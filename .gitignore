@@ -1,0 +1,31 @@
+node_modules
+.next
+out
+dist
+coverage
+
+# env
+.env
+.env.local
+.env.*.local
+
+# db
+prisma/dev.db
+prisma/dev.db-journal
+prisma/migrations/migration_lock.toml.bak
+
+# uploads (user data)
+uploads/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os
+.DS_Store
+
+# editors
+.vscode/*
+!.vscode/extensions.json
+.idea

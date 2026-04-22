@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// NOTE on JSON columns:
+// SQLite doesn't support Prisma's native `Json` type, so structured fields
+// (colors, styleTags, season, itemIds, stylePrefs, sourceData) are stored as
+// JSON-encoded strings. Use the helpers in lib/json.ts to read/write them so
+// the encoding stays consistent. When we migrate to Postgres we can switch
+// these back to `Json` with a single migration.
+
+model User {
+  id              String            @id @default(cuid())
+  email           String            @unique
+  name            String?
+  stylePrefs      String?           // JSON: { sizes?, favoriteColors?: string[], styles?: string[] }
+  createdAt       DateTime          @default(now())
+  referencePhotos ReferencePhoto[]
+  items           WardrobeItem[]
+  outfits         Outfit[]
+  tryOns          TryOnGeneration[]
+}
+
+model ReferencePhoto {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  imagePath String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model WardrobeItem {
+  id                String            @id @default(cuid())
+  userId            String
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  brand             String?
+  category          String
+  subcategory       String?
+  colors            String            // JSON: { hex, name }[]
+  priceCents        Int?
+  currency          String            @default("USD")
+  retailer          String?
+  productUrl        String?
+  material          String?
+  pattern           String?
+  styleTags         String            // JSON: string[]
+  season            String            // JSON: string[]
+  originalImagePath String
+  cutoutImagePath   String?
+  isWishlist        Boolean           @default(false)
+  timesWorn         Int               @default(0)
+  lastWornAt        DateTime?
+  notes             String?
+  sourceData        String?           // JSON: raw stub/API response for debugging
+  createdAt         DateTime          @default(now())
+  tryOns            TryOnGeneration[]
+
+  @@index([userId])
+  @@index([userId, category])
+}
+
+model Outfit {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  itemIds   String   // JSON: string[]
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model TryOnGeneration {
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId           String?
+  item             WardrobeItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  referencePhotoId String
+  resultImagePath  String
+  createdAt        DateTime      @default(now())
+
+  @@index([userId])
+  @@index([itemId])
+}
