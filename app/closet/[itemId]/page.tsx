@@ -18,9 +18,19 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
   });
   if (!item) notFound();
 
-  const tryOns = await prisma.tryOnGeneration.findMany({
-    where: { itemId: item.id, userId: user.id },
+  // itemIds is JSON in SQLite, so contains() is a best-effort pre-filter and
+  // we verify by parsing each match.
+  const tryOnCandidates = await prisma.tryOnGeneration.findMany({
+    where: { userId: user.id, itemIds: { contains: item.id } },
     orderBy: { createdAt: "desc" },
+  });
+  const tryOns = tryOnCandidates.filter((t) => {
+    try {
+      const arr = JSON.parse(t.itemIds) as string[];
+      return Array.isArray(arr) && arr.includes(item.id);
+    } catch {
+      return false;
+    }
   });
 
   const initial: ItemFormValue = {
@@ -85,7 +95,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
         {tryOns.length === 0 ? (
           <p className="text-ink-muted text-sm">
             You haven&apos;t generated any try-ons yet.{" "}
-            <Link href={`/try-on/${item.id}`} className="underline">
+            <Link href={`/try-on?item=${item.id}`} className="underline">
               Try this one on
             </Link>
             .

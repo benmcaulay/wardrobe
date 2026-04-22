@@ -62,7 +62,6 @@ model WardrobeItem {
   notes             String?
   sourceData        String?           // JSON: raw stub/API response for debugging
   createdAt         DateTime          @default(now())
-  tryOns            TryOnGeneration[]
 
   @@index([userId])
   @@index([userId, category])
@@ -80,15 +79,13 @@ model Outfit {
 }
 
 model TryOnGeneration {
-  id               String        @id @default(cuid())
+  id               String   @id @default(cuid())
   userId           String
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  itemId           String?
-  item             WardrobeItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemIds          String   @default("[]") // JSON: string[]
   referencePhotoId String
   resultImagePath  String
-  createdAt        DateTime      @default(now())
+  createdAt        DateTime @default(now())
 
   @@index([userId])
-  @@index([itemId])
 }

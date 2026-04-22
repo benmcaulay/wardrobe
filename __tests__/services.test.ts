@@ -110,27 +110,69 @@ describe("removeBackground", () => {
 });
 
 describe("generateTryOn", () => {
-  it("writes a composite file and returns a DB-relative path", async () => {
+  it("writes a composite file + thumbnail and returns a DB-relative path", async () => {
     const personPath = await writeTestImage("person.jpg", "#d9ccb3");
     const garmentPath = await writeTestImage("garment.jpg", "#7a8c6f");
     const result = await generateTryOn({
       userId: TEST_USER,
       personImagePath: personPath,
-      garmentImagePath: garmentPath,
+      garmentImagePaths: [garmentPath],
     });
     expect(result.resultImagePath.startsWith(`${TEST_USER}/tryon-`)).toBe(true);
     const abs = path.join(UPLOADS_ROOT, result.resultImagePath);
     const meta = await sharp(abs).metadata();
     expect(meta.format).toBe("jpeg");
-    expect(meta.width).toBe(800);
+    expect(meta.width).toBe(1024);
+    expect(meta.height).toBe(1366);
+
+    // Thumbnail companion
+    const thumbRel = result.resultImagePath.replace(/\.jpg$/, "-thumb.jpg");
+    const thumbMeta = await sharp(path.join(UPLOADS_ROOT, thumbRel)).metadata();
+    expect(thumbMeta.width).toBeLessThanOrEqual(400);
+    expect(thumbMeta.height).toBeLessThanOrEqual(400);
   });
 
-  it("is deterministic for the same (person, garment) pair", async () => {
+  it("composites multiple garments in one call", async () => {
     const personPath = await writeTestImage("person.jpg", "#d9ccb3");
-    const garmentPath = await writeTestImage("garment.jpg", "#7a8c6f");
-    const a = await generateTryOn({ userId: TEST_USER, personImagePath: personPath, garmentImagePath: garmentPath });
-    const b = await generateTryOn({ userId: TEST_USER, personImagePath: personPath, garmentImagePath: garmentPath });
+    const g1 = await writeTestImage("g1.jpg", "#7a8c6f");
+    const g2 = await writeTestImage("g2.jpg", "#b5553a");
+    const g3 = await writeTestImage("g3.jpg", "#5a6b85");
+    const result = await generateTryOn({
+      userId: TEST_USER,
+      personImagePath: personPath,
+      garmentImagePaths: [g1, g2, g3],
+    });
+    const meta = await sharp(path.join(UPLOADS_ROOT, result.resultImagePath)).metadata();
+    expect(meta.width).toBe(1024);
+    expect(meta.height).toBe(1366);
+  });
+
+  it("is deterministic for the same inputs regardless of garment order", async () => {
+    const personPath = await writeTestImage("person.jpg", "#d9ccb3");
+    const g1 = await writeTestImage("g1.jpg", "#7a8c6f");
+    const g2 = await writeTestImage("g2.jpg", "#b5553a");
+    const a = await generateTryOn({
+      userId: TEST_USER,
+      personImagePath: personPath,
+      garmentImagePaths: [g1, g2],
+    });
+    const b = await generateTryOn({
+      userId: TEST_USER,
+      personImagePath: personPath,
+      garmentImagePaths: [g2, g1],
+    });
     expect(a.resultImagePath).toBe(b.resultImagePath);
+  });
+
+  it("throws when no garments are provided", async () => {
+    const personPath = await writeTestImage("person.jpg", "#d9ccb3");
+    await expect(
+      generateTryOn({
+        userId: TEST_USER,
+        personImagePath: personPath,
+        garmentImagePaths: [],
+      }),
+    ).rejects.toThrow();
   });
 
   it("throws on traversal-unsafe paths", async () => {
@@ -138,7 +180,7 @@ describe("generateTryOn", () => {
       generateTryOn({
         userId: TEST_USER,
         personImagePath: "../etc/passwd",
-        garmentImagePath: "../etc/passwd",
+        garmentImagePaths: ["../etc/passwd"],
       }),
     ).rejects.toThrow();
   });
