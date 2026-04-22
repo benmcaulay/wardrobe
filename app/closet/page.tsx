@@ -12,11 +12,16 @@ export default async function ClosetPage() {
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12">
-      <header className="mb-10 flex items-baseline justify-between">
+      <header className="mb-10 flex items-baseline justify-between gap-4">
         <h1 className="font-serif text-4xl tracking-tight">Closet</h1>
-        <span className="text-ink-muted text-sm">
-          {items.length} {items.length === 1 ? "piece" : "pieces"}
-        </span>
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-ink-muted">
+            {items.length} {items.length === 1 ? "piece" : "pieces"}
+          </span>
+          <Link href="/settings" className="text-ink-muted hover:text-ink">
+            Settings
+          </Link>
+        </div>
       </header>
 
       {items.length === 0 ? (

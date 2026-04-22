@@ -2,6 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
+import { thumbnailPathFor } from "./image-paths";
+
+// Re-export the pure helpers so existing imports keep working. Client code
+// should import from "@/lib/image-paths" directly to avoid pulling sharp in.
+export { thumbnailPathFor, imageUrl, thumbnailUrl } from "./image-paths";
 
 export const UPLOADS_ROOT = path.join(process.cwd(), "uploads");
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -36,23 +41,6 @@ export function resolveUploadPath(relativePath: string): string | null {
   const root = path.resolve(UPLOADS_ROOT);
   if (absolute !== root && !absolute.startsWith(root + path.sep)) return null;
   return absolute;
-}
-
-/** Derive the thumbnail path from an original path. Convention: foo.jpg → foo-thumb.jpg. */
-export function thumbnailPathFor(originalPath: string): string {
-  const ext = path.posix.extname(originalPath);
-  const base = originalPath.slice(0, originalPath.length - ext.length);
-  return `${base}-thumb${ext}`;
-}
-
-/** URL to serve an image through our authenticated route. */
-export function imageUrl(relativePath: string): string {
-  return `/api/images/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
-}
-
-/** Convenience: URL for the thumbnail derived from the original path. */
-export function thumbnailUrl(originalPath: string): string {
-  return imageUrl(thumbnailPathFor(originalPath));
 }
 
 /**
