@@ -143,12 +143,17 @@ async function writePlaceholder(userId: string, idx: number, color: string): Pro
   const dir = path.join(UPLOADS_ROOT, userId);
   await fs.mkdir(dir, { recursive: true });
   const filename = `seed-${idx}.jpg`;
-  const absolute = path.join(dir, filename);
+  const thumbFilename = `seed-${idx}-thumb.jpg`;
   await sharp({
     create: { width: 1024, height: 1024, channels: 3, background: color },
   })
     .jpeg({ quality: 82 })
-    .toFile(absolute);
+    .toFile(path.join(dir, filename));
+  await sharp({
+    create: { width: 400, height: 400, channels: 3, background: color },
+  })
+    .jpeg({ quality: 78 })
+    .toFile(path.join(dir, thumbFilename));
   return path.posix.join(userId, filename);
 }
 
