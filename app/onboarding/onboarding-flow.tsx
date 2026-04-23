@@ -125,7 +125,10 @@ export function OnboardingFlow({ photos, initialPrefs }: Props) {
 function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
   const labels = ["Welcome", "Reference photos", "Preferences"] as const;
   return (
-    <ol className="flex items-center gap-3 text-xs">
+    <ol
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs"
+      aria-label={`Step ${step} of 3`}
+    >
       {labels.map((label, i) => {
         const idx = (i + 1) as 1 | 2 | 3;
         const active = idx === step;
@@ -140,6 +143,7 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
                     ? "bg-accent text-white"
                     : "bg-paper-warm text-ink-muted"
               }`}
+              aria-current={active ? "step" : undefined}
             >
               {done ? "✓" : idx}
             </span>

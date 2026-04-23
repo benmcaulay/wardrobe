@@ -25,3 +25,23 @@ body {
     transform: translateX(100%);
   }
 }
+
+/* Consistent keyboard focus ring across every interactive element.
+   `:focus-visible` so mouse clicks don't flash it. */
+:focus-visible {
+  outline: 2px solid theme("colors.accent.DEFAULT");
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Honor the user's reduced-motion preference — disables our shimmer and
+   animate-pulse. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
