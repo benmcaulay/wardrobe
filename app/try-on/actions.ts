@@ -5,6 +5,14 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encode } from "@/lib/json";
 import { generateTryOn } from "@/lib/services/virtualTryOn";
+import { createOutfit, type OutfitFormInput, type OutfitMutationResponse } from "@/lib/actions/outfits";
+
+// Thin wrapper so the try-on "Save as outfit" button can call the shared
+// create action without knowing where it lives. "use server" files only
+// allow inline async-function exports, so we can't re-export directly.
+export async function saveOutfit(input: OutfitFormInput): Promise<OutfitMutationResponse> {
+  return createOutfit(input);
+}
 
 export type GenerateInput = {
   referencePhotoId: string;
@@ -64,28 +72,4 @@ export async function generateTryOnForSelection(input: GenerateInput): Promise<G
   } catch (err) {
     return { ok: false, error: (err as Error).message ?? "Generation failed" };
   }
-}
-
-export type SaveOutfitResponse = { ok: true; outfitId: string } | { ok: false; error: string };
-
-export async function saveOutfit(input: { name: string; itemIds: string[] }): Promise<SaveOutfitResponse> {
-  const user = await requireUser();
-  const name = input.name.trim();
-  if (!name) return { ok: false, error: "Name is required" };
-  if (!Array.isArray(input.itemIds) || input.itemIds.length === 0) {
-    return { ok: false, error: "Outfit needs at least one item" };
-  }
-  const count = await prisma.wardrobeItem.count({
-    where: { id: { in: input.itemIds }, userId: user.id },
-  });
-  if (count !== input.itemIds.length) {
-    return { ok: false, error: "One or more items could not be found" };
-  }
-
-  const outfit = await prisma.outfit.create({
-    data: { userId: user.id, name, itemIds: encode(input.itemIds) },
-  });
-
-  revalidatePath("/outfits");
-  return { ok: true, outfitId: outfit.id };
 }

@@ -18,6 +18,12 @@ export default async function ClosetPage() {
           <span className="text-ink-muted">
             {items.length} {items.length === 1 ? "piece" : "pieces"}
           </span>
+          <Link href="/outfits" className="text-ink-muted hover:text-ink">
+            Outfits
+          </Link>
+          <Link href="/try-on" className="text-ink-muted hover:text-ink">
+            Try on
+          </Link>
           <Link href="/settings" className="text-ink-muted hover:text-ink">
             Settings
           </Link>
