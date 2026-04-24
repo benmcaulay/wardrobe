@@ -43,7 +43,10 @@ export async function runPrefill(originalImagePath: string): Promise<PrefillBund
   const scraped = topMatch ? await scrapeProduct(topMatch.url) : null;
 
   const prefill: PrefillResult = {
-    name: topMatch?.name ?? scraped?.name ?? "Untitled",
+    // Name / productUrl / styleTags are intentionally left blank so we don't
+    // surface the stub's fake "Boxy Midi Skirt" / "https://quince.com/..."
+    // guesses. The user fills these in.
+    name: "",
     brand: topMatch?.brand ?? scraped?.brand ?? "",
     category: vision.category,
     subcategory: vision.subcategory,
@@ -51,10 +54,10 @@ export async function runPrefill(originalImagePath: string): Promise<PrefillBund
     priceCents: topMatch?.priceCents ?? scraped?.priceCents ?? null,
     currency: topMatch?.currency ?? scraped?.currency ?? "USD",
     retailer: topMatch?.retailer ?? scraped?.retailer ?? "",
-    productUrl: topMatch?.url ?? "",
+    productUrl: "",
     material: scraped?.material ?? "",
     pattern: vision.pattern,
-    styleTags: vision.styleTags,
+    styleTags: [],
     season: vision.season,
   };
 

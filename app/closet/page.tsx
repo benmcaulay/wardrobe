@@ -58,7 +58,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
   const user = await requireUser();
   const filters = readFilters(searchParams);
 
-  const [items, allForFacets, totalCount] = await Promise.all([
+  const [items, allForFacets, totalCount, valueAgg] = await Promise.all([
     prisma.wardrobeItem.findMany({
       where: buildWhere(user.id, filters),
       orderBy: { createdAt: "desc" },
@@ -68,7 +68,18 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       select: { brand: true, colors: true },
     }),
     prisma.wardrobeItem.count({ where: { userId: user.id } }),
+    // Wardrobe value = sum of priceCents for owned items (wishlist excluded).
+    prisma.wardrobeItem.aggregate({
+      where: { userId: user.id, isWishlist: false },
+      _sum: { priceCents: true },
+    }),
   ]);
+  const totalValueCents = valueAgg._sum.priceCents ?? 0;
+  const totalValueFormatted = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(totalValueCents / 100);
 
   const options: FilterOptions = {
     brands: [...new Set(allForFacets.map((i) => i.brand).filter((b): b is string => !!b))].sort(
@@ -81,23 +92,33 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12">
-      <header className="mb-8 flex items-baseline justify-between gap-4 flex-wrap">
-        <h1 className="font-serif text-4xl tracking-tight">Closet</h1>
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-ink-muted">
+      <header className="mb-10 flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <p className="font-serif text-5xl md:text-6xl tracking-tight leading-none">
+            {totalValueFormatted}
+          </p>
+          <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-ink-muted">
+            Wardrobe value
+          </p>
+          <h1 className="sr-only">Closet</h1>
+        </div>
+        <div className="flex flex-col items-end gap-1 pt-2">
+          <nav className="flex items-center gap-4 text-sm">
+            <Link href="/outfits" className="text-ink-muted hover:text-ink">
+              Outfits
+            </Link>
+            <Link href="/try-on" className="text-ink-muted hover:text-ink">
+              Try on
+            </Link>
+            <Link href="/settings" className="text-ink-muted hover:text-ink">
+              Settings
+            </Link>
+          </nav>
+          <span className="text-xs text-ink-muted">
             {items.length === totalCount
-              ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"}`
-              : `${items.length} of ${totalCount}`}
+              ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"} in closet`
+              : `${items.length} of ${totalCount} shown`}
           </span>
-          <Link href="/outfits" className="text-ink-muted hover:text-ink">
-            Outfits
-          </Link>
-          <Link href="/try-on" className="text-ink-muted hover:text-ink">
-            Try on
-          </Link>
-          <Link href="/settings" className="text-ink-muted hover:text-ink">
-            Settings
-          </Link>
         </div>
       </header>
 

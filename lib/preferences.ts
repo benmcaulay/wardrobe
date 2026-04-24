@@ -13,6 +13,24 @@ export const STYLE_OPTIONS = [
   "athletic",
 ] as const;
 
+/**
+ * The 10 style tags offered as chips on the item form. If a legacy item has
+ * tags outside this list, the form still renders them so the user can clear
+ * them — but new items pick from this set.
+ */
+export const COMMON_STYLE_TAGS = [
+  "minimal",
+  "classic",
+  "casual",
+  "romantic",
+  "streetwear",
+  "vintage",
+  "workwear",
+  "cozy",
+  "tailored",
+  "going-out",
+] as const;
+
 export const FAVORITE_COLOR_OPTIONS: readonly { hex: string; name: string }[] = [
   { hex: "#1a1613", name: "black" },
   { hex: "#f5f2ea", name: "ivory" },

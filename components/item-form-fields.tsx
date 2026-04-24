@@ -2,6 +2,7 @@
 
 import type { ItemFormValue, Season } from "@/lib/types";
 import { CATEGORIES, SEASONS } from "@/lib/types";
+import { COMMON_STYLE_TAGS } from "@/lib/preferences";
 
 type Props = {
   value: ItemFormValue;
@@ -169,21 +170,35 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
         </Field>
       </div>
 
-      <Field label="Style tags" hint="Comma-separated">
-        <input
-          type="text"
-          value={value.styleTags.join(", ")}
-          onChange={(e) =>
-            onChange({
-              styleTags: e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-          disabled={disabled}
-          className={inputCls}
-        />
+      <Field label="Style tags">
+        <div className="flex flex-wrap gap-2">
+          {[...new Set([...COMMON_STYLE_TAGS, ...value.styleTags])].map((tag) => {
+            const checked = value.styleTags.includes(tag);
+            return (
+              <label
+                key={tag}
+                className={`cursor-pointer rounded-full border px-3 py-1 text-xs capitalize transition ${
+                  checked
+                    ? "bg-ink text-paper border-ink"
+                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                } ${disabled ? "opacity-50 pointer-events-none" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={checked}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...value.styleTags, tag]
+                      : value.styleTags.filter((x) => x !== tag);
+                    onChange({ styleTags: next });
+                  }}
+                />
+                {tag}
+              </label>
+            );
+          })}
+        </div>
       </Field>
 
       <Field label="Season">

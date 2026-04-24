@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
+import { ImageCropper } from "@/components/image-cropper";
 import type { ItemFormValue } from "@/lib/types";
 import {
   analyzeUpload,
@@ -13,10 +14,11 @@ import {
 
 type FlowState =
   | { kind: "idle"; error?: string }
+  | { kind: "cropping"; sourceUrl: string }
   | { kind: "analyzing"; previewUrl: string }
   | { kind: "ready"; previewUrl: string; response: Extract<AnalyzeUploadResponse, { ok: true }>; value: ItemFormValue }
   | { kind: "saving"; previewUrl: string; response: Extract<AnalyzeUploadResponse, { ok: true }>; value: ItemFormValue }
-  | { kind: "error"; message: string; previewUrl?: string };
+  | { kind: "error"; message: string };
 
 export function AddItemFlow() {
   const [state, setState] = useState<FlowState>({ kind: "idle" });
@@ -24,9 +26,29 @@ export function AddItemFlow() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleFile(file: File) {
-    const previewUrl = URL.createObjectURL(file);
+  // Clean up any object URLs we've created for previews / cropper sources.
+  useEffect(() => {
+    return () => {
+      if (state.kind === "cropping") URL.revokeObjectURL(state.sourceUrl);
+      if (state.kind === "analyzing" || state.kind === "ready" || state.kind === "saving") {
+        URL.revokeObjectURL(state.previewUrl);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleFile(file: File) {
+    const sourceUrl = URL.createObjectURL(file);
+    setState({ kind: "cropping", sourceUrl });
+  }
+
+  async function handleCroppedBlob(blob: Blob) {
+    // Revoke the cropper's source URL now that we've captured the crop.
+    if (state.kind === "cropping") URL.revokeObjectURL(state.sourceUrl);
+    const file = new File([blob], "garment.jpg", { type: "image/jpeg" });
+    const previewUrl = URL.createObjectURL(blob);
     setState({ kind: "analyzing", previewUrl });
+
     const formData = new FormData();
     formData.append("image", file);
     const response = await analyzeUpload(formData);
@@ -60,6 +82,12 @@ export function AddItemFlow() {
     });
   }
 
+  function cancelCrop() {
+    if (state.kind === "cropping") URL.revokeObjectURL(state.sourceUrl);
+    setState({ kind: "idle" });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   function patchValue(patch: Partial<ItemFormValue>) {
     setState((s) => (s.kind === "ready" ? { ...s, value: { ...s.value, ...patch } } : s));
   }
@@ -89,6 +117,7 @@ export function AddItemFlow() {
         ? state.response.originalImagePath
         : null;
     if (origPath) await discardUpload(origPath);
+    if (state.kind === "ready" || state.kind === "saving") URL.revokeObjectURL(state.previewUrl);
     setState({ kind: "idle" });
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -96,6 +125,10 @@ export function AddItemFlow() {
   return (
     <div className="space-y-8">
       {state.kind === "idle" && <IdleView onFile={handleFile} fileInputRef={fileInputRef} error={state.error} />}
+
+      {state.kind === "cropping" && (
+        <ImageCropper src={state.sourceUrl} onCancel={cancelCrop} onConfirm={handleCroppedBlob} />
+      )}
 
       {state.kind === "analyzing" && <AnalyzingView previewUrl={state.previewUrl} />}
 
@@ -164,6 +197,7 @@ function IdleView({
             ref={fileInputRef}
             type="file"
             accept="image/jpeg,image/png,image/webp"
+            capture="environment"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -193,7 +227,7 @@ function AnalyzingView({ previewUrl }: { previewUrl: string }) {
     <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-8">
       <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={previewUrl} alt="Uploaded garment" className="w-full h-full object-cover" />
+        <img src={previewUrl} alt="Cropped garment" className="w-full h-full object-cover" />
       </div>
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -242,7 +276,7 @@ function ReadyView({
     <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-8 items-start">
       <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square sticky top-6">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={previewUrl} alt="Uploaded garment" className="w-full h-full object-cover" />
+        <img src={previewUrl} alt="Cropped garment" className="w-full h-full object-cover" />
       </div>
       <form
         onSubmit={(e) => {

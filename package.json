@@ -31,6 +31,7 @@
     "next": "14.2.18",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-easy-crop": "^5.5.7",
     "sharp": "^0.33.5",
     "tailwind-merge": "^2.5.4"
   },
