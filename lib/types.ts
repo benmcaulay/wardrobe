@@ -12,8 +12,6 @@ export type ItemFormValue = {
   colors: Color[];
   priceCents: number | null;
   currency: string;
-  retailer: string;
-  productUrl: string;
   material: string;
   pattern: string;
   styleTags: string[];

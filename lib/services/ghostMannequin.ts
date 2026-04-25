@@ -12,12 +12,16 @@ import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
 // - Replicate IDM-VTON: https://replicate.com/cuuupid/idm-vton
 // Cost target: ~$0.02 / image = 1 credit.
 
-export type GhostMannequinCategory = "upperbody" | "lowerbody" | "dress" | "full";
+export { mapCategoryToGhost, type GhostMannequinCategory } from "./ghost-mannequin-shared";
+import type { GhostMannequinCategory } from "./ghost-mannequin-shared";
 
 export type GhostMannequinInput = {
   userId: string;
   /** DB-relative path to the garment image (cutout strongly preferred). */
   garmentImagePath: string;
+  /** Additional reference shots for accuracy (real provider passes these as
+   *  extra garment refs; the stub ignores them but accepts them for parity). */
+  extraImagePaths?: string[];
   category: GhostMannequinCategory;
 };
 
@@ -56,9 +60,12 @@ export async function createGhostMannequin(
   const dir = path.join(UPLOADS_ROOT, input.userId);
   await fs.mkdir(dir, { recursive: true });
 
+  // Hash the garment + category + sorted extra refs so adding context shots
+  // produces a different (and stable) output filename.
+  const sortedExtras = [...(input.extraImagePaths ?? [])].sort();
   const hash = crypto
     .createHash("sha256")
-    .update(`${input.garmentImagePath}|${input.category}`)
+    .update([input.garmentImagePath, input.category, ...sortedExtras].join("|"))
     .digest("hex")
     .slice(0, 12);
   const filename = `ghost-${hash}.jpg`;
@@ -115,19 +122,3 @@ export async function createGhostMannequin(
   };
 }
 
-/** Map a wardrobe item category to the ghost-mannequin category enum. */
-export function mapCategoryToGhost(category: string): GhostMannequinCategory {
-  switch (category) {
-    case "top":
-    case "outerwear":
-    case "accessory":
-      return "upperbody";
-    case "bottom":
-    case "shoes":
-      return "lowerbody";
-    case "dress":
-      return "dress";
-    default:
-      return "full";
-  }
-}

@@ -27,8 +27,6 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     colors: parseColors(item.colors),
     priceCents: item.priceCents,
     currency: item.currency,
-    retailer: item.retailer ?? "",
-    productUrl: item.productUrl ?? "",
     material: item.material ?? "",
     pattern: item.pattern ?? "",
     styleTags: parseStringArray(item.styleTags),

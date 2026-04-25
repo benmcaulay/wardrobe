@@ -2,7 +2,7 @@
 
 import type { ItemFormValue, Season } from "@/lib/types";
 import { CATEGORIES, SEASONS } from "@/lib/types";
-import { COMMON_STYLE_TAGS } from "@/lib/preferences";
+import { COMMON_STYLE_TAGS, FAVORITE_COLOR_OPTIONS } from "@/lib/preferences";
 
 type Props = {
   value: ItemFormValue;
@@ -11,6 +11,16 @@ type Props = {
 };
 
 export function ItemFormFields({ value, onChange, disabled }: Props) {
+  const selectedNames = new Set(value.colors.map((c) => c.name));
+
+  function toggleColor(hex: string, name: string) {
+    if (selectedNames.has(name)) {
+      onChange({ colors: value.colors.filter((c) => c.name !== name) });
+    } else {
+      onChange({ colors: [...value.colors, { hex, name }] });
+    }
+  }
+
   return (
     <div className="space-y-5">
       <Field label="Name" required>
@@ -24,26 +34,15 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
         />
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Brand">
-          <input
-            type="text"
-            value={value.brand}
-            onChange={(e) => onChange({ brand: e.target.value })}
-            disabled={disabled}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Retailer">
-          <input
-            type="text"
-            value={value.retailer}
-            onChange={(e) => onChange({ retailer: e.target.value })}
-            disabled={disabled}
-            className={inputCls}
-          />
-        </Field>
-      </div>
+      <Field label="Brand">
+        <input
+          type="text"
+          value={value.brand}
+          onChange={(e) => onChange({ brand: e.target.value })}
+          disabled={disabled}
+          className={inputCls}
+        />
+      </Field>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Category">
@@ -71,36 +70,30 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
         </Field>
       </div>
 
-      <Field label="Colors">
-        <div className="flex flex-wrap gap-2">
-          {value.colors.length === 0 && (
-            <span className="text-xs text-ink-muted">No colors detected</span>
-          )}
-          {value.colors.map((c, i) => (
-            <span
-              key={`${c.hex}-${i}`}
-              className="inline-flex items-center gap-2 rounded-full bg-paper-warm border border-ink/10 px-3 py-1 text-xs"
-            >
-              <span
-                className="w-3 h-3 rounded-full border border-ink/10"
-                style={{ backgroundColor: c.hex }}
-                aria-hidden
-              />
-              {c.name}
-              {!disabled && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${c.name}`}
-                  onClick={() =>
-                    onChange({ colors: value.colors.filter((_, idx) => idx !== i) })
-                  }
-                  className="text-ink-muted hover:text-ink"
-                >
-                  ×
-                </button>
-              )}
-            </span>
-          ))}
+      <Field label="Colors" hint="Tap to toggle">
+        <div className="flex flex-wrap gap-2.5">
+          {FAVORITE_COLOR_OPTIONS.map((c) => {
+            const active = selectedNames.has(c.name);
+            return (
+              <button
+                key={c.name}
+                type="button"
+                onClick={() => toggleColor(c.hex, c.name)}
+                disabled={disabled}
+                aria-pressed={active}
+                aria-label={c.name}
+                className="flex flex-col items-center gap-1 transition disabled:opacity-50"
+              >
+                <span
+                  className={`block w-9 h-9 rounded-full border transition ${
+                    active ? "ring-2 ring-offset-2 ring-accent border-transparent" : "border-ink/10"
+                  }`}
+                  style={{ backgroundColor: c.hex }}
+                />
+                <span className="text-[10px] uppercase tracking-wide text-ink-muted">{c.name}</span>
+              </button>
+            );
+          })}
         </div>
       </Field>
 
@@ -136,17 +129,6 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
           />
         </Field>
       </div>
-
-      <Field label="Product URL">
-        <input
-          type="url"
-          value={value.productUrl}
-          onChange={(e) => onChange({ productUrl: e.target.value })}
-          disabled={disabled}
-          className={inputCls}
-          placeholder="https://…"
-        />
-      </Field>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Material">

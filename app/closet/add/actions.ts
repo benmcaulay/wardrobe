@@ -6,7 +6,6 @@ import { prisma } from "@/lib/db";
 import { saveUpload, saveCutout, deleteUpload, UploadError } from "@/lib/uploads";
 import { encode } from "@/lib/json";
 import { runPrefill, type PrefillBundle } from "@/lib/prefill";
-import { generateGhostFor } from "@/lib/actions/ghost-mannequin";
 import type { ItemFormValue } from "@/lib/types";
 
 export type AnalyzeUploadResponse =
@@ -46,11 +45,6 @@ export type SaveCutoutResponse =
   | { ok: true; cutoutImagePath: string }
   | { ok: false; error: string };
 
-/**
- * Persist a transparent-background cutout PNG produced client-side by
- * @imgly/background-removal. The user is identified by cookie; the resulting
- * file lands under uploads/{userId}/.
- */
 export async function saveCutoutFromClient(formData: FormData): Promise<SaveCutoutResponse> {
   const user = await requireUser();
   const file = formData.get("cutout");
@@ -66,21 +60,49 @@ export async function saveCutoutFromClient(formData: FormData): Promise<SaveCuto
   }
 }
 
+export type SaveExtraImageResponse =
+  | { ok: true; imagePath: string }
+  | { ok: false; error: string };
+
+/**
+ * Save an extra context image — uploaded raw (no cropping) so the model has
+ * varied views (full-body, close-up, label) for accuracy.
+ */
+export async function saveExtraImage(formData: FormData): Promise<SaveExtraImageResponse> {
+  const user = await requireUser();
+  const file = formData.get("image");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "No file provided" };
+  }
+  try {
+    const saved = await saveUpload(file, user.id);
+    return { ok: true, imagePath: saved.originalImagePath };
+  } catch (err) {
+    if (err instanceof UploadError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
 export type CreateItemInput = ItemFormValue & {
   originalImagePath: string;
   cutoutImagePath?: string | null;
-  generateGhost?: boolean;
+  ghostImagePath?: string | null;
+  /** Already-uploaded extra context-image paths. */
+  extraImagePaths?: string[];
+  /** Credits already debited by the preview action; logged on the item. */
+  ghostCreditsUsed?: number;
   sourceData?: unknown;
 };
 
 export type CreateItemResponse =
-  | { ok: true; itemId: string; ghostGenerated: boolean; ghostError?: string }
+  | { ok: true; itemId: string }
   | { ok: false; error: string };
 
 /**
- * Persist the user-confirmed item. Optionally fires off the ghost-mannequin
- * generation as well — failures there don't block the save (the item still
- * exists and the user can retry from the detail page).
+ * Persist the user-confirmed item, including any pre-generated ghost
+ * mannequin and extra context images. Credits for the ghost were already
+ * decremented by previewGhostMannequin; this just logs the TryOnGeneration
+ * row so history is complete.
  */
 export async function createItem(input: CreateItemInput): Promise<CreateItemResponse> {
   const user = await requireUser();
@@ -89,6 +111,14 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
   }
   if (input.cutoutImagePath && !input.cutoutImagePath.startsWith(`${user.id}/`)) {
     return { ok: false, error: "Cutout does not belong to this user" };
+  }
+  if (input.ghostImagePath && !input.ghostImagePath.startsWith(`${user.id}/`)) {
+    return { ok: false, error: "Ghost does not belong to this user" };
+  }
+  for (const extra of input.extraImagePaths ?? []) {
+    if (!extra.startsWith(`${user.id}/`)) {
+      return { ok: false, error: "Extra image does not belong to this user" };
+    }
   }
   if (!input.name.trim()) return { ok: false, error: "Name is required" };
 
@@ -102,34 +132,43 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
       colors: encode(input.colors),
       priceCents: input.priceCents,
       currency: input.currency || "USD",
-      retailer: input.retailer.trim() || null,
-      productUrl: input.productUrl.trim() || null,
       material: input.material.trim() || null,
       pattern: input.pattern.trim() || null,
       styleTags: encode(input.styleTags),
       season: encode(input.season),
       originalImagePath: input.originalImagePath,
       cutoutImagePath: input.cutoutImagePath ?? null,
+      ghostImagePath: input.ghostImagePath ?? null,
+      extraImagePaths: input.extraImagePaths?.length ? encode(input.extraImagePaths) : null,
       isWishlist: input.isWishlist,
       notes: input.notes.trim() || null,
       sourceData: input.sourceData ? JSON.stringify(input.sourceData) : null,
     },
   });
 
-  let ghostGenerated = false;
-  let ghostError: string | undefined;
-  if (input.generateGhost) {
-    const res = await generateGhostFor(item.id);
-    if (res.ok) ghostGenerated = true;
-    else ghostError = res.error;
+  if (input.ghostImagePath) {
+    await prisma.tryOnGeneration.create({
+      data: {
+        userId: user.id,
+        itemId: item.id,
+        resultImagePath: input.ghostImagePath,
+        creditsUsed: input.ghostCreditsUsed ?? 1,
+      },
+    });
   }
 
   revalidatePath("/closet");
-  return { ok: true, itemId: item.id, ghostGenerated, ghostError };
+  return { ok: true, itemId: item.id };
 }
 
 export async function discardUpload(originalImagePath: string): Promise<void> {
   const user = await requireUser();
   if (!originalImagePath.startsWith(`${user.id}/`)) return;
   await deleteUpload(originalImagePath);
+}
+
+export async function discardExtraImage(imagePath: string): Promise<void> {
+  const user = await requireUser();
+  if (!imagePath.startsWith(`${user.id}/`)) return;
+  await deleteUpload(imagePath);
 }

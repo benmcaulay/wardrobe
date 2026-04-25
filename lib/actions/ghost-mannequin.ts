@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import {
   createGhostMannequin,
   mapCategoryToGhost,
+  type GhostMannequinCategory,
 } from "@/lib/services/ghostMannequin";
 
 const REAL_GHOST = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
@@ -15,12 +16,9 @@ export type GenerateGhostResponse =
   | { ok: false; error: string };
 
 /**
- * Generate (or regenerate) the ghost-mannequin image for an item.
- *
- * - In stub mode (USE_REAL_GHOST_MANNEQUIN != "true"), we still log a
- *   TryOnGeneration row for tracking but skip the User.credits decrement,
- *   so the demo never runs out.
- * - In real mode the credit is deducted atomically with the row insert.
+ * Generate (or regenerate) the ghost mannequin for an item that's already
+ * persisted. Updates item.ghostImagePath, logs a TryOnGeneration row, and
+ * (in real mode) decrements User.credits — all in one transaction.
  */
 export async function generateGhostFor(itemId: string): Promise<GenerateGhostResponse> {
   const user = await requireUser();
@@ -34,14 +32,19 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
   }
 
   const sourcePath = item.cutoutImagePath ?? item.originalImagePath;
+  let extras: string[] = [];
+  try {
+    if (item.extraImagePaths) extras = JSON.parse(item.extraImagePaths) as string[];
+  } catch {
+    // ignore — bad JSON shouldn't block generation
+  }
   const result = await createGhostMannequin({
     userId: user.id,
     garmentImagePath: sourcePath,
+    extraImagePaths: extras,
     category: mapCategoryToGhost(item.category),
   });
 
-  // Update item, log generation, and (in real mode) decrement credits — all
-  // in one transaction so the row insert and the credit deduction can't drift.
   const remaining = await prisma.$transaction(async (tx) => {
     await tx.wardrobeItem.update({
       where: { id: itemId },
@@ -69,4 +72,65 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
   revalidatePath("/closet");
   revalidatePath(`/closet/${itemId}`);
   return { ok: true, ghostImagePath: result.resultImagePath, creditsRemaining: remaining };
+}
+
+export type PreviewGhostInput = {
+  garmentImagePath: string;
+  extraImagePaths?: string[];
+  category: GhostMannequinCategory;
+};
+
+export type PreviewGhostResponse =
+  | { ok: true; ghostImagePath: string; creditsRemaining: number; creditsUsed: number }
+  | { ok: false; error: string };
+
+/**
+ * Generate a ghost-mannequin preview during the /closet/add flow — before any
+ * WardrobeItem exists. Decrements credits in real mode (the API call already
+ * cost real money) but does NOT log a TryOnGeneration row; that happens at
+ * createItem time when we know the item id.
+ */
+export async function previewGhostMannequin(
+  input: PreviewGhostInput,
+): Promise<PreviewGhostResponse> {
+  const user = await requireUser();
+  if (!input.garmentImagePath.startsWith(`${user.id}/`)) {
+    return { ok: false, error: "Image does not belong to this user" };
+  }
+  for (const extra of input.extraImagePaths ?? []) {
+    if (!extra.startsWith(`${user.id}/`)) {
+      return { ok: false, error: "Extra image does not belong to this user" };
+    }
+  }
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { credits: true },
+  });
+  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
+    return { ok: false, error: "Out of credits" };
+  }
+
+  const result = await createGhostMannequin({
+    userId: user.id,
+    garmentImagePath: input.garmentImagePath,
+    extraImagePaths: input.extraImagePaths,
+    category: input.category,
+  });
+
+  let creditsRemaining = dbUser?.credits ?? 0;
+  if (REAL_GHOST) {
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { credits: { decrement: result.credits } },
+      select: { credits: true },
+    });
+    creditsRemaining = updated.credits;
+  }
+
+  return {
+    ok: true,
+    ghostImagePath: result.resultImagePath,
+    creditsRemaining,
+    creditsUsed: result.credits,
+  };
 }

@@ -32,8 +32,6 @@ export async function updateItem(input: UpdateItemInput): Promise<ActionResponse
       colors: encode(input.colors),
       priceCents: input.priceCents,
       currency: input.currency || "USD",
-      retailer: input.retailer.trim() || null,
-      productUrl: input.productUrl.trim() || null,
       material: input.material.trim() || null,
       pattern: input.pattern.trim() || null,
       styleTags: encode(input.styleTags),
@@ -71,6 +69,14 @@ export async function deleteItem(itemId: string): Promise<void> {
     await deleteUpload(item.originalImagePath);
     if (item.cutoutImagePath) await deleteUpload(item.cutoutImagePath);
     if (item.ghostImagePath) await deleteUpload(item.ghostImagePath);
+    if (item.extraImagePaths) {
+      try {
+        const extras = JSON.parse(item.extraImagePaths) as string[];
+        for (const p of extras) await deleteUpload(p);
+      } catch {
+        // ignore bad JSON
+      }
+    }
   } catch {
     // ignore
   }
