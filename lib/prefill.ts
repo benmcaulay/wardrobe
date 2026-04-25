@@ -43,11 +43,10 @@ export async function runPrefill(originalImagePath: string): Promise<PrefillBund
   const scraped = topMatch ? await scrapeProduct(topMatch.url) : null;
 
   const prefill: PrefillResult = {
-    // Name / productUrl / styleTags are intentionally left blank so we don't
-    // surface the stub's fake "Boxy Midi Skirt" / "https://quince.com/..."
-    // guesses. The user fills these in.
+    // Name / brand / productUrl / styleTags are intentionally left blank so
+    // we don't surface the stub's fake guesses. The user fills these in.
     name: "",
-    brand: topMatch?.brand ?? scraped?.brand ?? "",
+    brand: "",
     category: vision.category,
     subcategory: vision.subcategory,
     colors: vision.colors,
@@ -55,7 +54,9 @@ export async function runPrefill(originalImagePath: string): Promise<PrefillBund
     currency: topMatch?.currency ?? scraped?.currency ?? "USD",
     retailer: topMatch?.retailer ?? scraped?.retailer ?? "",
     productUrl: "",
-    material: scraped?.material ?? "",
+    // Default material: cotton for everything except shoes (where assuming a
+    // material is more wrong than right).
+    material: vision.category === "shoes" ? "" : "cotton",
     pattern: vision.pattern,
     styleTags: [],
     season: vision.season,

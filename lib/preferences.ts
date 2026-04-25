@@ -32,18 +32,15 @@ export const COMMON_STYLE_TAGS = [
 ] as const;
 
 export const FAVORITE_COLOR_OPTIONS: readonly { hex: string; name: string }[] = [
-  { hex: "#1a1613", name: "black" },
-  { hex: "#f5f2ea", name: "ivory" },
-  { hex: "#2b2521", name: "charcoal" },
-  { hex: "#7a8c6f", name: "sage" },
-  { hex: "#b5553a", name: "terracotta" },
-  { hex: "#5a6b85", name: "indigo" },
-  { hex: "#d9ccb3", name: "sand" },
-  { hex: "#3b2a20", name: "cognac" },
-  { hex: "#c5cfbc", name: "pale-sage" },
-  { hex: "#4c5b3c", name: "olive" },
-  { hex: "#efe6d8", name: "cream" },
-  { hex: "#a24c4c", name: "brick" },
+  { hex: "#111111", name: "black" },
+  { hex: "#ffffff", name: "white" },
+  { hex: "#8a8a8a", name: "gray" },
+  { hex: "#c0392b", name: "red" },
+  { hex: "#d97a3b", name: "orange" },
+  { hex: "#d9b94a", name: "yellow" },
+  { hex: "#4a8c5a", name: "green" },
+  { hex: "#4a6fb0", name: "blue" },
+  { hex: "#7a4fb0", name: "purple" },
 ];
 
 export const SIZE_SLOTS = [

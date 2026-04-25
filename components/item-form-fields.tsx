@@ -102,16 +102,15 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
           <div className="flex items-center gap-2">
             <span className="text-ink-muted text-sm">$</span>
             <input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              value={value.priceCents == null ? "" : (value.priceCents / 100).toFixed(2)}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={value.priceCents == null ? "" : Math.round(value.priceCents / 100).toString()}
               onChange={(e) => {
-                const v = e.target.value;
-                if (v === "") return onChange({ priceCents: null });
-                const cents = Math.round(parseFloat(v) * 100);
-                onChange({ priceCents: Number.isFinite(cents) ? cents : null });
+                const digits = e.target.value.replace(/\D/g, "");
+                if (digits === "") return onChange({ priceCents: null });
+                const dollars = parseInt(digits, 10);
+                onChange({ priceCents: Number.isFinite(dollars) ? dollars * 100 : null });
               }}
               disabled={disabled}
               className={inputCls}
