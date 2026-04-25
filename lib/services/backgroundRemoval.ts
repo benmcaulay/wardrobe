@@ -1,8 +1,11 @@
-// TODO: replace with a real background-removal call (remove.bg, Photoroom,
-// Replicate rembg, or fal.ai).
-// remove.bg: https://www.remove.bg/api
-// Photoroom: https://www.photoroom.com/api
-// Replicate rembg: https://replicate.com/cjwbw/rembg
+// TODO (server-side): if the client-side @imgly/background-removal becomes
+// unworkable (huge WASM bundle, no GPU on user's device, etc.), swap to a
+// server-side provider here. Recommended:
+// - remove.bg: https://www.remove.bg/api
+// - Photoroom: https://www.photoroom.com/api
+// - Replicate rembg: https://replicate.com/cjwbw/rembg
+// Today the real work happens in the browser via lib/client/background-removal.ts;
+// this module exists as a stub seam so a server-side fallback is one file change.
 
 export type BackgroundRemovalResult = {
   /** DB-relative path to the transparent-background cutout, or null when unavailable. */
@@ -10,9 +13,9 @@ export type BackgroundRemovalResult = {
 };
 
 /**
- * No-op stub. A real implementation should produce a PNG cutout and store it
- * next to the original, then return the DB-relative path. Callers currently
- * treat a null result as "no cutout available, fall back to the original".
+ * No-op server-side stub. Real removal happens client-side; see
+ * lib/client/background-removal.ts. Callers treat a null result as
+ * "no cutout available, fall back to the original".
  */
 export async function removeBackground(_imagePath: string): Promise<BackgroundRemovalResult> {
   return { cutoutImagePath: null };

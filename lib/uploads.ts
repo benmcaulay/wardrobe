@@ -93,6 +93,56 @@ export async function saveUpload(file: File, userId: string): Promise<SavedUploa
   };
 }
 
+/**
+ * Save a transparent-background cutout PNG (typically produced client-side by
+ * @imgly/background-removal). Preserves alpha, resizes to 1536px max edge,
+ * writes a 400px PNG thumbnail companion. Returns DB-relative paths.
+ */
+export async function saveCutout(file: File, userId: string): Promise<SavedUpload> {
+  if (!file || file.size === 0) throw new UploadError("empty", "Cutout is empty");
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new UploadError("too_large", `Cutout exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`);
+  }
+  if (file.type && file.type !== "image/png") {
+    throw new UploadError("bad_type", `Cutouts must be image/png, got ${file.type}`);
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const id = crypto.randomUUID();
+  const dir = path.join(UPLOADS_ROOT, userId);
+  await fs.mkdir(dir, { recursive: true });
+
+  const originalName = `cutout-${id}.png`;
+  const thumbName = `cutout-${id}-thumb.png`;
+  const originalAbs = path.join(dir, originalName);
+  const thumbAbs = path.join(dir, thumbName);
+
+  let meta: sharp.OutputInfo;
+  try {
+    meta = await sharp(buffer)
+      .rotate()
+      .resize({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "inside", withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toFile(originalAbs);
+    await sharp(buffer)
+      .rotate()
+      .resize({ width: THUMB_EDGE_PX, height: THUMB_EDGE_PX, fit: "inside", withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toFile(thumbAbs);
+  } catch (err) {
+    await fs.rm(originalAbs, { force: true });
+    await fs.rm(thumbAbs, { force: true });
+    throw new UploadError("decode_failed", `Could not decode cutout: ${(err as Error).message}`);
+  }
+
+  return {
+    originalImagePath: path.posix.join(userId, originalName),
+    thumbnailImagePath: path.posix.join(userId, thumbName),
+    width: meta.width,
+    height: meta.height,
+  };
+}
+
 /** Best-effort delete of an image and its thumbnail. Ignores missing files. */
 export async function deleteUpload(originalPath: string): Promise<void> {
   const abs = resolveUploadPath(originalPath);

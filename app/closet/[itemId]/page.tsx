@@ -2,10 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { imageUrl } from "@/lib/uploads";
 import { parseColors, parseSeasons, parseStringArray } from "@/lib/json";
 import type { Category, ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
+import { ImageCarousel } from "./image-carousel";
 
 function formatDate(d: Date) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -13,9 +13,10 @@ function formatDate(d: Date) {
 
 export default async function ItemDetailPage({ params }: { params: { itemId: string } }) {
   const user = await requireUser();
-  const item = await prisma.wardrobeItem.findFirst({
-    where: { id: params.itemId, userId: user.id },
-  });
+  const [item, dbUser] = await Promise.all([
+    prisma.wardrobeItem.findFirst({ where: { id: params.itemId, userId: user.id } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { credits: true } }),
+  ]);
   if (!item) notFound();
 
   const initial: ItemFormValue = {
@@ -36,9 +37,6 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     isWishlist: item.isWishlist,
   };
 
-  // Best available image: ghost > cutout > original.
-  const heroImage = item.ghostImagePath ?? item.cutoutImagePath ?? item.originalImagePath;
-
   return (
     <main className="max-w-6xl mx-auto px-6 py-12">
       <nav className="text-xs text-ink-muted mb-6">
@@ -49,14 +47,13 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
 
       <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-10 items-start">
         <div className="space-y-4 md:sticky md:top-6">
-          <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square shadow-tile">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl(heroImage)}
-              alt={item.name}
-              className="w-full h-full object-cover"
-            />
-          </div>
+          <ImageCarousel
+            itemId={item.id}
+            originalPath={item.originalImagePath}
+            cutoutPath={item.cutoutImagePath}
+            ghostPath={item.ghostImagePath}
+            credits={dbUser?.credits ?? 0}
+          />
           <dl className="grid grid-cols-2 gap-4 text-xs">
             <div>
               <dt className="uppercase tracking-wide text-ink-muted">Worn</dt>

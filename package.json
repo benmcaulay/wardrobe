@@ -26,6 +26,7 @@
     ]
   },
   "dependencies": {
+    "@imgly/background-removal": "^1.7.0",
     "@prisma/client": "^5.22.0",
     "clsx": "^2.1.1",
     "next": "14.2.18",

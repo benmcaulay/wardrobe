@@ -137,31 +137,47 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
         <NoResults />
       ) : (
         <ul className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {items.map((item) => (
-            <li key={item.id}>
-              <Link
-                href={`/closet/${item.id}`}
-                className="block rounded-2xl bg-white shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={thumbnailUrl(item.originalImagePath)}
-                  alt={item.name}
-                  loading="lazy"
-                  className="w-full h-full object-cover"
-                />
-                {item.isWishlist && (
-                  <span className="absolute top-2 left-2 bg-white/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
-                    Wishlist
-                  </span>
-                )}
-                <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-ink/70 to-transparent text-white opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition">
-                  <div className="text-xs font-medium truncate">{item.name}</div>
-                  <div className="text-[10px] text-white/80 truncate">{item.brand ?? "—"}</div>
-                </div>
-              </Link>
-            </li>
-          ))}
+          {items.map((item) => {
+            // Best available variant: ghost > cutout > original.
+            const bestImage =
+              item.ghostImagePath ?? item.cutoutImagePath ?? item.originalImagePath;
+            const isGhost = !!item.ghostImagePath;
+            return (
+              <li key={item.id}>
+                <Link
+                  href={`/closet/${item.id}`}
+                  className="block rounded-2xl bg-white shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={thumbnailUrl(bestImage)}
+                    alt={item.name}
+                    loading="lazy"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-1">
+                    {item.isWishlist && (
+                      <span className="bg-white/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
+                        Wishlist
+                      </span>
+                    )}
+                    {isGhost && (
+                      <span
+                        className="ml-auto bg-white/90 text-ink text-[10px] px-2 py-0.5 rounded-full"
+                        title="Ghost mannequin"
+                      >
+                        ✨
+                      </span>
+                    )}
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-ink/70 to-transparent text-white opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition">
+                    <div className="text-xs font-medium truncate">{item.name}</div>
+                    <div className="text-[10px] text-white/80 truncate">{item.brand ?? "—"}</div>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
 

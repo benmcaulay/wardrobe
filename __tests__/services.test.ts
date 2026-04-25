@@ -6,6 +6,10 @@ import { analyzeGarment } from "../lib/services/vision";
 import { reverseImageSearch } from "../lib/services/reverseImageSearch";
 import { scrapeProduct } from "../lib/services/productScraper";
 import { removeBackground } from "../lib/services/backgroundRemoval";
+import {
+  createGhostMannequin,
+  mapCategoryToGhost,
+} from "../lib/services/ghostMannequin";
 import { UPLOADS_ROOT } from "../lib/uploads";
 
 const TEST_USER = "__test_services__";
@@ -108,4 +112,74 @@ describe("removeBackground", () => {
   });
 });
 
-// Ghost-mannequin tests are added in the next commit when the service exists.
+describe("createGhostMannequin", () => {
+  it("writes a 1024x1366 JPEG + 400px thumbnail and returns a DB-relative path", async () => {
+    const garment = await writeTestImage("garment.jpg", "#7a8c6f");
+    const result = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+    });
+    expect(result.resultImagePath.startsWith(`${TEST_USER}/ghost-`)).toBe(true);
+    expect(result.credits).toBe(1);
+    const meta = await sharp(path.join(UPLOADS_ROOT, result.resultImagePath)).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(meta.width).toBe(1024);
+    expect(meta.height).toBe(1366);
+    const thumbRel = result.resultImagePath.replace(/\.jpg$/, "-thumb.jpg");
+    const thumbMeta = await sharp(path.join(UPLOADS_ROOT, thumbRel)).metadata();
+    expect(thumbMeta.width).toBeLessThanOrEqual(400);
+    expect(thumbMeta.height).toBeLessThanOrEqual(400);
+  });
+
+  it("is deterministic for the same (garment, category)", async () => {
+    const garment = await writeTestImage("garment.jpg", "#7a8c6f");
+    const a = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+    });
+    const b = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+    });
+    expect(a.resultImagePath).toBe(b.resultImagePath);
+  });
+
+  it("changes filename when category changes", async () => {
+    const garment = await writeTestImage("garment.jpg", "#7a8c6f");
+    const top = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+    });
+    const dress = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "dress",
+    });
+    expect(top.resultImagePath).not.toBe(dress.resultImagePath);
+  });
+
+  it("throws on traversal-unsafe paths", async () => {
+    await expect(
+      createGhostMannequin({
+        userId: TEST_USER,
+        garmentImagePath: "../etc/passwd",
+        category: "upperbody",
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("mapCategoryToGhost", () => {
+  it("maps wardrobe categories to ghost-mannequin categories", () => {
+    expect(mapCategoryToGhost("top")).toBe("upperbody");
+    expect(mapCategoryToGhost("outerwear")).toBe("upperbody");
+    expect(mapCategoryToGhost("bottom")).toBe("lowerbody");
+    expect(mapCategoryToGhost("shoes")).toBe("lowerbody");
+    expect(mapCategoryToGhost("dress")).toBe("dress");
+    expect(mapCategoryToGhost("anything-else")).toBe("full");
+  });
+});
