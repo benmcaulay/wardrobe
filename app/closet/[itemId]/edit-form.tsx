@@ -59,12 +59,6 @@ export function EditForm({ itemId, initial }: Props) {
         >
           Wear today
         </button>
-        <a
-          href={`/try-on?item=${itemId}`}
-          className="rounded-full border border-ink/15 px-4 py-2 text-xs tracking-wide hover:bg-paper-warm transition"
-        >
-          Try on me
-        </a>
         <button
           type="button"
           onClick={onDelete}

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { imageUrl, thumbnailUrl } from "@/lib/uploads";
+import { imageUrl } from "@/lib/uploads";
 import { parseColors, parseSeasons, parseStringArray } from "@/lib/json";
 import type { Category, ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
@@ -17,21 +17,6 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     where: { id: params.itemId, userId: user.id },
   });
   if (!item) notFound();
-
-  // itemIds is JSON in SQLite, so contains() is a best-effort pre-filter and
-  // we verify by parsing each match.
-  const tryOnCandidates = await prisma.tryOnGeneration.findMany({
-    where: { userId: user.id, itemIds: { contains: item.id } },
-    orderBy: { createdAt: "desc" },
-  });
-  const tryOns = tryOnCandidates.filter((t) => {
-    try {
-      const arr = JSON.parse(t.itemIds) as string[];
-      return Array.isArray(arr) && arr.includes(item.id);
-    } catch {
-      return false;
-    }
-  });
 
   const initial: ItemFormValue = {
     name: item.name,
@@ -51,6 +36,9 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     isWishlist: item.isWishlist,
   };
 
+  // Best available image: ghost > cutout > original.
+  const heroImage = item.ghostImagePath ?? item.cutoutImagePath ?? item.originalImagePath;
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-12">
       <nav className="text-xs text-ink-muted mb-6">
@@ -64,7 +52,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
           <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square shadow-tile">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={imageUrl(item.originalImagePath)}
+              src={imageUrl(heroImage)}
               alt={item.name}
               className="w-full h-full object-cover"
             />
@@ -89,32 +77,6 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
           <EditForm itemId={item.id} initial={initial} />
         </div>
       </div>
-
-      <section className="mt-16">
-        <h2 className="font-serif text-2xl tracking-tight mb-4">Try-on history</h2>
-        {tryOns.length === 0 ? (
-          <p className="text-ink-muted text-sm">
-            You haven&apos;t generated any try-ons yet.{" "}
-            <Link href={`/try-on?item=${item.id}`} className="underline">
-              Try this one on
-            </Link>
-            .
-          </p>
-        ) : (
-          <ul className="grid grid-cols-3 md:grid-cols-5 gap-3">
-            {tryOns.map((t) => (
-              <li key={t.id} className="rounded-xl overflow-hidden bg-paper-warm aspect-square shadow-tile">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={thumbnailUrl(t.resultImagePath)}
-                  alt="Try-on result"
-                  className="w-full h-full object-cover"
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </main>
   );
 }

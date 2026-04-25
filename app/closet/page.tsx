@@ -58,7 +58,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
   const user = await requireUser();
   const filters = readFilters(searchParams);
 
-  const [items, allForFacets, totalCount, valueAgg] = await Promise.all([
+  const [items, allForFacets, totalCount, valueAgg, dbUser] = await Promise.all([
     prisma.wardrobeItem.findMany({
       where: buildWhere(user.id, filters),
       orderBy: { createdAt: "desc" },
@@ -73,7 +73,9 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       where: { userId: user.id, isWishlist: false },
       _sum: { priceCents: true },
     }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { credits: true } }),
   ]);
+  const credits = dbUser?.credits ?? 0;
   const totalValueCents = valueAgg._sum.priceCents ?? 0;
   const totalValueFormatted = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -102,13 +104,18 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
           </p>
           <h1 className="sr-only">Closet</h1>
         </div>
-        <div className="flex flex-col items-end gap-1 pt-2">
-          <nav className="flex items-center gap-4 text-sm">
-            <Link href="/outfits" className="text-ink-muted hover:text-ink">
-              Outfits
-            </Link>
-            <Link href="/try-on" className="text-ink-muted hover:text-ink">
-              Try on
+        <div className="flex flex-col items-end gap-2 pt-2">
+          <nav className="flex items-center gap-3 text-sm">
+            <Link
+              href="/settings"
+              className={`rounded-full px-3 py-1 text-xs tracking-wide transition ${
+                credits < 10
+                  ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
+                  : "bg-paper-warm text-ink hover:bg-ink/5"
+              }`}
+              title={credits < 10 ? "Running low on credits" : "Ghost-mannequin credits"}
+            >
+              ✨ {credits}
             </Link>
             <Link href="/settings" className="text-ink-muted hover:text-ink">
               Settings

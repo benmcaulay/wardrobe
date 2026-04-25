@@ -69,28 +69,12 @@ export async function deleteItem(itemId: string): Promise<void> {
   // block the DB delete since the row references files that may already be gone.
   try {
     await deleteUpload(item.originalImagePath);
+    if (item.cutoutImagePath) await deleteUpload(item.cutoutImagePath);
+    if (item.ghostImagePath) await deleteUpload(item.ghostImagePath);
   } catch {
     // ignore
   }
-  // itemIds is JSON in SQLite — contains() is a best-effort string pre-filter,
-  // then we verify by parsing each match before deleting.
-  const candidates = await prisma.tryOnGeneration.findMany({
-    where: { userId: user.id, itemIds: { contains: itemId } },
-    select: { id: true, itemIds: true },
-  });
-  const ids = candidates
-    .filter((c) => {
-      try {
-        const arr = JSON.parse(c.itemIds) as string[];
-        return Array.isArray(arr) && arr.includes(itemId);
-      } catch {
-        return false;
-      }
-    })
-    .map((c) => c.id);
-  if (ids.length) {
-    await prisma.tryOnGeneration.deleteMany({ where: { id: { in: ids } } });
-  }
+  // TryOnGeneration rows cascade-delete via FK on the WardrobeItem.
   await prisma.wardrobeItem.delete({ where: { id: itemId } });
   revalidatePath("/closet");
   redirect("/closet");
