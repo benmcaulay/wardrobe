@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
 import { ImageCropper } from "@/components/image-cropper";
-import { removeBackgroundFromBlob } from "@/lib/client/background-removal";
 import { imageUrl } from "@/lib/image-paths";
 import { previewGhostMannequin } from "@/lib/actions/ghost-mannequin";
 import { mapCategoryToGhost } from "@/lib/services/ghost-mannequin-shared";
@@ -14,7 +13,6 @@ import {
   createItem,
   discardUpload,
   discardExtraImage,
-  saveCutoutFromClient,
   saveExtraImage,
   type AnalyzeUploadResponse,
 } from "./actions";
@@ -26,9 +24,7 @@ type ExtraImage = { id: string; path: string; previewUrl: string };
 type ReadyState = {
   kind: "ready";
   previewUrl: string;
-  cutoutPreviewUrl: string | null;
   analyze: AnalyzeOk;
-  cutoutImagePath: string | null;
   ghostImagePath: string | null;
   ghostCreditsUsed: number | null;
   generatingGhost: boolean;
@@ -42,7 +38,7 @@ type FlowState =
   | { kind: "cropping"; sourceUrl: string }
   | { kind: "processing"; previewUrl: string }
   | ReadyState
-  | { kind: "saving"; previewUrl: string; cutoutPreviewUrl: string | null }
+  | { kind: "saving"; previewUrl: string }
   | { kind: "error"; message: string };
 
 type Props = {
@@ -68,9 +64,6 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
       ) {
         URL.revokeObjectURL(state.previewUrl);
       }
-      if ((state.kind === "ready" || state.kind === "saving") && state.cutoutPreviewUrl) {
-        URL.revokeObjectURL(state.cutoutPreviewUrl);
-      }
       if (state.kind === "ready") {
         for (const e of state.extras) URL.revokeObjectURL(e.previewUrl);
       }
@@ -90,17 +83,9 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     setState({ kind: "processing", previewUrl });
 
     const file = new File([blob], "garment.jpg", { type: "image/jpeg" });
-    const analyzePromise = (async () => {
-      const formData = new FormData();
-      formData.append("image", file);
-      return analyzeUpload(formData);
-    })();
-    const cutoutPromise = removeBackgroundFromBlob(blob).catch((err) => {
-      console.warn("background removal failed:", err);
-      return null;
-    });
-
-    const [analyzeRes, cutoutBlob] = await Promise.all([analyzePromise, cutoutPromise]);
+    const formData = new FormData();
+    formData.append("image", file);
+    const analyzeRes = await analyzeUpload(formData);
 
     if (!analyzeRes.ok) {
       URL.revokeObjectURL(previewUrl);
@@ -108,26 +93,11 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
       return;
     }
 
-    let cutoutImagePath: string | null = null;
-    let cutoutPreviewUrl: string | null = null;
-    if (cutoutBlob) {
-      const cutoutFile = new File([cutoutBlob], "cutout.png", { type: "image/png" });
-      const cutoutForm = new FormData();
-      cutoutForm.append("cutout", cutoutFile);
-      const cutoutRes = await saveCutoutFromClient(cutoutForm);
-      if (cutoutRes.ok) {
-        cutoutImagePath = cutoutRes.cutoutImagePath;
-        cutoutPreviewUrl = URL.createObjectURL(cutoutBlob);
-      }
-    }
-
     const prefill = analyzeRes.bundle.prefill;
     const ready: ReadyState = {
       kind: "ready",
       previewUrl,
-      cutoutPreviewUrl,
       analyze: analyzeRes,
-      cutoutImagePath,
       ghostImagePath: null,
       ghostCreditsUsed: null,
       generatingGhost: false,
@@ -152,7 +122,6 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     setState(ready);
 
     if (autoGenerateGhost && credits > 0) {
-      // Fire-and-forget — generate runs immediately on a fresh ready state.
       runGhost(ready);
     }
   }
@@ -175,7 +144,7 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     const current = snapshot ?? (state.kind === "ready" ? state : null);
     if (!current) return;
     const res = await previewGhostMannequin({
-      garmentImagePath: current.cutoutImagePath ?? current.analyze.originalImagePath,
+      garmentImagePath: current.analyze.originalImagePath,
       extraImagePaths: current.extras.map((e) => e.path),
       category: mapCategoryToGhost(current.value.category),
     });
@@ -228,16 +197,11 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
   function onSave() {
     if (state.kind !== "ready") return;
     const snapshot = state;
-    setState({
-      kind: "saving",
-      previewUrl: snapshot.previewUrl,
-      cutoutPreviewUrl: snapshot.cutoutPreviewUrl,
-    });
+    setState({ kind: "saving", previewUrl: snapshot.previewUrl });
     startTransition(async () => {
       const result = await createItem({
         ...snapshot.value,
         originalImagePath: snapshot.analyze.originalImagePath,
-        cutoutImagePath: snapshot.cutoutImagePath,
         ghostImagePath: snapshot.ghostImagePath,
         ghostCreditsUsed: snapshot.ghostCreditsUsed ?? undefined,
         extraImagePaths: snapshot.extras.map((e) => e.path),
@@ -254,7 +218,6 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
   async function onDiscard() {
     if (state.kind === "ready" || state.kind === "saving") {
       URL.revokeObjectURL(state.previewUrl);
-      if (state.cutoutPreviewUrl) URL.revokeObjectURL(state.cutoutPreviewUrl);
       if (state.kind === "ready") {
         for (const e of state.extras) URL.revokeObjectURL(e.previewUrl);
         await Promise.all([
@@ -294,9 +257,7 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
         />
       )}
 
-      {state.kind === "saving" && (
-        <SavingView previewUrl={state.previewUrl} cutoutPreviewUrl={state.cutoutPreviewUrl} />
-      )}
+      {state.kind === "saving" && <SavingView previewUrl={state.previewUrl} />}
 
       {state.kind === "error" && (
         <div className="space-y-4">
@@ -386,11 +347,8 @@ function ProcessingView({ previewUrl }: { previewUrl: string }) {
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" />
-          <p className="font-serif text-xl">Removing background &amp; analyzing…</p>
+          <p className="font-serif text-xl">Analyzing…</p>
         </div>
-        <p className="text-xs text-ink-muted">
-          First-time bg-removal downloads a ~30MB model — subsequent uploads are instant.
-        </p>
         <div className="space-y-3">
           <Shimmer className="h-4 w-3/4" />
           <Shimmer className="h-4 w-1/2" />
@@ -412,12 +370,10 @@ function Shimmer({ className = "" }: { className?: string }) {
 
 function VariantPanel({
   previewUrl,
-  cutoutPreviewUrl,
   ghostImagePath,
   generating,
 }: {
   previewUrl: string;
-  cutoutPreviewUrl: string | null;
   ghostImagePath: string | null;
   generating: boolean;
 }) {
@@ -427,31 +383,15 @@ function VariantPanel({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={previewUrl} alt="Cropped garment" className="w-full h-full object-cover" />
       </div>
-      <div className="grid grid-cols-3 gap-2 text-[10px] uppercase tracking-wide text-ink-muted">
+      <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-wide text-ink-muted">
         <span>Original</span>
-        <span>{cutoutPreviewUrl ? "Cutout" : "Cutout · n/a"}</span>
         <span>{ghostImagePath ? "✨ Ghost" : generating ? "Generating…" : "Ghost · pending"}</span>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        {cutoutPreviewUrl ? (
-          <div
-            className="rounded-2xl overflow-hidden aspect-square"
-            style={{
-              backgroundImage:
-                "linear-gradient(45deg, #efe6d8 25%, transparent 25%), linear-gradient(-45deg, #efe6d8 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #efe6d8 75%), linear-gradient(-45deg, transparent 75%, #efe6d8 75%)",
-              backgroundSize: "16px 16px",
-              backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
-              backgroundColor: "#faf8f5",
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cutoutPreviewUrl} alt="Cutout" className="w-full h-full object-contain" />
-          </div>
-        ) : (
-          <div className="rounded-2xl bg-paper-warm aspect-square flex items-center justify-center text-[11px] text-ink-muted px-4 text-center">
-            Background removal didn&apos;t produce a clean cutout.
-          </div>
-        )}
+        <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={previewUrl} alt="Original" className="w-full h-full object-cover" />
+        </div>
         {ghostImagePath ? (
           <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -508,7 +448,6 @@ function ReadyView({
       <div className="md:sticky md:top-6 space-y-5">
         <VariantPanel
           previewUrl={state.previewUrl}
-          cutoutPreviewUrl={state.cutoutPreviewUrl}
           ghostImagePath={state.ghostImagePath}
           generating={state.generatingGhost}
         />
@@ -529,7 +468,7 @@ function ReadyView({
           <p className="text-[11px] text-ink-muted">
             {noCredits
               ? "Out of credits. Buy more in Settings."
-              : `Costs 1 credit. Add context shots below for better accuracy.`}
+              : "Costs 1 credit. Add context shots below for better accuracy."}
           </p>
           {state.ghostError && (
             <p role="alert" className="text-[11px] text-red-700">
@@ -540,9 +479,7 @@ function ReadyView({
 
         <div className="rounded-2xl border border-ink/10 p-4 space-y-3">
           <div className="flex items-baseline justify-between">
-            <h3 className="text-xs uppercase tracking-wide text-ink-muted">
-              Context images
-            </h3>
+            <h3 className="text-xs uppercase tracking-wide text-ink-muted">Context images</h3>
             <span className="text-[10px] text-ink-muted">{state.extras.length} added</span>
           </div>
           <p className="text-[11px] text-ink-muted">
@@ -622,26 +559,14 @@ function ReadyView({
   );
 }
 
-function SavingView({
-  previewUrl,
-  cutoutPreviewUrl,
-}: {
-  previewUrl: string;
-  cutoutPreviewUrl: string | null;
-}) {
+function SavingView({ previewUrl }: { previewUrl: string }) {
   return (
     <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-8 items-start">
-      <div className="md:sticky md:top-6 space-y-3">
+      <div className="md:sticky md:top-6">
         <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={previewUrl} alt="Cropped garment" className="w-full h-full object-cover" />
         </div>
-        {cutoutPreviewUrl && (
-          <div className="rounded-2xl overflow-hidden aspect-square bg-paper-warm">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cutoutPreviewUrl} alt="" className="w-full h-full object-contain" />
-          </div>
-        )}
       </div>
       <div className="space-y-4">
         <div className="flex items-center gap-3">

@@ -138,9 +138,8 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       ) : (
         <ul className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {items.map((item) => {
-            // Best available variant: ghost > cutout > original.
-            const bestImage =
-              item.ghostImagePath ?? item.cutoutImagePath ?? item.originalImagePath;
+            // Best available variant: ghost > original.
+            const bestImage = item.ghostImagePath ?? item.originalImagePath;
             const isGhost = !!item.ghostImagePath;
             return (
               <li key={item.id}>

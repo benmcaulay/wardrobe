@@ -48,7 +48,6 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
           <ImageCarousel
             itemId={item.id}
             originalPath={item.originalImagePath}
-            cutoutPath={item.cutoutImagePath}
             ghostPath={item.ghostImagePath}
             credits={dbUser?.credits ?? 0}
           />

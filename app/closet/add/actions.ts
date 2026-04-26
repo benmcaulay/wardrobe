@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { saveUpload, saveCutout, deleteUpload, UploadError } from "@/lib/uploads";
+import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { encode } from "@/lib/json";
 import { runPrefill, type PrefillBundle } from "@/lib/prefill";
 import type { ItemFormValue } from "@/lib/types";
@@ -41,25 +41,6 @@ export async function analyzeUpload(formData: FormData): Promise<AnalyzeUploadRe
   };
 }
 
-export type SaveCutoutResponse =
-  | { ok: true; cutoutImagePath: string }
-  | { ok: false; error: string };
-
-export async function saveCutoutFromClient(formData: FormData): Promise<SaveCutoutResponse> {
-  const user = await requireUser();
-  const file = formData.get("cutout");
-  if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: "No cutout provided" };
-  }
-  try {
-    const saved = await saveCutout(file, user.id);
-    return { ok: true, cutoutImagePath: saved.originalImagePath };
-  } catch (err) {
-    if (err instanceof UploadError) return { ok: false, error: err.message };
-    throw err;
-  }
-}
-
 export type SaveExtraImageResponse =
   | { ok: true; imagePath: string }
   | { ok: false; error: string };
@@ -85,7 +66,6 @@ export async function saveExtraImage(formData: FormData): Promise<SaveExtraImage
 
 export type CreateItemInput = ItemFormValue & {
   originalImagePath: string;
-  cutoutImagePath?: string | null;
   ghostImagePath?: string | null;
   /** Already-uploaded extra context-image paths. */
   extraImagePaths?: string[];
@@ -108,9 +88,6 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
   const user = await requireUser();
   if (!input.originalImagePath.startsWith(`${user.id}/`)) {
     return { ok: false, error: "Image does not belong to this user" };
-  }
-  if (input.cutoutImagePath && !input.cutoutImagePath.startsWith(`${user.id}/`)) {
-    return { ok: false, error: "Cutout does not belong to this user" };
   }
   if (input.ghostImagePath && !input.ghostImagePath.startsWith(`${user.id}/`)) {
     return { ok: false, error: "Ghost does not belong to this user" };
@@ -137,7 +114,6 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
       styleTags: encode(input.styleTags),
       season: encode(input.season),
       originalImagePath: input.originalImagePath,
-      cutoutImagePath: input.cutoutImagePath ?? null,
       ghostImagePath: input.ghostImagePath ?? null,
       extraImagePaths: input.extraImagePaths?.length ? encode(input.extraImagePaths) : null,
       isWishlist: input.isWishlist,

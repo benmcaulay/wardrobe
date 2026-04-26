@@ -43,23 +43,24 @@ export async function runPrefill(originalImagePath: string): Promise<PrefillBund
   const scraped = topMatch ? await scrapeProduct(topMatch.url) : null;
 
   const prefill: PrefillResult = {
-    // Name / brand / productUrl / styleTags are intentionally left blank so
-    // we don't surface the stub's fake guesses. The user fills these in.
+    // Every editable field starts blank. The vision/search/scraper stubs still
+    // run (their results are stashed in sourceData for debugging), but we
+    // don't surface their guesses on the form because they're meaningless
+    // until the real Claude-vision call is wired up. The category dropdown
+    // gets vision.category as a starting point so the select isn't empty.
     name: "",
     brand: "",
     category: vision.category,
-    subcategory: vision.subcategory,
-    colors: vision.colors,
-    priceCents: topMatch?.priceCents ?? scraped?.priceCents ?? null,
-    currency: topMatch?.currency ?? scraped?.currency ?? "USD",
-    retailer: topMatch?.retailer ?? scraped?.retailer ?? "",
+    subcategory: "",
+    colors: [],
+    priceCents: null,
+    currency: "USD",
+    retailer: "",
     productUrl: "",
-    // Default material: cotton for everything except shoes (where assuming a
-    // material is more wrong than right).
-    material: vision.category === "shoes" ? "" : "cotton",
-    pattern: vision.pattern,
+    material: "",
+    pattern: "",
     styleTags: [],
-    season: vision.season,
+    season: [],
   };
 
   return {

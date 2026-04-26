@@ -34,7 +34,7 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
     return { ok: false, error: "Out of credits" };
   }
 
-  const sourcePath = item.cutoutImagePath ?? item.originalImagePath;
+  const sourcePath = item.originalImagePath;
   let extras: string[] = [];
   try {
     if (item.extraImagePaths) extras = JSON.parse(item.extraImagePaths) as string[];

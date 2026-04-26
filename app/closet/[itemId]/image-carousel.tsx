@@ -5,34 +5,23 @@ import { useRouter } from "next/navigation";
 import { imageUrl } from "@/lib/image-paths";
 import { generateGhostFor } from "@/lib/actions/ghost-mannequin";
 
-type Variant = {
-  kind: "original" | "cutout" | "ghost";
-  label: string;
-  path: string | null;
-};
+type VariantKind = "original" | "ghost";
 
 type Props = {
   itemId: string;
   originalPath: string;
-  cutoutPath: string | null;
   ghostPath: string | null;
   credits: number;
 };
 
-export function ImageCarousel({ itemId, originalPath, cutoutPath, ghostPath, credits }: Props) {
-  const variants: Variant[] = [
-    { kind: "ghost", label: "Ghost", path: ghostPath },
-    { kind: "cutout", label: "Cutout", path: cutoutPath },
-    { kind: "original", label: "Original", path: originalPath },
-  ];
-  // Default selection: best available.
-  const initialActive = ghostPath ? "ghost" : cutoutPath ? "cutout" : "original";
-  const [active, setActive] = useState<Variant["kind"]>(initialActive);
+export function ImageCarousel({ itemId, originalPath, ghostPath, credits }: Props) {
+  const initialActive: VariantKind = ghostPath ? "ghost" : "original";
+  const [active, setActive] = useState<VariantKind>(initialActive);
   const [generating, startGenerate] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const activeVariant = variants.find((v) => v.kind === active) ?? variants[2];
+  const activePath = active === "ghost" ? ghostPath : originalPath;
   const noCredits = credits < 1;
 
   function onGenerate() {
@@ -50,26 +39,13 @@ export function ImageCarousel({ itemId, originalPath, cutoutPath, ghostPath, cre
 
   return (
     <div className="space-y-3">
-      <div
-        className="rounded-2xl overflow-hidden aspect-square shadow-tile"
-        style={
-          active === "cutout"
-            ? {
-                backgroundImage:
-                  "linear-gradient(45deg, #efe6d8 25%, transparent 25%), linear-gradient(-45deg, #efe6d8 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #efe6d8 75%), linear-gradient(-45deg, transparent 75%, #efe6d8 75%)",
-                backgroundSize: "16px 16px",
-                backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
-                backgroundColor: "#faf8f5",
-              }
-            : { backgroundColor: "#f3ede4" }
-        }
-      >
-        {activeVariant.path ? (
+      <div className="rounded-2xl overflow-hidden aspect-square shadow-tile bg-paper-warm">
+        {activePath ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
-            src={imageUrl(activeVariant.path)}
-            alt={activeVariant.label}
-            className={`w-full h-full ${active === "cutout" ? "object-contain" : "object-cover"}`}
+            src={imageUrl(activePath)}
+            alt={active}
+            className="w-full h-full object-cover"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-xs text-ink-muted text-center px-4">
@@ -78,39 +54,19 @@ export function ImageCarousel({ itemId, originalPath, cutoutPath, ghostPath, cre
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        {variants.map((v) => {
-          const isActive = active === v.kind;
-          const disabled = !v.path;
-          return (
-            <button
-              key={v.kind}
-              type="button"
-              onClick={() => v.path && setActive(v.kind)}
-              disabled={disabled}
-              aria-pressed={isActive}
-              className={`flex flex-col items-center gap-1 rounded-xl border p-2 transition ${
-                isActive
-                  ? "border-ink bg-paper-warm"
-                  : "border-ink/10 hover:border-ink/30"
-              } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-            >
-              {v.path ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={imageUrl(v.path)}
-                  alt={v.label}
-                  className="w-full aspect-square rounded object-cover"
-                />
-              ) : (
-                <div className="w-full aspect-square rounded bg-paper-warm" />
-              )}
-              <span className="text-[10px] uppercase tracking-wide text-ink-muted">
-                {v.kind === "ghost" ? `✨ ${v.label}` : v.label}
-              </span>
-            </button>
-          );
-        })}
+      <div className="grid grid-cols-2 gap-2">
+        <Tab
+          label="Original"
+          path={originalPath}
+          active={active === "original"}
+          onClick={() => setActive("original")}
+        />
+        <Tab
+          label="✨ Ghost"
+          path={ghostPath}
+          active={active === "ghost"}
+          onClick={() => ghostPath && setActive("ghost")}
+        />
       </div>
 
       {!ghostPath && (
@@ -139,5 +95,42 @@ export function ImageCarousel({ itemId, originalPath, cutoutPath, ghostPath, cre
         </div>
       )}
     </div>
+  );
+}
+
+function Tab({
+  label,
+  path,
+  active,
+  onClick,
+}: {
+  label: string;
+  path: string | null;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const disabled = !path;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={`flex flex-col items-center gap-1 rounded-xl border p-2 transition ${
+        active ? "border-ink bg-paper-warm" : "border-ink/10 hover:border-ink/30"
+      } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+    >
+      {path ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={imageUrl(path)}
+          alt={label}
+          className="w-full aspect-square rounded object-cover"
+        />
+      ) : (
+        <div className="w-full aspect-square rounded bg-paper-warm" />
+      )}
+      <span className="text-[10px] uppercase tracking-wide text-ink-muted">{label}</span>
+    </button>
   );
 }
