@@ -14,7 +14,8 @@ export async function getOrCreateDemoUser(): Promise<User> {
   const existing = await prisma.user.findUnique({ where: { email: DEMO_USER_EMAIL } });
   if (existing) return existing;
   return prisma.user.create({
-    data: { email: DEMO_USER_EMAIL, name: "Demo", credits: 100 },
+    // 250 credits ≈ $10 at ~$0.04 per fal.ai gemini-25-flash-image generation.
+    data: { email: DEMO_USER_EMAIL, name: "Demo", credits: 250 },
   });
 }
 

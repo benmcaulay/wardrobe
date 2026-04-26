@@ -7,6 +7,7 @@ import {
   createGhostMannequin,
   mapCategoryToGhost,
   type GhostMannequinCategory,
+  type GhostMannequinResult,
 } from "@/lib/services/ghostMannequin";
 
 const REAL_GHOST = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
@@ -17,8 +18,10 @@ export type GenerateGhostResponse =
 
 /**
  * Generate (or regenerate) the ghost mannequin for an item that's already
- * persisted. Updates item.ghostImagePath, logs a TryOnGeneration row, and
- * (in real mode) decrements User.credits — all in one transaction.
+ * persisted. Updates item.ghostImagePath, logs a TryOnGeneration row, and (in
+ * real mode) decrements User.credits — all in one transaction. Errors from
+ * the provider are caught and returned as { ok: false } so the UI can show
+ * them without a 500.
  */
 export async function generateGhostFor(itemId: string): Promise<GenerateGhostResponse> {
   const user = await requireUser();
@@ -38,12 +41,19 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
   } catch {
     // ignore — bad JSON shouldn't block generation
   }
-  const result = await createGhostMannequin({
-    userId: user.id,
-    garmentImagePath: sourcePath,
-    extraImagePaths: extras,
-    category: mapCategoryToGhost(item.category),
-  });
+
+  let result: GhostMannequinResult;
+  try {
+    result = await createGhostMannequin({
+      userId: user.id,
+      garmentImagePath: sourcePath,
+      extraImagePaths: extras,
+      category: mapCategoryToGhost(item.category),
+    });
+  } catch (err) {
+    console.error("[generateGhostFor] failed:", (err as Error).message);
+    return { ok: false, error: (err as Error).message ?? "Generation failed" };
+  }
 
   const remaining = await prisma.$transaction(async (tx) => {
     await tx.wardrobeItem.update({
@@ -110,12 +120,18 @@ export async function previewGhostMannequin(
     return { ok: false, error: "Out of credits" };
   }
 
-  const result = await createGhostMannequin({
-    userId: user.id,
-    garmentImagePath: input.garmentImagePath,
-    extraImagePaths: input.extraImagePaths,
-    category: input.category,
-  });
+  let result: GhostMannequinResult;
+  try {
+    result = await createGhostMannequin({
+      userId: user.id,
+      garmentImagePath: input.garmentImagePath,
+      extraImagePaths: input.extraImagePaths,
+      category: input.category,
+    });
+  } catch (err) {
+    console.error("[previewGhostMannequin] failed:", (err as Error).message);
+    return { ok: false, error: (err as Error).message ?? "Generation failed" };
+  }
 
   let creditsRemaining = dbUser?.credits ?? 0;
   if (REAL_GHOST) {
