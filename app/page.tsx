@@ -1,10 +1,12 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { DEMO_USER_COOKIE } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
-export default function LandingPage() {
-  const hasCookie = cookies().get(DEMO_USER_COOKIE)?.value;
-  if (hasCookie) redirect("/closet");
+export default async function LandingPage() {
+  // Verify the user actually exists in the DB rather than trusting the cookie.
+  // After a `pnpm db:reset` (or any wipe) a stale cookie would otherwise loop:
+  // / → /closet → requireUser() finds nothing → / → /closet → …
+  const user = await getCurrentUser();
+  if (user) redirect("/closet");
 
   return (
     <main className="min-h-dvh flex items-center justify-center px-6">
@@ -12,7 +14,7 @@ export default function LandingPage() {
         <h1 className="font-serif text-5xl tracking-tight">Wardrobe</h1>
         <p className="text-ink-muted text-lg leading-relaxed">
           Your personal digital closet. Upload what you own, see it organized,
-          and (soon) try on new pieces before you buy.
+          and turn flat photos into clean ghost-mannequin product shots.
         </p>
         <form action="/api/demo/enter" method="post">
           <button
