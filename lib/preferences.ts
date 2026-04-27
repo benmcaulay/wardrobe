@@ -41,6 +41,9 @@ export const FAVORITE_COLOR_OPTIONS: readonly { hex: string; name: string }[] = 
   { hex: "#4a8c5a", name: "green" },
   { hex: "#4a6fb0", name: "blue" },
   { hex: "#7a4fb0", name: "purple" },
+  { hex: "#e8b4c8", name: "pink" },
+  { hex: "#7a4f2a", name: "brown" },
+  { hex: "#d4b896", name: "beige" },
 ];
 
 export const SIZE_SLOTS = [
