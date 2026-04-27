@@ -41,6 +41,7 @@ const BASE_HEIGHT = 1366; // 3:4 portrait
 const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
   upperbody: "TOP",
   lowerbody: "BOTTOM",
+  footwear: "FOOTWEAR",
   dress: "DRESS",
   full: "FULL LOOK",
 };
@@ -86,10 +87,11 @@ export async function createGhostMannequin(
 // Real implementation
 // -----------------------------------------------------------------------------
 
-const PROMPT = (category: GhostMannequinCategory) => {
+const APPAREL_PROMPT = (category: Exclude<GhostMannequinCategory, "footwear">) => {
   const label = {
     upperbody: "top garment (shirt, sweater, jacket, or other upper-body piece)",
-    lowerbody: "bottom garment (pants, shorts, skirt, or other lower-body piece)",
+    lowerbody:
+      "bottom garment (pants, shorts, skirt, or similar — not shoes or sneakers)",
     dress: "dress",
     full: "full outfit",
   }[category];
@@ -104,6 +106,20 @@ Requirements:
 - Preserve the garment's exact colour, fabric texture, prints, logos, and proportions.
 - Do not show any person, mannequin, hands, hangers, props, or text.`;
 };
+
+/** Footwear uses different geometry than torso/legs apparel; kept separate from lowerbody prompts. */
+const FOOTWEAR_PROMPT = `Generate a clean e-commerce product photograph of this footwear (the exact shoes or sneakers shown in the reference).
+
+Requirements:
+- Pure white seamless studio background (#ffffff).
+- Reproduce only the footwear from the reference — same silhouette, colours, materials, soles, logos, and laces. Do not substitute shirts, jackets, pants, or any other apparel.
+- Pair presented in a professional catalog layout: natural three-quarter or front angle, balanced composition, entire pair visible with comfortable margin.
+- Soft even studio lighting, no harsh cast shadows.
+- Preserve fine detail: mesh, suede, stitching, sole tread, branding.
+- Do not show legs, mannequin bodies above the ankle, hangers, or text.`;
+
+const PROMPT = (category: GhostMannequinCategory): string =>
+  category === "footwear" ? FOOTWEAR_PROMPT : APPAREL_PROMPT(category);
 
 async function uploadToFal(absolutePath: string, fallbackName: string): Promise<string> {
   const buf = await fs.readFile(absolutePath);
