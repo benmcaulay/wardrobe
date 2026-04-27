@@ -64,13 +64,19 @@ export async function saveExtraImage(formData: FormData): Promise<SaveExtraImage
   }
 }
 
+export type GhostViewInput = {
+  label: string;
+  imagePath: string;
+  creditsUsed: number;
+};
+
 export type CreateItemInput = ItemFormValue & {
   originalImagePath: string;
   ghostImagePath?: string | null;
+  /** All generated ghost views (first one matches ghostImagePath). */
+  ghostViews?: GhostViewInput[];
   /** Already-uploaded extra context-image paths. */
   extraImagePaths?: string[];
-  /** Credits already debited by the preview action; logged on the item. */
-  ghostCreditsUsed?: number;
   sourceData?: unknown;
 };
 
@@ -80,9 +86,9 @@ export type CreateItemResponse =
 
 /**
  * Persist the user-confirmed item, including any pre-generated ghost
- * mannequin and extra context images. Credits for the ghost were already
- * decremented by previewGhostMannequin; this just logs the TryOnGeneration
- * row so history is complete.
+ * mannequin views and extra context images. Credits for the ghosts were
+ * already decremented by previewGhostMannequin; this just logs the
+ * TryOnGeneration rows so history is complete.
  */
 export async function createItem(input: CreateItemInput): Promise<CreateItemResponse> {
   const user = await requireUser();
@@ -91,6 +97,11 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
   }
   if (input.ghostImagePath && !input.ghostImagePath.startsWith(`${user.id}/`)) {
     return { ok: false, error: "Ghost does not belong to this user" };
+  }
+  for (const view of input.ghostViews ?? []) {
+    if (!view.imagePath.startsWith(`${user.id}/`)) {
+      return { ok: false, error: "Ghost view does not belong to this user" };
+    }
   }
   for (const extra of input.extraImagePaths ?? []) {
     if (!extra.startsWith(`${user.id}/`)) {
@@ -115,6 +126,9 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
       season: encode(input.season),
       originalImagePath: input.originalImagePath,
       ghostImagePath: input.ghostImagePath ?? null,
+      ghostViews: input.ghostViews?.length
+        ? encode(input.ghostViews.map(({ label, imagePath }) => ({ label, imagePath })))
+        : null,
       extraImagePaths: input.extraImagePaths?.length ? encode(input.extraImagePaths) : null,
       isWishlist: input.isWishlist,
       notes: input.notes.trim() || null,
@@ -122,13 +136,22 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
     },
   });
 
-  if (input.ghostImagePath) {
+  if (input.ghostViews?.length) {
+    await prisma.tryOnGeneration.createMany({
+      data: input.ghostViews.map((v) => ({
+        userId: user.id,
+        itemId: item.id,
+        resultImagePath: v.imagePath,
+        creditsUsed: v.creditsUsed,
+      })),
+    });
+  } else if (input.ghostImagePath) {
     await prisma.tryOnGeneration.create({
       data: {
         userId: user.id,
         itemId: item.id,
         resultImagePath: input.ghostImagePath,
-        creditsUsed: input.ghostCreditsUsed ?? 1,
+        creditsUsed: 1,
       },
     });
   }
