@@ -7,6 +7,8 @@ import type { Category, ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
 import { ImageCarousel } from "./image-carousel";
 
+type StoredGhostView = { label: string; imagePath: string };
+
 function formatDate(d: Date) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
@@ -35,6 +37,19 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     isWishlist: item.isWishlist,
   };
 
+  // Parse ghost views; fall back to synthesising one from ghostImagePath for old items
+  let ghostViews: StoredGhostView[] = [];
+  try {
+    if (item.ghostViews) ghostViews = JSON.parse(item.ghostViews) as StoredGhostView[];
+  } catch {
+    // ignore
+  }
+  if (ghostViews.length === 0 && item.ghostImagePath) {
+    ghostViews = [{ label: "Ghost", imagePath: item.ghostImagePath }];
+  }
+
+  const extraPaths = parseStringArray(item.extraImagePaths ?? "[]");
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-12">
       <nav className="text-xs text-ink-muted mb-6">
@@ -48,7 +63,8 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
           <ImageCarousel
             itemId={item.id}
             originalPath={item.originalImagePath}
-            ghostPath={item.ghostImagePath}
+            ghostViews={ghostViews}
+            extraImagePaths={extraPaths}
             credits={dbUser?.credits ?? 0}
           />
           <dl className="grid grid-cols-2 gap-4 text-xs">

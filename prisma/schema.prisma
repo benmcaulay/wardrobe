@@ -46,6 +46,7 @@ model WardrobeItem {
   originalImagePath String
   cutoutImagePath   String?
   ghostImagePath    String?
+  ghostViews        String?           // JSON: { label: string; imagePath: string }[]
   extraImagePaths   String?           // JSON: string[] — extra context shots
   isWishlist        Boolean           @default(false)
   timesWorn         Int               @default(0)
