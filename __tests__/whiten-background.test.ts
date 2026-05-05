@@ -1,0 +1,113 @@
+import { describe, it, expect } from "vitest";
+import sharp from "sharp";
+import { whitenBackground } from "../lib/services/whiten-background";
+
+/** 16x16 image: solid #ededed background with a 6x6 saturated red square in
+ *  the centre. Mirrors what fal returns: a near-white catalog backdrop with
+ *  the garment in the middle. */
+async function nearWhiteCatalog(bgGray = 237): Promise<Buffer> {
+  const w = 16,
+    h = 16;
+  const raw = Buffer.alloc(w * h * 3);
+  for (let p = 0; p < w * h; p++) {
+    raw[p * 3] = bgGray;
+    raw[p * 3 + 1] = bgGray;
+    raw[p * 3 + 2] = bgGray;
+  }
+  for (let y = 5; y < 11; y++) {
+    for (let x = 5; x < 11; x++) {
+      const p = y * w + x;
+      raw[p * 3] = 200;
+      raw[p * 3 + 1] = 30;
+      raw[p * 3 + 2] = 30;
+    }
+  }
+  return sharp(raw, { raw: { width: w, height: h, channels: 3 } })
+    .png()
+    .toBuffer();
+}
+
+/** Same shape but the garment itself contains a tiny pure-white pocket — the
+ *  test the connected-component approach is designed to pass. */
+async function catalogWithInteriorWhite(): Promise<Buffer> {
+  const w = 16,
+    h = 16;
+  const raw = Buffer.alloc(w * h * 3);
+  for (let p = 0; p < w * h; p++) {
+    raw[p * 3] = 237;
+    raw[p * 3 + 1] = 237;
+    raw[p * 3 + 2] = 237;
+  }
+  // Garment block (red).
+  for (let y = 5; y < 11; y++) {
+    for (let x = 5; x < 11; x++) {
+      const p = y * w + x;
+      raw[p * 3] = 200;
+      raw[p * 3 + 1] = 30;
+      raw[p * 3 + 2] = 30;
+    }
+  }
+  // White pocket inside the garment, fully surrounded.
+  for (let y = 7; y < 9; y++) {
+    for (let x = 7; x < 9; x++) {
+      const p = y * w + x;
+      raw[p * 3] = 255;
+      raw[p * 3 + 1] = 255;
+      raw[p * 3 + 2] = 255;
+    }
+  }
+  return sharp(raw, { raw: { width: w, height: h, channels: 3 } })
+    .png()
+    .toBuffer();
+}
+
+async function readPixel(
+  buf: Buffer,
+  x: number,
+  y: number,
+): Promise<{ r: number; g: number; b: number; a: number }> {
+  const { data, info } = await sharp(buf)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const i = (y * info.width + x) * 4;
+  return { r: data[i], g: data[i + 1], b: data[i + 2], a: data[i + 3] };
+}
+
+describe("whitenBackground", () => {
+  it("clamps near-white background pixels to pure #ffffff in the flattened image", async () => {
+    const input = await nearWhiteCatalog(237);
+    const { flattened } = await whitenBackground(input);
+    const corner = await readPixel(flattened, 0, 0);
+    expect(corner.r).toBe(255);
+    expect(corner.g).toBe(255);
+    expect(corner.b).toBe(255);
+  });
+
+  it("makes the same background pixels transparent in the cutout", async () => {
+    const input = await nearWhiteCatalog(237);
+    const { cutout } = await whitenBackground(input);
+    const corner = await readPixel(cutout, 0, 0);
+    expect(corner.a).toBe(0);
+  });
+
+  it("preserves garment pixels untouched in both outputs", async () => {
+    const input = await nearWhiteCatalog(237);
+    const { flattened, cutout } = await whitenBackground(input);
+    const f = await readPixel(flattened, 8, 8);
+    expect(f.r).toBeGreaterThan(150);
+    expect(f.g).toBeLessThan(80);
+    const c = await readPixel(cutout, 8, 8);
+    expect(c.a).toBe(255);
+    expect(c.r).toBeGreaterThan(150);
+  });
+
+  it("does NOT punch holes in interior white regions of the garment", async () => {
+    // The pocket at (7,7)-(8,8) is pure white but enclosed by red — the
+    // flood fill must not reach it.
+    const input = await catalogWithInteriorWhite();
+    const { cutout } = await whitenBackground(input);
+    const interior = await readPixel(cutout, 7, 7);
+    expect(interior.a).toBe(255);
+  });
+});
