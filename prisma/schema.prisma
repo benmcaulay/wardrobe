@@ -24,6 +24,9 @@ model User {
   createdAt         DateTime          @default(now())
   items             WardrobeItem[]
   tryOns            TryOnGeneration[]
+  personPhotos      PersonPhoto[]
+  outfits           Outfit[]
+  virtualTryOns     VirtualTryOn[]
 }
 
 model WardrobeItem {
@@ -71,4 +74,52 @@ model TryOnGeneration {
 
   @@index([userId])
   @@index([itemId])
+}
+
+// A reference photo of the user (face / body) used as the subject for
+// virtual try-on. Up to ~5 are kept active at a time but the model itself
+// imposes no hard cap; the UI does.
+model PersonPhoto {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  imagePath     String
+  label         String?
+  createdAt     DateTime       @default(now())
+  virtualTryOns VirtualTryOn[]
+
+  @@index([userId])
+}
+
+// A saved combination of WardrobeItem ids the user can try on as a unit.
+model Outfit {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  itemIds       String         // JSON: string[] of WardrobeItem ids
+  createdAt     DateTime       @default(now())
+  virtualTryOns VirtualTryOn[]
+
+  @@index([userId])
+}
+
+// One virtual try-on generation: a person photo + a set of garment items
+// (optionally a saved Outfit) → a generated image.
+model VirtualTryOn {
+  id              String      @id @default(cuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personPhotoId   String
+  personPhoto     PersonPhoto @relation(fields: [personPhotoId], references: [id], onDelete: Cascade)
+  outfitId        String?
+  outfit          Outfit?     @relation(fields: [outfitId], references: [id], onDelete: SetNull)
+  itemIds         String      // JSON: string[] of WardrobeItem ids
+  prompt          String?
+  resultImagePath String
+  creditsUsed     Int         @default(1)
+  createdAt       DateTime    @default(now())
+
+  @@index([userId])
+  @@index([personPhotoId])
 }

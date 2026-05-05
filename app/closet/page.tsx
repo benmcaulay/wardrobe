@@ -107,6 +107,13 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
         <div className="flex flex-col items-end gap-2 pt-2">
           <nav className="flex items-center gap-3 text-sm">
             <Link
+              href="/closet/try-on"
+              className="rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
+              title="Virtual try-on"
+            >
+              👗 Try on
+            </Link>
+            <Link
               href="/settings"
               className={`rounded-full px-3 py-1 text-xs tracking-wide transition ${
                 credits < 10

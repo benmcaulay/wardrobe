@@ -1,8 +1,10 @@
 # Wardrobe
 
-Your personal digital closet with **AI-powered ghost-mannequin photos**.
-Upload clothing pictures and get back clean, professional studio-style
-images — the kind you'd see on a product page — without a photographer.
+Your personal digital closet with **AI-powered ghost-mannequin photos**
+and **virtual try-on**. Upload clothing pictures and get back clean,
+professional studio-style images — the kind you'd see on a product page —
+or upload a few photos of yourself and see how a saved outfit looks on you,
+without a photographer.
 
 Background removal runs for real, free, client-side via
 `@imgly/background-removal`. Ghost mannequin generation runs for real on
