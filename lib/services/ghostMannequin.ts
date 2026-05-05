@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
 import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
+import { whitenBackground } from "./whiten-background";
 
 // Real provider: fal.ai Gemini 2.5 Flash Image (edit). Takes a primary garment
 // image plus optional context references and returns a single composite, all
@@ -41,6 +42,7 @@ const BASE_HEIGHT = 1366; // 3:4 portrait
 const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
   upperbody: "TOP",
   lowerbody: "BOTTOM",
+  footwear: "FOOTWEAR",
   dress: "DRESS",
   full: "FULL LOOK",
 };
@@ -86,10 +88,11 @@ export async function createGhostMannequin(
 // Real implementation
 // -----------------------------------------------------------------------------
 
-const PROMPT = (category: GhostMannequinCategory) => {
+const APPAREL_PROMPT = (category: Exclude<GhostMannequinCategory, "footwear">) => {
   const label = {
     upperbody: "top garment (shirt, sweater, jacket, or other upper-body piece)",
-    lowerbody: "bottom garment (pants, shorts, skirt, or other lower-body piece)",
+    lowerbody:
+      "bottom garment (pants, shorts, skirt, or similar — not shoes or sneakers)",
     dress: "dress",
     full: "full outfit",
   }[category];
@@ -104,6 +107,20 @@ Requirements:
 - Preserve the garment's exact colour, fabric texture, prints, logos, and proportions.
 - Do not show any person, mannequin, hands, hangers, props, or text.`;
 };
+
+/** Footwear uses different geometry than torso/legs apparel; kept separate from lowerbody prompts. */
+const FOOTWEAR_PROMPT = `Generate a clean e-commerce product photograph of this footwear (the exact shoes or sneakers shown in the reference).
+
+Requirements:
+- Pure white seamless studio background (#ffffff).
+- Reproduce only the footwear from the reference — same silhouette, colours, materials, soles, logos, and laces. Do not substitute shirts, jackets, pants, or any other apparel.
+- Pair presented in a professional catalog layout: natural three-quarter or front angle, balanced composition, entire pair visible with comfortable margin.
+- Soft even studio lighting, no harsh cast shadows.
+- Preserve fine detail: mesh, suede, stitching, sole tread, branding.
+- Do not show legs, mannequin bodies above the ankle, hangers, or text.`;
+
+const PROMPT = (category: GhostMannequinCategory): string =>
+  category === "footwear" ? FOOTWEAR_PROMPT : APPAREL_PROMPT(category);
 
 async function uploadToFal(absolutePath: string, fallbackName: string): Promise<string> {
   const buf = await fs.readFile(absolutePath);
@@ -169,29 +186,39 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   const elapsedMs = Date.now() - startedAt;
   console.log(`[ghost-mannequin] fal ${FAL_GHOST_MODEL} ok in ${elapsedMs}ms (refs=${1 + extraUrls.length})`);
 
-  // Download the result and normalise to a 1024x1366 JPEG with a thumbnail.
+  // Download the result. fal models prompt for #ffffff but routinely emit
+  // near-white grays; whitenBackground() flood-fills the actual background to
+  // pure white and produces a transparent cutout the try-on/outfit features
+  // can composite directly. We resize first so the segmentation runs over
+  // the canonical 1024x1366 canvas.
   const fetched = await fetch(resultUrl);
   if (!fetched.ok) throw new Error(`Failed to download result: ${fetched.status}`);
-  const buffer = Buffer.from(await fetched.arrayBuffer());
+  const rawBuffer = Buffer.from(await fetched.arrayBuffer());
 
   const dir = path.join(UPLOADS_ROOT, input.userId);
   await fs.mkdir(dir, { recursive: true });
   const hash = deterministicHash(input);
   const filename = `ghost-${hash}.jpg`;
   const thumbName = `ghost-${hash}-thumb.jpg`;
+  const cutoutName = `ghost-${hash}-cutout.png`;
   const outAbs = path.join(dir, filename);
   const thumbAbs = path.join(dir, thumbName);
+  const cutoutAbs = path.join(dir, cutoutName);
 
-  await sharp(buffer)
+  const normalised = await sharp(rawBuffer)
     .rotate()
     .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
-    .jpeg({ quality: 88 })
-    .toFile(outAbs);
-  await sharp(buffer)
-    .rotate()
+    .png()
+    .toBuffer();
+
+  const { flattened, cutout } = await whitenBackground(normalised);
+
+  await sharp(flattened).jpeg({ quality: 88 }).toFile(outAbs);
+  await sharp(flattened)
     .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 80 })
     .toFile(thumbAbs);
+  await fs.writeFile(cutoutAbs, cutout);
 
   return {
     resultImagePath: path.posix.join(input.userId, filename),

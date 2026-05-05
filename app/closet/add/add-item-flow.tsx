@@ -281,6 +281,25 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     await discardExtraImage(target.path);
   }
 
+  async function removeGhostView(id: string) {
+    if (state.kind !== "ready") return;
+    const target = state.ghostViews.find((v) => v.id === id);
+    if (!target) return;
+
+    setState((s) => {
+      if (s.kind !== "ready") return s;
+      const remaining = s.ghostViews.filter((v) => v.id !== id);
+      const nextActive =
+        s.activeViewId === id
+          ? remaining.length > 0
+            ? remaining[remaining.length - 1]!.id
+            : null
+          : s.activeViewId;
+      return { ...s, ghostViews: remaining, activeViewId: nextActive };
+    });
+    await discardExtraImage(target.imagePath);
+  }
+
   function onSave() {
     if (state.kind !== "ready") return;
     const snapshot = state;
@@ -315,6 +334,7 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
         await Promise.all([
           discardUpload(state.analyze.originalImagePath),
           ...state.extras.map((e) => discardExtraImage(e.path)),
+          ...state.ghostViews.map((v) => discardExtraImage(v.imagePath)),
         ]);
       }
     }
@@ -371,6 +391,7 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
           onActivateView={(id) =>
             setState((s) => (s.kind === "ready" ? { ...s, activeViewId: id } : s))
           }
+          onRemoveGhostView={(id) => void removeGhostView(id)}
           onAddExtra={addExtra}
           onRemoveExtra={removeExtra}
           onSave={onSave}
@@ -502,12 +523,14 @@ function VariantPanel({
   activeViewId,
   generating,
   onActivate,
+  onRemoveGhost,
 }: {
   previewUrl: string;
   ghostViews: GhostView[];
   activeViewId: string | null;
   generating: boolean;
   onActivate: (id: string | null) => void;
+  onRemoveGhost: (id: string) => void;
 }) {
   const activeGhost = ghostViews.find((v) => v.id === activeViewId);
   const activeSrc = activeGhost ? imageUrl(activeGhost.imagePath) : previewUrl;
@@ -527,13 +550,45 @@ function VariantPanel({
           onClick={() => onActivate(null)}
         />
         {ghostViews.map((view) => (
-          <ViewThumb
+          <div
             key={view.id}
-            src={imageUrl(view.imagePath)}
-            label={view.label}
-            active={activeViewId === view.id}
-            onClick={() => onActivate(view.id)}
-          />
+            className="relative flex-shrink-0 w-16 flex flex-col items-center gap-1 group"
+          >
+            <button
+              type="button"
+              onClick={() => onActivate(view.id)}
+              disabled={generating}
+              className={`w-full flex flex-col items-center gap-1 rounded-xl border p-1 transition disabled:opacity-50 ${
+                activeViewId === view.id
+                  ? "border-ink bg-paper-warm"
+                  : "border-ink/10 hover:border-ink/30"
+              }`}
+            >
+              <div className="w-full aspect-square rounded overflow-hidden bg-paper-warm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imageUrl(view.imagePath)}
+                  alt={view.label}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <span className="text-[9px] uppercase tracking-wide text-ink-muted truncate w-full text-center px-0.5">
+                {view.label}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveGhost(view.id);
+              }}
+              disabled={generating}
+              aria-label="Remove ghost preview"
+              className="absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow-sm border border-ink/10 disabled:opacity-30"
+            >
+              ×
+            </button>
+          </div>
         ))}
         {generating && (
           <div className="flex-shrink-0 w-16 flex flex-col items-center gap-1 rounded-xl border border-ink/10 p-1">
@@ -672,6 +727,7 @@ function ReadyView({
   onTogglePickExtra,
   onPickLabelChange,
   onActivateView,
+  onRemoveGhostView,
   onAddExtra,
   onRemoveExtra,
   onSave,
@@ -687,6 +743,7 @@ function ReadyView({
   onTogglePickExtra: (id: string) => void;
   onPickLabelChange: (label: string) => void;
   onActivateView: (id: string | null) => void;
+  onRemoveGhostView: (id: string) => void;
   onAddExtra: (file: File) => void;
   onRemoveExtra: (id: string) => void;
   onSave: () => void;
@@ -709,6 +766,7 @@ function ReadyView({
           activeViewId={state.activeViewId}
           generating={state.generatingGhost}
           onActivate={onActivateView}
+          onRemoveGhost={onRemoveGhostView}
         />
 
         {/* Ghost mannequin panel */}

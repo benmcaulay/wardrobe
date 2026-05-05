@@ -178,7 +178,7 @@ describe("mapCategoryToGhost", () => {
     expect(mapCategoryToGhost("top")).toBe("upperbody");
     expect(mapCategoryToGhost("outerwear")).toBe("upperbody");
     expect(mapCategoryToGhost("bottom")).toBe("lowerbody");
-    expect(mapCategoryToGhost("shoes")).toBe("lowerbody");
+    expect(mapCategoryToGhost("shoes")).toBe("footwear");
     expect(mapCategoryToGhost("dress")).toBe("dress");
     expect(mapCategoryToGhost("anything-else")).toBe("full");
   });

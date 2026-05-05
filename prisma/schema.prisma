@@ -44,7 +44,6 @@ model WardrobeItem {
   styleTags         String            // JSON: string[]
   season            String            // JSON: string[]
   originalImagePath String
-  cutoutImagePath   String?
   ghostImagePath    String?
   ghostViews        String?           // JSON: { label: string; imagePath: string }[]
   extraImagePaths   String?           // JSON: string[] — extra context shots

@@ -14,6 +14,20 @@ export function thumbnailPathFor(originalPath: string): string {
   return `${base}-thumb${ext}`;
 }
 
+/**
+ * Derive the transparent-cutout PNG path from a ghost-mannequin JPEG path.
+ * Convention: foo.jpg → foo-cutout.png. The cutout is produced as a side
+ * effect of ghost generation (see whiten-background.ts) so the outfit/try-on
+ * features can composite without re-running background removal.
+ */
+export function cutoutPathFor(ghostPath: string): string {
+  const slash = ghostPath.lastIndexOf("/");
+  const filename = slash === -1 ? ghostPath : ghostPath.slice(slash + 1);
+  const dot = filename.lastIndexOf(".");
+  const base = dot === -1 ? ghostPath : ghostPath.slice(0, ghostPath.length - filename.length + dot);
+  return `${base}-cutout.png`;
+}
+
 /** URL to serve an image through the authenticated route. */
 export function imageUrl(relativePath: string): string {
   return `/api/images/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
