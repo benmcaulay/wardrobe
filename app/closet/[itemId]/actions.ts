@@ -67,7 +67,6 @@ export async function deleteItem(itemId: string): Promise<void> {
   // block the DB delete since the row references files that may already be gone.
   try {
     await deleteUpload(item.originalImagePath);
-    if (item.cutoutImagePath) await deleteUpload(item.cutoutImagePath);
     if (item.ghostImagePath) await deleteUpload(item.ghostImagePath);
     if (item.extraImagePaths) {
       try {
