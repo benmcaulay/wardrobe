@@ -81,7 +81,7 @@ function deterministicHash(input: VirtualTryOnInput): string {
     .slice(0, 12);
 }
 
-const PROMPT = (extraPrompt?: string) => {
+const PROMPT = (extraPrompt?: string, garmentLabels?: (string | undefined)[]) => {
   const base = `Generate a photorealistic image of the SAME person from the first reference photo wearing the clothing items shown in the additional reference photos.
 
 Strict requirements:
@@ -91,9 +91,22 @@ Strict requirements:
 - Match the garments' colors, fabric textures, prints, logos, fit, and proportions exactly as shown in the reference photos.
 - Realistic drape and natural shadows; the new clothing should look like it is actually being worn, not pasted in.
 - Do not add text, watermarks, hangers, mannequins, or extra people.`;
-  return extraPrompt && extraPrompt.trim().length > 0
-    ? `${base}\n\nAdditional direction from the user: ${extraPrompt.trim()}`
-    : base;
+
+  // Tell the model what each reference garment is and where it belongs. This is
+  // the biggest lever against multi-garment composites putting a top on the
+  // legs (or duplicating a piece) — the fal edit model otherwise has to guess.
+  const labels = (garmentLabels ?? [])
+    .map((l) => l?.trim())
+    .filter((l): l is string => !!l && l.length > 0);
+  let prompt = base;
+  if (labels.length > 0) {
+    const list = labels.map((l, i) => `${i + 1}) ${l}`).join(", ");
+    prompt += `\n\nThe additional reference photos are the garments to put on the person, in order: ${list}. Place each garment on its correct body region (tops on the torso, bottoms on the legs/waist, shoes on the feet, accessories where they belong) and combine them into one coherent, layered outfit. If these references only cover part of an outfit, keep the person's other existing garments unchanged.`;
+  }
+  if (extraPrompt && extraPrompt.trim().length > 0) {
+    prompt += `\n\nAdditional direction from the user: ${extraPrompt.trim()}`;
+  }
+  return prompt;
 };
 
 async function uploadToFal(absolutePath: string, fallbackName: string): Promise<string> {
@@ -267,33 +280,41 @@ async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTry
   if (!personAbs) throw new Error(`Invalid person path: ${input.personImagePath}`);
   await fs.access(personAbs);
 
-  const garmentAbsList: string[] = [];
-  for (const rel of input.garmentImagePaths) {
-    const abs = resolveUploadPath(rel);
+  // Keep each garment paired with its category so the prompt can name them in
+  // the same order they're handed to the model (missing files are dropped from
+  // both lists together).
+  const garments: { abs: string; category?: string }[] = [];
+  for (let i = 0; i < input.garmentImagePaths.length; i++) {
+    const abs = resolveUploadPath(input.garmentImagePaths[i]);
     if (!abs) continue;
     try {
       await fs.access(abs);
-      garmentAbsList.push(abs);
+      garments.push({ abs, category: input.garmentCategories?.[i] });
     } catch {
       // skip missing garments silently
     }
   }
-  if (garmentAbsList.length === 0) {
+  if (garments.length === 0) {
     throw new Error("None of the garment images could be read");
   }
 
-  const personUrl = await uploadToFal(personAbs, "person.jpg");
-  const garmentUrls: string[] = [];
-  for (const abs of garmentAbsList) {
-    garmentUrls.push(await uploadToFal(abs, "garment.jpg"));
-  }
+  // Uploads are independent network calls — run them concurrently rather than
+  // one-at-a-time. Promise.all preserves order, so image_urls stays
+  // [person, ...garments].
+  const [personUrl, ...garmentUrls] = await Promise.all([
+    uploadToFal(personAbs, "person.jpg"),
+    ...garments.map((g) => uploadToFal(g.abs, "garment.jpg")),
+  ]);
 
   const startedAt = Date.now();
   let resultUrl: string;
   try {
     const response = await fal.subscribe(FAL_VTON_MODEL, {
       input: {
-        prompt: PROMPT(input.prompt),
+        prompt: PROMPT(
+          input.prompt,
+          garments.map((g) => g.category),
+        ),
         image_urls: [personUrl, ...garmentUrls],
         num_images: 1,
       },

@@ -202,19 +202,25 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   if (!garmentAbs) throw new Error(`Invalid garment path: ${input.garmentImagePath}`);
   await fs.access(garmentAbs);
 
-  // Resolve and upload all inputs to fal.ai storage so the model can fetch them.
-  const garmentUrl = await uploadToFal(garmentAbs, "garment.jpg");
-  const extraUrls: string[] = [];
+  // Resolve all inputs first (cheap fs checks), then upload to fal.ai storage.
+  const extraAbs: string[] = [];
   for (const rel of input.extraImagePaths ?? []) {
     const abs = resolveUploadPath(rel);
     if (!abs) continue;
     try {
       await fs.access(abs);
-      extraUrls.push(await uploadToFal(abs, "context.jpg"));
+      extraAbs.push(abs);
     } catch {
       // skip missing/unreadable extras silently — they're optional
     }
   }
+
+  // Uploads are independent network calls — run them concurrently. Promise.all
+  // preserves order, so image_urls stays [garment, ...extras].
+  const [garmentUrl, ...extraUrls] = await Promise.all([
+    uploadToFal(garmentAbs, "garment.jpg"),
+    ...extraAbs.map((abs) => uploadToFal(abs, "context.jpg")),
+  ]);
 
   const startedAt = Date.now();
   let resultUrl: string;
