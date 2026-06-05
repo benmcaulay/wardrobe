@@ -13,6 +13,9 @@ tsconfig.tsbuildinfo
 # db
 prisma/migrations/migration_lock.toml.bak
 
+# local backups (full db + uploads archives)
+backups/
+
 # uploads (user data)
 uploads/
 

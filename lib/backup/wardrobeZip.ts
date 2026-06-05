@@ -7,26 +7,59 @@ import { getObject, objectExists } from "@/lib/storage";
 
 type GhostViewRow = { label?: string; imagePath?: string };
 
+/** Full set of WardrobeItem columns needed to faithfully recreate a row on
+ *  import. Paths here are the *original* (exporting account) relative paths;
+ *  restore remaps them to the importing account's new files. */
+export type WardrobeBackupItemData = {
+  colors: string;
+  priceCents: number | null;
+  currency: string;
+  retailer: string | null;
+  productUrl: string | null;
+  material: string | null;
+  pattern: string | null;
+  styleTags: string;
+  season: string;
+  isWishlist: boolean;
+  timesWorn: number;
+  lastWornAt: string | null;
+  notes: string | null;
+  originalThumbZoom: number;
+  originalMirror: boolean;
+  weightGrams: number | null;
+  volumeLiters: number | null;
+  originalImagePath: string;
+  ghostImagePath: string | null;
+  ghostViews: string | null;
+  extraImagePaths: string | null;
+};
+
+export type WardrobeBackupFile = {
+  role: string;
+  dbPath: string;
+  zipPath: string;
+  label?: string;
+  index?: number;
+  forGhostPath?: string;
+};
+
+export type WardrobeBackupItem = {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: string;
+  subcategory: string | null;
+  createdAt: string;
+  /** Present in version >= 2; lets import recreate the full item. */
+  data?: WardrobeBackupItemData;
+  files: WardrobeBackupFile[];
+};
+
 export type WardrobeBackupManifest = {
-  version: 1;
+  version: 2;
   exportedAt: string;
   note: string;
-  items: Array<{
-    id: string;
-    name: string;
-    brand: string | null;
-    category: string;
-    subcategory: string | null;
-    createdAt: string;
-    files: Array<{
-      role: string;
-      dbPath: string;
-      zipPath: string;
-      label?: string;
-      index?: number;
-      forGhostPath?: string;
-    }>;
-  }>;
+  items: WardrobeBackupItem[];
   skippedMissing: Array<{ dbPath: string; reason: string }>;
 };
 
@@ -56,18 +89,6 @@ export async function appendWardrobeBackupToArchiver(
   const items = await prisma.wardrobeItem.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      name: true,
-      brand: true,
-      category: true,
-      subcategory: true,
-      createdAt: true,
-      originalImagePath: true,
-      ghostImagePath: true,
-      ghostViews: true,
-      extraImagePaths: true,
-    },
   });
 
   const skippedMissing: WardrobeBackupManifest["skippedMissing"] = [];
@@ -171,12 +192,35 @@ export async function appendWardrobeBackupToArchiver(
       category: item.category,
       subcategory: item.subcategory,
       createdAt: item.createdAt.toISOString(),
+      data: {
+        colors: item.colors,
+        priceCents: item.priceCents,
+        currency: item.currency,
+        retailer: item.retailer,
+        productUrl: item.productUrl,
+        material: item.material,
+        pattern: item.pattern,
+        styleTags: item.styleTags,
+        season: item.season,
+        isWishlist: item.isWishlist,
+        timesWorn: item.timesWorn,
+        lastWornAt: item.lastWornAt ? item.lastWornAt.toISOString() : null,
+        notes: item.notes,
+        originalThumbZoom: item.originalThumbZoom,
+        originalMirror: item.originalMirror,
+        weightGrams: item.weightGrams,
+        volumeLiters: item.volumeLiters,
+        originalImagePath: item.originalImagePath,
+        ghostImagePath: item.ghostImagePath,
+        ghostViews: item.ghostViews,
+        extraImagePaths: item.extraImagePaths,
+      },
       files,
     });
   }
 
   const manifest: WardrobeBackupManifest = {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     note:
       "Images from your Wardrobe closet (originals, thumbnails, extras, ghost views, cutouts when present). Try-on generations and person photos are not included.",

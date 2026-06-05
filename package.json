@@ -13,6 +13,7 @@
     "test:fal": "node --env-file=.env --import tsx scripts/test-fal.ts",
     "test:s3": "tsx scripts/verify-s3.ts",
     "test:jobs": "tsx scripts/verify-jobs.ts",
+    "db:backup": "tsx scripts/db-backup.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "postinstall": "prisma generate",
@@ -40,6 +41,7 @@
     "@fal-ai/client": "^1.10.0",
     "@prisma/client": "^5.22.0",
     "@sentry/node": "^8.55.2",
+    "adm-zip": "^0.5.17",
     "archiver": "5.3.2",
     "clsx": "^2.1.1",
     "next": "14.2.18",
@@ -52,6 +54,7 @@
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/archiver": "6.0.2",
     "@types/node": "^20.17.6",
     "@types/react": "^18.3.12",

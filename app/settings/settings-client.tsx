@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CreditMark } from "@/components/credit-mark";
 import { ReorderableStringList } from "@/components/reorderable-string-list";
@@ -52,6 +52,11 @@ export function SettingsClient({
   const [clearing, startClear] = useTransition();
   const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
+  const [restore, setRestore] = useState<{
+    status: "idle" | "uploading" | "done" | "error";
+    message?: string;
+  }>({ status: "idle" });
+  const restoreInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   async function onBuyPack(packId: string) {
@@ -68,6 +73,28 @@ export function SettingsClient({
       setBuyError("Could not start checkout. Please try again.");
     } finally {
       setBuyingPackId(null);
+    }
+  }
+
+  async function handleRestore(file: File) {
+    setRestore({ status: "uploading" });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/backup/wardrobe/restore", { method: "POST", body: fd });
+      const data = (await res.json()) as
+        | { ok: true; imported: number; skipped: number }
+        | { ok: false; error: string };
+      if (!data.ok) {
+        setRestore({ status: "error", message: data.error });
+        return;
+      }
+      const parts = [`Imported ${data.imported} item${data.imported === 1 ? "" : "s"}`];
+      if (data.skipped) parts.push(`${data.skipped} already present`);
+      setRestore({ status: "done", message: `${parts.join(", ")}.` });
+      router.refresh();
+    } catch (err) {
+      setRestore({ status: "error", message: (err as Error).message });
     }
   }
 
@@ -355,6 +382,40 @@ export function SettingsClient({
         >
           Download wardrobe backup (.zip)
         </a>
+
+        <div className="space-y-2 border-t border-ink/10 pt-3">
+          <p className="text-sm text-ink-muted max-w-xl">
+            Restore from a wardrobe backup .zip. Items are added to this account with their photos;
+            pieces already imported (same name and date) are skipped, so re-importing is safe.
+          </p>
+          <input
+            ref={restoreInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleRestore(f);
+              e.target.value = "";
+            }}
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => restoreInputRef.current?.click()}
+              disabled={restore.status === "uploading"}
+              className="inline-flex rounded-full border border-ink/15 px-5 py-2 text-sm tracking-wide hover:bg-paper-warm transition disabled:opacity-50"
+            >
+              {restore.status === "uploading" ? "Importing…" : "Import wardrobe backup…"}
+            </button>
+            {restore.status === "done" && (
+              <span className="text-xs text-ink-muted">{restore.message}</span>
+            )}
+            {restore.status === "error" && (
+              <span className="text-xs text-red-700">{restore.message}</span>
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="pt-10 border-t border-ink/10 space-y-3">
