@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
 import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
-import { bufferToJpegDataUri, fileToDataUri, fashnRunTryOn } from "./fashnTryOn";
+import { bufferToPngDataUri, fileToDataUri, fashnRunTryOn } from "./fashnTryOn";
 
 // Real providers (USE_REAL_VIRTUAL_TRYON === "true"):
 // 1) Fashn.ai try-on (FASHN_API_KEY) — one garment per API call; we chain
@@ -19,6 +19,21 @@ const FAL_VTON_MODEL =
 const FASHN_TRYON_MODEL = process.env.FASHN_TRYON_MODEL ?? "tryon-v1.6";
 /** For `tryon-max` only. */
 const FASHN_TRYON_RESOLUTION = process.env.FASHN_TRYON_RESOLUTION?.trim() || "1k";
+/**
+ * tryon-v1.6 render mode: performance | balanced | quality. Defaults to the
+ * highest-fidelity "quality" — output fidelity matters more than the few extra
+ * seconds here, and "balanced" was visibly softer on prints/textures. Override
+ * with FASHN_TRYON_MODE if you'd rather trade quality for speed.
+ */
+const FASHN_TRYON_MODE = process.env.FASHN_TRYON_MODE?.trim().toLowerCase() || "quality";
+/**
+ * How Fashn should interpret the garment image. Our garment references are
+ * product / ghost-mannequin cutouts (not photos of someone wearing the item),
+ * so "flat-lay" gives the model the correct prior. "auto" (the old default)
+ * made it guess and sometimes treated a flat garment as an on-model shot.
+ */
+const FASHN_GARMENT_PHOTO_TYPE =
+  process.env.FASHN_GARMENT_PHOTO_TYPE?.trim().toLowerCase() || "flat-lay";
 const REAL_MODE = process.env.USE_REAL_VIRTUAL_TRYON === "true";
 const BASE_WIDTH = 1024;
 const BASE_HEIGHT = 1366;
@@ -203,19 +218,21 @@ async function fashnRealVirtualTryOn(
     for (let i = 0; i < steps.length; i++) {
       const { abs, category } = steps[i]!;
       const garmentImage = await fileToDataUri(abs);
+      // PNG output: the only lossy compression is then our single final JPEG
+      // encode, instead of Fashn JPEG -> (re-JPEG per chained step) -> JPEG.
       const inputs: Record<string, unknown> = useMax
         ? {
             model_image: modelImage,
             product_image: garmentImage,
-            output_format: "jpeg",
+            output_format: "png",
             resolution: FASHN_TRYON_RESOLUTION,
           }
         : {
             model_image: modelImage,
             garment_image: garmentImage,
-            garment_photo_type: "auto",
-            output_format: "jpeg",
-            mode: "balanced",
+            garment_photo_type: FASHN_GARMENT_PHOTO_TYPE,
+            output_format: "png",
+            mode: FASHN_TRYON_MODE,
             category: mapCategoryToFashnV16(category),
           };
 
@@ -229,7 +246,8 @@ async function fashnRealVirtualTryOn(
       if (!fetched.ok) throw new Error(`Failed to download Fashn result: ${fetched.status}`);
       const buf = Buffer.from(await fetched.arrayBuffer());
       lastResultBuf = buf;
-      modelImage = await bufferToJpegDataUri(buf);
+      // Chain losslessly so adding garment N+1 doesn't degrade garments 1..N.
+      modelImage = await bufferToPngDataUri(buf);
     }
   } catch (err) {
     const ms = Date.now() - startedAt;
