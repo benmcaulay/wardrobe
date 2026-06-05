@@ -1,3 +1,5 @@
+import type { StylePrefs } from "@/lib/json";
+
 export const STYLE_OPTIONS = [
   "minimal",
   "classic",
@@ -14,9 +16,8 @@ export const STYLE_OPTIONS = [
 ] as const;
 
 /**
- * The 10 style tags offered as chips on the item form. If a legacy item has
- * tags outside this list, the form still renders them so the user can clear
- * them — but new items pick from this set.
+ * Built-in default style tags (also the default picker when no custom list is saved).
+ * Items can still store tags outside this list — the form shows them so they can be cleared.
  */
 export const COMMON_STYLE_TAGS = [
   "minimal",
@@ -30,6 +31,38 @@ export const COMMON_STYLE_TAGS = [
   "tailored",
   "going-out",
 ] as const;
+
+/** Default tag picker when `styleTagsList` is unset in stylePrefs. */
+export const DEFAULT_STYLE_TAG_LIST: string[] = [...COMMON_STYLE_TAGS];
+
+export function normalizeStyleTagName(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function dedupeStyleTagsOrdered(labels: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of labels) {
+    const key = normalizeStyleTagName(raw);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw.trim());
+  }
+  return out;
+}
+
+export function sanitizeStyleTagsList(list: readonly string[]): string[] {
+  return dedupeStyleTagsOrdered(list);
+}
+
+/** Style tags shown as chips on item forms — user list from prefs or built-in defaults. */
+export function getStyleTagsListFromPrefs(prefs: StylePrefs): string[] {
+  const fromPrefs = prefs.styleTagsList;
+  if (Array.isArray(fromPrefs) && fromPrefs.length > 0) {
+    return sanitizeStyleTagsList(fromPrefs);
+  }
+  return [...DEFAULT_STYLE_TAG_LIST];
+}
 
 export const FAVORITE_COLOR_OPTIONS: readonly { hex: string; name: string }[] = [
   { hex: "#111111", name: "black" },

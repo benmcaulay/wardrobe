@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { getCategoriesListFromPrefs } from "@/lib/categories";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
+import { getStyleTagsListFromPrefs } from "@/lib/preferences";
 import { SettingsClient } from "./settings-client";
 
 export default async function SettingsPage() {
@@ -11,6 +13,8 @@ export default async function SettingsPage() {
     select: { stylePrefs: true, credits: true, autoGenerateGhost: true },
   });
   const initialPrefs = parseStylePrefs(dbUser?.stylePrefs);
+  const categoryList = getCategoriesListFromPrefs(initialPrefs);
+  const styleTagsList = getStyleTagsListFromPrefs(initialPrefs);
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-12">
@@ -27,6 +31,8 @@ export default async function SettingsPage() {
         <h2 className="font-serif text-2xl tracking-tight mb-6">Style preferences</h2>
         <SettingsClient
           initialPrefs={initialPrefs}
+          categoryList={categoryList}
+          styleTagsList={styleTagsList}
           credits={dbUser?.credits ?? 0}
           autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
         />
