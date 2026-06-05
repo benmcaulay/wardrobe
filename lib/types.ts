@@ -1,13 +1,15 @@
-import type { Category, Season } from "./services/vision";
 import type { Color } from "./json";
+import { DEFAULT_CATEGORIES } from "./categories";
 
-export type { Category, Season, Color };
+export type Season = "spring" | "summer" | "fall" | "winter";
+
+export type { Color };
 
 /** Controlled form shape shared by /closet/add and /closet/[itemId]. */
 export type ItemFormValue = {
   name: string;
   brand: string;
-  category: Category;
+  category: string;
   subcategory: string;
   colors: Color[];
   priceCents: number | null;
@@ -20,5 +22,5 @@ export type ItemFormValue = {
   isWishlist: boolean;
 };
 
-export const CATEGORIES: Category[] = ["top", "bottom", "dress", "outerwear", "shoes", "accessory"];
+export const CATEGORIES: string[] = [...DEFAULT_CATEGORIES];
 export const SEASONS: Season[] = ["spring", "summer", "fall", "winter"];

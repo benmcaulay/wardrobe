@@ -11,6 +11,16 @@ export type StylePrefs = {
   sizes?: Record<string, string>;
   favoriteColors?: string[];
   styles?: string[];
+  /** Ordered wardrobe category picker list (merged with defaults server-side only when absent). */
+  categoriesList?: string[];
+  /** Ordered style-tag chips for item add/edit (defaults when absent). */
+  styleTagsList?: string[];
+  /** @deprecated — read for migration only; omit on save */
+  customCategories?: string[];
+  /** @deprecated */
+  categoryOrder?: string[];
+  /** @deprecated */
+  hiddenCategories?: string[];
 };
 
 export function encode<T>(value: T): string {

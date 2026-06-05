@@ -26,7 +26,11 @@ model User {
   tryOns            TryOnGeneration[]
   personPhotos      PersonPhoto[]
   outfits           Outfit[]
+  outfitLayouts     OutfitLayout[]
   virtualTryOns     VirtualTryOn[]
+  saleListings      SaleListing[]
+  packingBags       PackingBag[]
+  packingTrips      PackingTrip[]
 }
 
 model WardrobeItem {
@@ -47,16 +51,23 @@ model WardrobeItem {
   styleTags         String            // JSON: string[]
   season            String            // JSON: string[]
   originalImagePath String
+  originalThumbZoom Float             @default(1)     // zoom applied when framing the original in square tiles
+  originalMirror    Boolean           @default(false)
   ghostImagePath    String?
   ghostViews        String?           // JSON: { label: string; imagePath: string }[]
   extraImagePaths   String?           // JSON: string[] — extra context shots
   isWishlist        Boolean           @default(false)
   timesWorn         Int               @default(0)
   lastWornAt        DateTime?
+  // Packing estimates (SmartPakker). Null = derive from the heuristic table in
+  // lib/packing/estimate.ts; populated = manual or (future) AI override.
+  weightGrams       Int?
+  volumeLiters      Float?
   notes             String?
   sourceData        String?           // JSON: raw stub/API response for debugging
   createdAt         DateTime          @default(now())
   tryOns            TryOnGeneration[]
+  saleListing       SaleListing?
 
   @@index([userId])
   @@index([userId, category])
@@ -122,4 +133,80 @@ model VirtualTryOn {
 
   @@index([userId])
   @@index([personPhotoId])
+}
+
+// Result of triaging a wardrobe item in the swipe-to-sell deck. One row per
+// item the user has made a decision on. Marketplaces don't expose public
+// listing APIs, so this tracks intent + a generated draft the user copies into
+// Depop/Poshmark/etc. manually.
+//   status: "skipped" (keep) | "for_sale" | "listed" | "sold"
+model SaleListing {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId       String       @unique
+  item         WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  status       String       @default("for_sale")
+  askingCents  Int?
+  currency     String       @default("USD")
+  condition    String?      // "new_with_tags" | "like_new" | "good" | "fair"
+  title        String?
+  description  String?
+  marketplaces String       @default("[]") // JSON: string[] of marketplace ids
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([userId, status])
+}
+
+// Saved drag/resize/layer outfit compositions for the outfit-builder canvas.
+model OutfitLayout {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  frameHeight Int
+  pieces      String   // JSON: { id, itemId, x, y, scale, z }[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// A piece of luggage the user owns (SmartPakker). `silhouette` is a preset id
+// from lib/packing/silhouettes.ts; `imagePath` optionally points at an uploaded
+// photo of the bag. Capacity is volume (litres) with an optional weight cap.
+model PackingBag {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  volumeLiters Float
+  maxWeightKg  Float?
+  silhouette   String   @default("duffel")
+  imagePath    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+// A packing plan for a trip (SmartPakker). Climate is fetched from the
+// destination + dates and summarised into `climateData`. `assignments` holds
+// the current per-bag item layout the algorithm produced (and the user edited).
+model PackingTrip {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  destination String
+  startDate   DateTime
+  endDate     DateTime
+  climateData String?  // JSON: ClimateSummary from lib/services/weather.ts
+  bagIds      String   @default("[]") // JSON: string[] of PackingBag ids
+  assignments String   @default("{}") // JSON: { [bagId]: string[] of WardrobeItem ids }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
 }
