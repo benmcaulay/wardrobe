@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { parseStringArray } from "@/lib/json";
+import { parseColors, parseStringArray } from "@/lib/json";
+import { CreditMark } from "@/components/credit-mark";
+import { virtualTryOnUsesAppCredits } from "@/lib/services/virtualTryOn";
 import { TryOnFlow, type ItemSummary, type OutfitSummary, type PersonPhotoSummary, type RecentTryOn } from "./try-on-flow";
 
 export default async function TryOnPage() {
@@ -19,8 +21,13 @@ export default async function TryOnPage() {
         name: true,
         brand: true,
         category: true,
+        subcategory: true,
+        colors: true,
+        pattern: true,
+        material: true,
+        season: true,
+        styleTags: true,
         originalImagePath: true,
-        cutoutImagePath: true,
         ghostImagePath: true,
       },
     }),
@@ -36,13 +43,38 @@ export default async function TryOnPage() {
     }),
   ]);
 
-  const itemSummaries: ItemSummary[] = items.map((i) => ({
-    id: i.id,
-    name: i.name,
-    brand: i.brand,
-    category: i.category,
-    bestImagePath: i.ghostImagePath ?? i.cutoutImagePath ?? i.originalImagePath,
-  }));
+  const itemSummaries: ItemSummary[] = items.map((i) => {
+    const colorParts = parseColors(i.colors).flatMap((c) => {
+      const hex = c.hex.replace(/^#/, "").toLowerCase();
+      return [c.name, hex, `#${hex}`];
+    });
+    const styleTags = parseStringArray(i.styleTags);
+    const seasons = parseStringArray(i.season);
+    const searchHaystack = [
+      i.name,
+      i.brand ?? "",
+      i.category,
+      i.subcategory ?? "",
+      i.pattern ?? "",
+      i.material ?? "",
+      ...colorParts,
+      ...styleTags,
+      ...seasons,
+    ]
+      .filter((s) => s.trim().length > 0)
+      .join(" ")
+      .toLowerCase();
+
+    return {
+      id: i.id,
+      name: i.name,
+      brand: i.brand,
+      category: i.category,
+      subcategory: i.subcategory,
+      bestImagePath: i.ghostImagePath ?? i.originalImagePath,
+      searchHaystack,
+    };
+  });
 
   const outfitSummaries: OutfitSummary[] = outfits.map((o) => ({
     id: o.id,
@@ -84,7 +116,10 @@ export default async function TryOnPage() {
           className="rounded-full bg-paper-warm text-ink px-3 py-1 text-xs tracking-wide hover:bg-ink/5"
           title="Try-on credits"
         >
-          ✨ {dbUser?.credits ?? 0}
+          <span className="inline-flex items-center gap-1">
+            <CreditMark className="h-3.5 w-3.5" title="Credits" />
+            {dbUser?.credits ?? 0}
+          </span>
         </Link>
       </header>
 
@@ -93,6 +128,7 @@ export default async function TryOnPage() {
         items={itemSummaries}
         outfits={outfitSummaries}
         credits={dbUser?.credits ?? 0}
+        tryOnUsesAppCredits={virtualTryOnUsesAppCredits()}
         recent={recentSummaries}
       />
     </main>

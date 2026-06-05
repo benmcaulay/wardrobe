@@ -61,6 +61,30 @@ async function catalogWithInteriorWhite(): Promise<Buffer> {
     .toBuffer();
 }
 
+/** Bright #fc studio with a dimmer #f0f0f0 block fully surrounded — must not be
+ *  classified as background (regression: legacy 232 flood would eat it). */
+async function brightBgWithDimInteriorIsland(): Promise<Buffer> {
+  const w = 24,
+    h = 24;
+  const raw = Buffer.alloc(w * h * 3);
+  for (let p = 0; p < w * h; p++) {
+    raw[p * 3] = 252;
+    raw[p * 3 + 1] = 252;
+    raw[p * 3 + 2] = 252;
+  }
+  for (let y = 9; y < 15; y++) {
+    for (let x = 9; x < 15; x++) {
+      const p = y * w + x;
+      raw[p * 3] = 240;
+      raw[p * 3 + 1] = 240;
+      raw[p * 3 + 2] = 240;
+    }
+  }
+  return sharp(raw, { raw: { width: w, height: h, channels: 3 } })
+    .png()
+    .toBuffer();
+}
+
 async function readPixel(
   buf: Buffer,
   x: number,
@@ -109,5 +133,16 @@ describe("whitenBackground", () => {
     const { cutout } = await whitenBackground(input);
     const interior = await readPixel(cutout, 7, 7);
     expect(interior.a).toBe(255);
+  });
+
+  it("does NOT treat a dim interior island as background when studio is bright", async () => {
+    const input = await brightBgWithDimInteriorIsland();
+    const { flattened } = await whitenBackground(input);
+    const center = await readPixel(flattened, 12, 12);
+    expect(center.r).toBe(240);
+    expect(center.g).toBe(240);
+    expect(center.b).toBe(240);
+    const corner = await readPixel(flattened, 0, 0);
+    expect(corner.r).toBe(255);
   });
 });

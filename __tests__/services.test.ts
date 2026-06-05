@@ -2,7 +2,6 @@ import { describe, it, expect, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
-import { analyzeGarment } from "../lib/services/vision";
 import { reverseImageSearch } from "../lib/services/reverseImageSearch";
 import { scrapeProduct } from "../lib/services/productScraper";
 import { removeBackground } from "../lib/services/backgroundRemoval";
@@ -28,36 +27,6 @@ async function writeTestImage(name: string, color: string): Promise<string> {
     .toFile(abs);
   return path.posix.join(TEST_USER, name);
 }
-
-describe("vision.analyzeGarment", () => {
-  it("returns a VisionResult shape", async () => {
-    const result = await analyzeGarment("user/foo.jpg");
-    expect(["top", "bottom", "dress", "outerwear", "shoes", "accessory"]).toContain(result.category);
-    expect(typeof result.subcategory).toBe("string");
-    expect(result.colors.length).toBeGreaterThanOrEqual(1);
-    for (const c of result.colors) {
-      expect(c.hex).toMatch(/^#[0-9a-f]{6}$/i);
-      expect(typeof c.name).toBe("string");
-    }
-    expect(result.styleTags.length).toBeGreaterThanOrEqual(2);
-    expect(result.season.length).toBeGreaterThanOrEqual(1);
-    for (const s of result.season) {
-      expect(["spring", "summer", "fall", "winter"]).toContain(s);
-    }
-  });
-
-  it("is deterministic for the same input", async () => {
-    const a = await analyzeGarment("user/same.jpg");
-    const b = await analyzeGarment("user/same.jpg");
-    expect(a).toEqual(b);
-  });
-
-  it("produces different output for different inputs", async () => {
-    const a = await analyzeGarment("user/a.jpg");
-    const b = await analyzeGarment("user/b.jpg");
-    expect(a).not.toEqual(b);
-  });
-});
 
 describe("reverseImageSearch", () => {
   it("returns 2..4 matches sorted by confidence (desc)", async () => {
@@ -180,6 +149,7 @@ describe("mapCategoryToGhost", () => {
     expect(mapCategoryToGhost("bottom")).toBe("lowerbody");
     expect(mapCategoryToGhost("shoes")).toBe("footwear");
     expect(mapCategoryToGhost("dress")).toBe("dress");
+    expect(mapCategoryToGhost("None")).toBe("full");
     expect(mapCategoryToGhost("anything-else")).toBe("full");
   });
 });

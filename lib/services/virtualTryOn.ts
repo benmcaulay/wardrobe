@@ -4,18 +4,21 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
 import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
+import { bufferToJpegDataUri, fileToDataUri, fashnRunTryOn } from "./fashnTryOn";
 
-// Real provider: fal.ai (default `fal-ai/gemini-25-flash-image/edit`).
-// We pass the person photo as the first reference and each garment / outfit
-// image as additional references, then prompt the model to redress the same
-// person while keeping pose, face, body, and background unchanged.
+// Real providers (USE_REAL_VIRTUAL_TRYON === "true"):
+// 1) Fashn.ai try-on (FASHN_API_KEY) — one garment per API call; we chain
+//    multi-garment outfits by feeding each step's output back as model_image.
+//    Billing is on your Fashn plan; we do not decrement in-app credits.
+// 2) fal.ai (FAL_KEY) — multi-image edit with a text prompt; costs 1 app credit.
 //
-// Stub mode (USE_REAL_VIRTUAL_TRYON !== "true") composites the person photo
-// with a watermark + garment thumbnails so devs without a fal key can still
-// exercise the full UI flow.
+// Stub mode composites the person photo with a watermark + garment thumbnails.
 
 const FAL_VTON_MODEL =
   process.env.FAL_VTON_MODEL ?? process.env.FAL_GHOST_MODEL ?? "fal-ai/gemini-25-flash-image/edit";
+const FASHN_TRYON_MODEL = process.env.FASHN_TRYON_MODEL ?? "tryon-v1.6";
+/** For `tryon-max` only. */
+const FASHN_TRYON_RESOLUTION = process.env.FASHN_TRYON_RESOLUTION?.trim() || "1k";
 const REAL_MODE = process.env.USE_REAL_VIRTUAL_TRYON === "true";
 const BASE_WIDTH = 1024;
 const BASE_HEIGHT = 1366;
@@ -23,14 +26,25 @@ const BASE_HEIGHT = 1366;
 let falConfigured = false;
 function ensureFalConfigured() {
   if (falConfigured) return;
-  const key = process.env.FAL_KEY;
+  const key = process.env.FAL_KEY?.trim();
   if (!key) {
     throw new Error(
-      "USE_REAL_VIRTUAL_TRYON is true but FAL_KEY is not set. Add it to .env.",
+      'USE_REAL_VIRTUAL_TRYON is "true" but FAL_KEY is not set. Add FAL_KEY to .env, or use FASHN_API_KEY for Fashn try-on.',
     );
   }
   fal.config({ credentials: key });
   falConfigured = true;
+}
+
+/** When true, generateVirtualTryOn requires and decrements app credits (Fal path). */
+export function virtualTryOnUsesAppCredits(): boolean {
+  return REAL_MODE && !process.env.FASHN_API_KEY?.trim();
+}
+
+function tryOnProvider(): "stub" | "fal" | "fashn" {
+  if (!REAL_MODE) return "stub";
+  if (process.env.FASHN_API_KEY?.trim()) return "fashn";
+  return "fal";
 }
 
 export type VirtualTryOnInput = {
@@ -39,6 +53,8 @@ export type VirtualTryOnInput = {
   personImagePath: string;
   /** DB-relative paths of garment images (cutouts / ghosts preferred). */
   garmentImagePaths: string[];
+  /** Same order as garmentImagePaths; hints Fashn tryon-v1.6 category (hats/accessories → try tryon-max). */
+  garmentCategories?: string[];
   /** Optional human description (e.g. "outfit for a coffee date"). */
   prompt?: string;
 };
@@ -57,7 +73,8 @@ function deterministicHash(input: VirtualTryOnInput): string {
         input.personImagePath,
         input.prompt ?? "",
         ...sortedGarments,
-        REAL_MODE ? "real" : "stub",
+        tryOnProvider(),
+        REAL_MODE && tryOnProvider() === "fashn" ? FASHN_TRYON_MODEL : "",
       ].join("|"),
     )
     .digest("hex")
@@ -96,15 +113,154 @@ export async function createVirtualTryOn(
   if (input.garmentImagePaths.length === 0) {
     throw new Error("At least one garment image is required");
   }
-  if (REAL_MODE) return realVirtualTryOn(input);
+  if (REAL_MODE) {
+    const fashnKey = process.env.FASHN_API_KEY?.trim();
+    if (fashnKey) return fashnRealVirtualTryOn(input, fashnKey);
+    if (process.env.FAL_KEY?.trim()) return falRealVirtualTryOn(input);
+    throw new Error(
+      'USE_REAL_VIRTUAL_TRYON is "true" but neither FASHN_API_KEY nor FAL_KEY is set. Add one to .env.',
+    );
+  }
   return stubVirtualTryOn(input);
+}
+
+// -----------------------------------------------------------------------------
+// Fashn helpers
+// -----------------------------------------------------------------------------
+
+function fashnModelIsTryOnMax(modelName: string): boolean {
+  return modelName.trim().toLowerCase() === "tryon-max";
+}
+
+/** tryon-v1.6 only supports tops | bottoms | one-pieces | auto — no hats/shoes. */
+function mapCategoryToFashnV16(category: string | undefined): "auto" | "tops" | "bottoms" | "one-pieces" {
+  const n = (category ?? "").trim().toLowerCase();
+  if (!n) return "auto";
+  if (n.includes("hat") || n.includes("cap") || n.includes("beanie")) return "auto";
+  if (n.includes("bottom") || n === "pants" || n.includes("skirt")) return "bottoms";
+  if (n.includes("dress") || n.includes("jumpsuit") || n.includes("one-piece")) return "one-pieces";
+  if (
+    n.includes("top") ||
+    n.includes("outerwear") ||
+    n.includes("shirt") ||
+    n.includes("sweater") ||
+    n.includes("knit")
+  ) {
+    return "tops";
+  }
+  return "auto";
 }
 
 // -----------------------------------------------------------------------------
 // Real implementation
 // -----------------------------------------------------------------------------
 
-async function realVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTryOnResult> {
+async function fashnRealVirtualTryOn(
+  input: VirtualTryOnInput,
+  apiKey: string,
+): Promise<VirtualTryOnResult> {
+  const personAbs = resolveUploadPath(input.personImagePath);
+  if (!personAbs) throw new Error(`Invalid person path: ${input.personImagePath}`);
+  await fs.access(personAbs);
+
+  type Step = { abs: string; category?: string };
+  const steps: Step[] = [];
+  for (let i = 0; i < input.garmentImagePaths.length; i++) {
+    const rel = input.garmentImagePaths[i];
+    const abs = resolveUploadPath(rel);
+    if (!abs) continue;
+    try {
+      await fs.access(abs);
+      steps.push({ abs, category: input.garmentCategories?.[i] });
+    } catch {
+      // skip missing garments
+    }
+  }
+  if (steps.length === 0) {
+    throw new Error("None of the garment images could be read");
+  }
+
+  const useMax = fashnModelIsTryOnMax(FASHN_TRYON_MODEL);
+
+  let modelImage = await fileToDataUri(personAbs);
+  const startedAt = Date.now();
+  let lastResultBuf: Buffer | null = null;
+
+  try {
+    for (let i = 0; i < steps.length; i++) {
+      const { abs, category } = steps[i]!;
+      const garmentImage = await fileToDataUri(abs);
+      const inputs: Record<string, unknown> = useMax
+        ? {
+            model_image: modelImage,
+            product_image: garmentImage,
+            output_format: "jpeg",
+            resolution: FASHN_TRYON_RESOLUTION,
+          }
+        : {
+            model_image: modelImage,
+            garment_image: garmentImage,
+            garment_photo_type: "auto",
+            output_format: "jpeg",
+            mode: "balanced",
+            category: mapCategoryToFashnV16(category),
+          };
+
+      const prompt = input.prompt?.trim();
+      if (prompt && useMax) {
+        inputs.prompt = prompt;
+      }
+
+      const outUrl = await fashnRunTryOn(apiKey, FASHN_TRYON_MODEL, inputs);
+      const fetched = await fetch(outUrl);
+      if (!fetched.ok) throw new Error(`Failed to download Fashn result: ${fetched.status}`);
+      const buf = Buffer.from(await fetched.arrayBuffer());
+      lastResultBuf = buf;
+      modelImage = await bufferToJpegDataUri(buf);
+    }
+  } catch (err) {
+    const ms = Date.now() - startedAt;
+    console.error(
+      `[virtual-tryon] Fashn failed after ${ms}ms (model=${FASHN_TRYON_MODEL}, garments=${steps.length}):`,
+      (err as Error).message,
+    );
+    throw new Error(`Virtual try-on generation failed: ${(err as Error).message}`);
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  console.log(
+    `[virtual-tryon] Fashn ${FASHN_TRYON_MODEL} ok in ${elapsedMs}ms (steps=${steps.length})`,
+  );
+
+  if (!lastResultBuf) throw new Error("Fashn returned no image data");
+  const buffer = lastResultBuf;
+
+  const dir = path.join(UPLOADS_ROOT, input.userId);
+  await fs.mkdir(dir, { recursive: true });
+  const hash = deterministicHash(input);
+  const filename = `tryon-${hash}.jpg`;
+  const thumbName = `tryon-${hash}-thumb.jpg`;
+  const outAbs = path.join(dir, filename);
+  const thumbAbs = path.join(dir, thumbName);
+
+  await sharp(buffer)
+    .rotate()
+    .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
+    .jpeg({ quality: 88 })
+    .toFile(outAbs);
+  await sharp(buffer)
+    .rotate()
+    .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 80 })
+    .toFile(thumbAbs);
+
+  return {
+    resultImagePath: path.posix.join(input.userId, filename),
+    credits: 0,
+  };
+}
+
+async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTryOnResult> {
   ensureFalConfigured();
 
   const personAbs = resolveUploadPath(input.personImagePath);

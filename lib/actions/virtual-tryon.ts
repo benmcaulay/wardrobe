@@ -5,7 +5,11 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encode } from "@/lib/json";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
-import { createVirtualTryOn, type VirtualTryOnResult } from "@/lib/services/virtualTryOn";
+import {
+  createVirtualTryOn,
+  virtualTryOnUsesAppCredits,
+  type VirtualTryOnResult,
+} from "@/lib/services/virtualTryOn";
 
 const REAL_VTON = process.env.USE_REAL_VIRTUAL_TRYON === "true";
 const MAX_PERSON_PHOTOS = 5;
@@ -94,7 +98,7 @@ export type GenerateTryOnResponse =
 
 /**
  * Generate a virtual try-on image. Picks the best available image for each
- * selected wardrobe item (ghost > cutout > original) so the model has the
+ * selected wardrobe item (ghost > original) so the model has the
  * cleanest possible garment reference. Real-mode call decrements credits
  * atomically with the VirtualTryOn row insert; failure does not charge.
  */
@@ -121,7 +125,15 @@ export async function generateVirtualTryOn(
   if (items.length !== input.itemIds.length) {
     return { ok: false, error: "One or more selected items could not be found." };
   }
-  if (REAL_VTON && (dbUser?.credits ?? 0) < 1) {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const orderedItems = input.itemIds
+    .map((id) => itemsById.get(id))
+    .filter((item): item is NonNullable<typeof item> => item != null);
+  if (orderedItems.length !== items.length) {
+    return { ok: false, error: "One or more selected items could not be found." };
+  }
+
+  if (REAL_VTON && virtualTryOnUsesAppCredits() && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
 
@@ -132,9 +144,12 @@ export async function generateVirtualTryOn(
     }
   }
 
-  // Pick the best image for each item: ghost > cutout > original
-  const garmentPaths = items.map(
-    (item) => item.ghostImagePath ?? item.cutoutImagePath ?? item.originalImagePath,
+  // Pick the best image for each item: ghost > original (order matches UI selection).
+  const garmentPaths = orderedItems.map(
+    (item) => item.ghostImagePath ?? item.originalImagePath,
+  );
+  const garmentCategories = orderedItems.map((item) =>
+    [item.category, item.subcategory].filter(Boolean).join(" ").trim(),
   );
 
   let result: VirtualTryOnResult;
@@ -143,6 +158,7 @@ export async function generateVirtualTryOn(
       userId: user.id,
       personImagePath: person.imagePath,
       garmentImagePaths: garmentPaths,
+      garmentCategories,
       prompt: input.prompt,
     });
   } catch (err) {
@@ -163,7 +179,7 @@ export async function generateVirtualTryOn(
       },
     });
     let remaining = dbUser?.credits ?? 0;
-    if (REAL_VTON) {
+    if (REAL_VTON && result.credits > 0) {
       const updated = await tx.user.update({
         where: { id: user.id },
         data: { credits: { decrement: result.credits } },

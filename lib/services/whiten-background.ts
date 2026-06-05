@@ -4,26 +4,123 @@ import sharp from "sharp";
  * Post-process an AI-generated catalog image to guarantee a pure-white
  * background, regardless of what the model actually produced.
  *
- * The algorithm: build a binary mask of "near-white" pixels (R, G, B all
- * above NEAR_WHITE_THRESHOLD), then flood-fill from every edge pixel that's
- * already in the mask. Only pixels that are both near-white AND connected
- * to the image edge are treated as background — interior white regions of
- * the garment (e.g. a white shirt) are left alone.
+ * Primary strategy (avoids eating white garments that touch the frame):
+ * - Seed the flood fill only from **edge** pixels that are almost pure white
+ *   (RGB min ≥ SEED_MIN).
+ * - Expand only to neighbors with RGB min ≥ EXPAND_MIN (stricter than the
+ *   old single 232 threshold), so slightly dimmer studio walls still fill, but
+ *   a white tee body (often 230–245) does not connect from the edge.
+ *
+ * If that yields almost no background (e.g. flat #ededed studio), we **fall
+ * back** to the legacy edge flood at `threshold` (default 232).
+ *
+ * Finally we **erode** the background mask by a few pixels so any thin
+ * misclassification along the silhouette is flipped back to foreground.
  *
  * Returns two buffers:
  *  - flattened: the original image with background pixels clamped to #ffffff
  *    (suitable for catalog display, JPEG-compressible).
- *  - cutout:   the same image with background pixels made transparent
+ *  cutout:   the same image with background pixels made transparent
  *    (suitable for compositing into virtual try-on / outfit shots).
- *
- * Both are returned so callers can persist whichever variants they need
- * without re-running the segmentation.
  */
+const SEED_MIN = 249;
+const EXPAND_MIN = 246;
+const DEFAULT_LEGACY_THRESHOLD = 232;
+const MIN_BG_FRACTION = 0.012;
+const ERODE_PASSES = 2;
+
+function rgbMin(data: Buffer, px: number): number {
+  const i = px * 4;
+  return Math.min(data[i]!, data[i + 1]!, data[i + 2]!);
+}
+
+function floodFromEdges(
+  data: Buffer,
+  width: number,
+  height: number,
+  total: number,
+  edgeSeed: (px: number) => boolean,
+  expandOk: (px: number) => boolean,
+): Uint8Array {
+  const isBg = new Uint8Array(total);
+  const stack = new Int32Array(total);
+  let top = 0;
+  const push = (px: number) => {
+    if (isBg[px]) return;
+    if (!expandOk(px)) return;
+    isBg[px] = 1;
+    stack[top++] = px;
+  };
+  const seedPush = (px: number) => {
+    if (isBg[px]) return;
+    if (!edgeSeed(px)) return;
+    isBg[px] = 1;
+    stack[top++] = px;
+  };
+
+  for (let x = 0; x < width; x++) {
+    seedPush(x);
+    seedPush((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y++) {
+    seedPush(y * width);
+    seedPush(y * width + (width - 1));
+  }
+
+  while (top > 0) {
+    const px = stack[--top];
+    const x = px % width;
+    const y = (px - x) / width;
+    if (x > 0) push(px - 1);
+    if (x < width - 1) push(px + 1);
+    if (y > 0) push(px - width);
+    if (y < height - 1) push(px + width);
+  }
+  return isBg;
+}
+
+function countBg(isBg: Uint8Array, total: number): number {
+  let n = 0;
+  for (let p = 0; p < total; p++) if (isBg[p]) n++;
+  return n;
+}
+
+/** Remove background pixels that border foreground (shrink false-positive bg). */
+function erodeBackgroundMask(
+  isBg: Uint8Array,
+  width: number,
+  height: number,
+  passes: number,
+): void {
+  const total = width * height;
+  const next = new Uint8Array(total);
+  for (let pass = 0; pass < passes; pass++) {
+    next.fill(0);
+    for (let p = 0; p < total; p++) {
+      if (!isBg[p]) continue;
+      const x = p % width;
+      const y = (p - x) / width;
+      let allNeighborsBg = true;
+      if (x > 0 && !isBg[p - 1]) allNeighborsBg = false;
+      if (x < width - 1 && !isBg[p + 1]) allNeighborsBg = false;
+      if (y > 0 && !isBg[p - width]) allNeighborsBg = false;
+      if (y < height - 1 && !isBg[p + width]) allNeighborsBg = false;
+      if (allNeighborsBg) next[p] = 1;
+    }
+    isBg.set(next);
+  }
+}
+
+export type WhitenBackgroundOptions = {
+  /** Legacy fallback: edge seed + expansion both use this RGB minimum (default 232). */
+  threshold?: number;
+};
+
 export async function whitenBackground(
   input: Buffer,
-  opts: { threshold?: number } = {},
+  opts: WhitenBackgroundOptions = {},
 ): Promise<{ flattened: Buffer; cutout: Buffer }> {
-  const NEAR_WHITE = opts.threshold ?? 232;
+  const legacyMin = opts.threshold ?? DEFAULT_LEGACY_THRESHOLD;
 
   const { data, info } = await sharp(input)
     .ensureAlpha()
@@ -35,49 +132,37 @@ export async function whitenBackground(
   }
 
   const total = width * height;
-  // 0 = unvisited / foreground, 1 = background
-  const isBg = new Uint8Array(total);
-  const nearWhite = (px: number) => {
-    const i = px * 4;
-    return data[i] >= NEAR_WHITE && data[i + 1] >= NEAR_WHITE && data[i + 2] >= NEAR_WHITE;
-  };
 
-  // BFS seeded from every edge pixel that's near-white. A typed-array stack is
-  // significantly faster than a JS array for ~1M pixels.
-  const stack = new Int32Array(total);
-  let top = 0;
-  const push = (px: number) => {
-    if (isBg[px]) return;
-    if (!nearWhite(px)) return;
-    isBg[px] = 1;
-    stack[top++] = px;
-  };
-  for (let x = 0; x < width; x++) {
-    push(x);
-    push((height - 1) * width + x);
-  }
-  for (let y = 0; y < height; y++) {
-    push(y * width);
-    push(y * width + (width - 1));
-  }
-  while (top > 0) {
-    const px = stack[--top];
-    const x = px % width;
-    const y = (px - x) / width;
-    if (x > 0) push(px - 1);
-    if (x < width - 1) push(px + 1);
-    if (y > 0) push(px - width);
-    if (y < height - 1) push(px + width);
+  let isBg = floodFromEdges(
+    data,
+    width,
+    height,
+    total,
+    (px) => rgbMin(data, px) >= SEED_MIN,
+    (px) => rgbMin(data, px) >= EXPAND_MIN,
+  );
+
+  const bgFrac = countBg(isBg, total) / total;
+  if (bgFrac < MIN_BG_FRACTION) {
+    isBg = floodFromEdges(
+      data,
+      width,
+      height,
+      total,
+      (px) => rgbMin(data, px) >= legacyMin,
+      (px) => rgbMin(data, px) >= legacyMin,
+    );
   }
 
-  // Build flattened (RGB only, bg → 255,255,255) and cutout (RGBA, bg → α=0).
+  erodeBackgroundMask(isBg, width, height, ERODE_PASSES);
+
   const flatRgb = Buffer.allocUnsafe(total * 3);
   const cutRgba = Buffer.allocUnsafe(total * 4);
   for (let p = 0; p < total; p++) {
     const di = p * 4;
-    const r = data[di],
-      g = data[di + 1],
-      b = data[di + 2];
+    const r = data[di]!,
+      g = data[di + 1]!,
+      b = data[di + 2]!;
     const bg = isBg[p] === 1;
     const fi = p * 3;
     if (bg) {
@@ -95,7 +180,7 @@ export async function whitenBackground(
       cutRgba[di] = r;
       cutRgba[di + 1] = g;
       cutRgba[di + 2] = b;
-      cutRgba[di + 3] = data[di + 3];
+      cutRgba[di + 3] = data[di + 3]!;
     }
   }
 
