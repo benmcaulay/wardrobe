@@ -1,9 +1,6 @@
+import { signedPublicImageUrl } from "../public-image-url";
+import { serpApiEnabled, serpApiGet } from "./serpapi-client";
 import { pick, range, seededRng } from "./_rng";
-
-// TODO: replace with a real reverse image search call (SerpAPI Google Lens,
-// Bing Visual Search, or TinEye).
-// SerpAPI Google Lens: https://serpapi.com/google-lens-api
-// Bing Visual Search: https://learn.microsoft.com/bing/search-apis/bing-visual-search
 
 export type ProductMatch = {
   name: string;
@@ -15,6 +12,24 @@ export type ProductMatch = {
   thumbnailUrl: string | null;
   /** 0..1 — how confident the match is. Highest first in the returned array. */
   confidence: number;
+};
+
+type LensPrice = {
+  extracted_value?: number;
+  currency?: string;
+};
+
+type LensMatch = {
+  title?: string;
+  link?: string;
+  source?: string;
+  thumbnail?: string;
+  price?: LensPrice | string;
+};
+
+type LensResponse = {
+  visual_matches?: LensMatch[];
+  products?: LensMatch[];
 };
 
 const BRAND_RETAILERS: readonly { brand: string; retailer: string; host: string }[] = [
@@ -53,12 +68,79 @@ const NAME_NOUNS = [
   "Wool Coat",
 ];
 
-/**
- * Look up products that visually match an image. Stub returns 3 deterministic
- * matches (highest confidence first). A real provider should return results of
- * the same shape, sorted by confidence.
- */
-export async function reverseImageSearch(imagePath: string): Promise<ProductMatch[]> {
+function parseLensPrice(price: LensPrice | string | undefined): { cents: number; currency: string } {
+  if (!price) return { cents: 0, currency: "USD" };
+  if (typeof price === "string") {
+    const num = parseFloat(price.replace(/[^0-9.]/g, ""));
+    return {
+      cents: Number.isFinite(num) && num > 0 ? Math.round(num * 100) : 0,
+      currency: "USD",
+    };
+  }
+  const val = price.extracted_value;
+  const currency =
+    price.currency === "¥" ? "JPY" : price.currency === "£" ? "GBP" : price.currency === "€" ? "EUR" : "USD";
+  return {
+    cents: typeof val === "number" && val > 0 ? Math.round(val * 100) : 0,
+    currency: typeof price.currency === "string" && price.currency.length === 3 ? price.currency : currency,
+  };
+}
+
+function mapLensMatch(item: LensMatch, confidence: number): ProductMatch | null {
+  const url = item.link?.trim();
+  const name = item.title?.trim();
+  if (!url || !name) return null;
+
+  const { cents, currency } = parseLensPrice(item.price);
+  const retailer = item.source?.trim() || "Shop";
+
+  return {
+    name,
+    brand: retailer,
+    priceCents: cents,
+    currency,
+    retailer,
+    url,
+    thumbnailUrl: item.thumbnail ?? null,
+    confidence,
+  };
+}
+
+async function reverseImageSearchSerp(imagePath: string): Promise<ProductMatch[]> {
+  const imageUrl = signedPublicImageUrl(imagePath);
+  if (!imageUrl) {
+    console.warn(
+      "[reverseImageSearch] PUBLIC_APP_URL and PUBLIC_IMAGE_SECRET required for Google Lens; using stub.",
+    );
+    return reverseImageSearchStub(imagePath);
+  }
+
+  const data = await serpApiGet<LensResponse>({
+    engine: "google_lens",
+    url: imageUrl,
+    type: "products",
+    hl: "en",
+    country: "us",
+  });
+
+  const rows = [...(data.products ?? []), ...(data.visual_matches ?? [])];
+  const matches: ProductMatch[] = [];
+  const seen = new Set<string>();
+  let confidence = 0.95;
+
+  for (const row of rows) {
+    const m = mapLensMatch(row, confidence);
+    if (!m || seen.has(m.url)) continue;
+    seen.add(m.url);
+    matches.push(m);
+    confidence = Math.max(0.3, confidence - 0.07);
+    if (matches.length >= 10) break;
+  }
+
+  return matches;
+}
+
+function reverseImageSearchStub(imagePath: string): ProductMatch[] {
   const rng = seededRng(`reverseImageSearch:${imagePath}`);
   const count = range(rng, 2, 4);
   const matches: ProductMatch[] = [];
@@ -85,4 +167,19 @@ export async function reverseImageSearch(imagePath: string): Promise<ProductMatc
   }
 
   return matches;
+}
+
+/**
+ * Look up products that visually match an image (Google Lens via SerpAPI when configured).
+ */
+export async function reverseImageSearch(imagePath: string): Promise<ProductMatch[]> {
+  if (serpApiEnabled()) {
+    try {
+      return await reverseImageSearchSerp(imagePath);
+    } catch (err) {
+      console.error("[reverseImageSearch] SerpAPI failed:", (err as Error).message);
+      throw err;
+    }
+  }
+  return reverseImageSearchStub(imagePath);
 }

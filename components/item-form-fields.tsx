@@ -1,17 +1,67 @@
 "use client";
 
+import { useMemo } from "react";
 import type { ItemFormValue, Season } from "@/lib/types";
 import { CATEGORIES, SEASONS } from "@/lib/types";
-import { COMMON_STYLE_TAGS, FAVORITE_COLOR_OPTIONS } from "@/lib/preferences";
+import { NONE_CATEGORY, normalizeCategoryName } from "@/lib/categories";
+import { COMMON_STYLE_TAGS, FAVORITE_COLOR_OPTIONS, normalizeStyleTagName } from "@/lib/preferences";
 
 type Props = {
   value: ItemFormValue;
   onChange: (patch: Partial<ItemFormValue>) => void;
   disabled?: boolean;
+  categories?: string[];
+  /** Ordered style-tag chips (from Settings); defaults to built-ins when omitted. */
+  styleTags?: string[];
 };
 
-export function ItemFormFields({ value, onChange, disabled }: Props) {
+export function ItemFormFields({
+  value,
+  onChange,
+  disabled,
+  categories = CATEGORIES,
+  styleTags = [...COMMON_STYLE_TAGS],
+}: Props) {
   const selectedNames = new Set(value.colors.map((c) => c.name));
+
+  const categoryOptions = useMemo(() => {
+    const source = categories.length > 0 ? categories : CATEGORIES;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of source) {
+      const key = normalizeCategoryName(c);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(c.trim());
+    }
+    const raw = value.category?.trim() ?? "";
+    if (raw) {
+      const key = normalizeCategoryName(raw);
+      if (key && !seen.has(key)) {
+        out.unshift(raw);
+        seen.add(key);
+      }
+    }
+    return out;
+  }, [categories, value.category]);
+
+  /** Must match an <option value> exactly or the browser resets the select. */
+  const selectCategoryValue = useMemo(() => {
+    const raw = value.category?.trim() ?? "";
+    if (!raw || normalizeCategoryName(raw) === normalizeCategoryName(NONE_CATEGORY)) {
+      return NONE_CATEGORY;
+    }
+    const key = normalizeCategoryName(raw);
+    const match = categoryOptions.find((o) => normalizeCategoryName(o) === key);
+    return match ?? raw;
+  }, [categoryOptions, value.category]);
+
+  const tagChips = useMemo(() => {
+    const base = styleTags.length > 0 ? styleTags : [...COMMON_STYLE_TAGS];
+    const keys = new Set(base.map((t) => normalizeStyleTagName(t)));
+    const extras = value.styleTags.filter((t) => !keys.has(normalizeStyleTagName(t)));
+    return [...base, ...extras];
+  }, [styleTags, value.styleTags]);
 
   function toggleColor(hex: string, name: string) {
     if (selectedNames.has(name)) {
@@ -47,13 +97,24 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
       <div className="grid grid-cols-2 gap-4">
         <Field label="Category">
           <select
-            value={value.category}
-            onChange={(e) => onChange({ category: e.target.value as ItemFormValue["category"] })}
+            value={selectCategoryValue}
+            onChange={(e) => {
+              const picked = e.target.value;
+              if (picked === NONE_CATEGORY) {
+                if (value.category !== NONE_CATEGORY) onChange({ category: NONE_CATEGORY });
+                return;
+              }
+              const key = normalizeCategoryName(picked);
+              const canonical =
+                categoryOptions.find((o) => normalizeCategoryName(o) === key) ?? picked;
+              if (canonical !== value.category) onChange({ category: canonical });
+            }}
             disabled={disabled}
             className={inputCls}
           >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
+            <option value={NONE_CATEGORY}>{NONE_CATEGORY}</option>
+            {categoryOptions.map((c) => (
+              <option key={normalizeCategoryName(c)} value={c}>
                 {c}
               </option>
             ))}
@@ -153,7 +214,7 @@ export function ItemFormFields({ value, onChange, disabled }: Props) {
 
       <Field label="Style tags">
         <div className="flex flex-wrap gap-2">
-          {[...new Set([...COMMON_STYLE_TAGS, ...value.styleTags])].map((tag) => {
+          {tagChips.map((tag) => {
             const checked = value.styleTags.includes(tag);
             return (
               <label

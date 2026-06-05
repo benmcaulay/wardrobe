@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { canonicalCategoryChoice, getCategoriesListFromPrefs } from "@/lib/categories";
 import { prisma } from "@/lib/db";
-import { parseColors, parseSeasons, parseStringArray } from "@/lib/json";
-import type { Category, ItemFormValue } from "@/lib/types";
+import { parseColors, parseSeasons, parseStringArray, parseStylePrefs } from "@/lib/json";
+import { getStyleTagsListFromPrefs } from "@/lib/preferences";
+import type { ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
 import { ImageCarousel } from "./image-carousel";
 
-type StoredGhostView = { label: string; imagePath: string };
+type StoredGhostView = { label: string; imagePath: string; mirror: boolean; thumbZoom: number };
 
 function formatDate(d: Date) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -17,14 +19,17 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
   const user = await requireUser();
   const [item, dbUser] = await Promise.all([
     prisma.wardrobeItem.findFirst({ where: { id: params.itemId, userId: user.id } }),
-    prisma.user.findUnique({ where: { id: user.id }, select: { credits: true } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { credits: true, stylePrefs: true } }),
   ]);
   if (!item) notFound();
+  const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  const categories = getCategoriesListFromPrefs(prefs);
+  const styleTagsList = getStyleTagsListFromPrefs(prefs);
 
   const initial: ItemFormValue = {
     name: item.name,
     brand: item.brand ?? "",
-    category: item.category as Category,
+    category: canonicalCategoryChoice(item.category, categories),
     subcategory: item.subcategory ?? "",
     colors: parseColors(item.colors),
     priceCents: item.priceCents,
@@ -40,12 +45,29 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
   // Parse ghost views; fall back to synthesising one from ghostImagePath for old items
   let ghostViews: StoredGhostView[] = [];
   try {
-    if (item.ghostViews) ghostViews = JSON.parse(item.ghostViews) as StoredGhostView[];
+    if (item.ghostViews) {
+      const parsed = JSON.parse(item.ghostViews) as Array<{
+        label?: string;
+        imagePath?: string;
+        mirror?: boolean;
+        thumbZoom?: number;
+      }>;
+      ghostViews = parsed
+        .filter((v): v is { label: string; imagePath: string; mirror?: boolean; thumbZoom?: number } =>
+          typeof v?.label === "string" && typeof v?.imagePath === "string",
+        )
+        .map((v) => ({
+          label: v.label,
+          imagePath: v.imagePath,
+          mirror: !!v.mirror,
+          thumbZoom: typeof v.thumbZoom === "number" ? v.thumbZoom : 1,
+        }));
+    }
   } catch {
     // ignore
   }
   if (ghostViews.length === 0 && item.ghostImagePath) {
-    ghostViews = [{ label: "Ghost", imagePath: item.ghostImagePath }];
+    ghostViews = [{ label: "Ghost", imagePath: item.ghostImagePath, mirror: false, thumbZoom: 1 }];
   }
 
   const extraPaths = parseStringArray(item.extraImagePaths ?? "[]");
@@ -63,7 +85,10 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
           <ImageCarousel
             itemId={item.id}
             originalPath={item.originalImagePath}
+            originalThumbZoom={item.originalThumbZoom ?? 1}
+            originalMirror={item.originalMirror ?? false}
             ghostViews={ghostViews}
+            primaryGhostPath={item.ghostImagePath}
             extraImagePaths={extraPaths}
             credits={dbUser?.credits ?? 0}
           />
@@ -84,7 +109,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
         </div>
 
         <div>
-          <EditForm itemId={item.id} initial={initial} />
+          <EditForm itemId={item.id} initial={initial} categories={categories} styleTagsList={styleTagsList} />
         </div>
       </div>
     </main>

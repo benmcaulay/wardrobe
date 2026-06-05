@@ -5,7 +5,11 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { encode } from "@/lib/json";
+import { productMatchToFormPatch } from "@/lib/product-match";
 import { runPrefill, type PrefillBundle } from "@/lib/prefill";
+import type { ProductMatch } from "@/lib/services/reverseImageSearch";
+import { scrapeProduct } from "@/lib/services/productScraper";
+import { searchWebProducts } from "@/lib/services/webProductSearch";
 import type { ItemFormValue } from "@/lib/types";
 
 export type AnalyzeUploadResponse =
@@ -16,6 +20,41 @@ export type AnalyzeUploadResponse =
       thumbnailImagePath: string;
       bundle: PrefillBundle;
     };
+
+export type SearchWebProductsResponse =
+  | { ok: true; matches: ProductMatch[] }
+  | { ok: false; error: string };
+
+export async function searchWebProductsAction(query: string): Promise<SearchWebProductsResponse> {
+  await requireUser();
+  const q = query.trim();
+  if (!q) return { ok: false, error: "Enter a search term" };
+  try {
+    const matches = await searchWebProducts(q);
+    return { ok: true, matches };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? "Search failed" };
+  }
+}
+
+export type ApplyProductMatchResponse =
+  | { ok: true; patch: Partial<ItemFormValue> }
+  | { ok: false; error: string };
+
+/** Scrape listing URL and return form fields to merge on the client. */
+export async function applyProductMatchAction(
+  match: ProductMatch,
+): Promise<ApplyProductMatchResponse> {
+  await requireUser();
+  try {
+    const scraped = await scrapeProduct(match.url);
+    const patch = productMatchToFormPatch(match, scraped);
+    const { retailer: _r, productUrl: _u, ...formPatch } = patch;
+    return { ok: true, patch: formPatch };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? "Could not load product" };
+  }
+}
 
 export async function analyzeUpload(formData: FormData): Promise<AnalyzeUploadResponse> {
   const user = await requireUser();
@@ -68,6 +107,8 @@ export type GhostViewInput = {
   label: string;
   imagePath: string;
   creditsUsed: number;
+  mirror?: boolean;
+  thumbZoom?: number;
 };
 
 export type CreateItemInput = ItemFormValue & {
@@ -127,7 +168,14 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
       originalImagePath: input.originalImagePath,
       ghostImagePath: input.ghostImagePath ?? null,
       ghostViews: input.ghostViews?.length
-        ? encode(input.ghostViews.map(({ label, imagePath }) => ({ label, imagePath })))
+        ? encode(
+            input.ghostViews.map(({ label, imagePath, mirror, thumbZoom }) => ({
+              label,
+              imagePath,
+              mirror: !!mirror,
+              thumbZoom: typeof thumbZoom === "number" ? thumbZoom : 1,
+            })),
+          )
         : null,
       extraImagePaths: input.extraImagePaths?.length ? encode(input.extraImagePaths) : null,
       isWishlist: input.isWishlist,

@@ -1,17 +1,21 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
 import type { ItemFormValue } from "@/lib/types";
 import { updateItem, wearToday, deleteItem } from "./actions";
 
+const AUTOSAVE_MS = 600;
+
 type Props = {
   itemId: string;
   initial: ItemFormValue;
+  categories: string[];
+  styleTagsList: string[];
 };
 
-export function EditForm({ itemId, initial }: Props) {
+export function EditForm({ itemId, initial, categories, styleTagsList }: Props) {
   const [value, setValue] = useState<ItemFormValue>(initial);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -19,21 +23,48 @@ export function EditForm({ itemId, initial }: Props) {
   const [, startTransition] = useTransition();
   const router = useRouter();
 
-  const dirty = JSON.stringify(value) !== JSON.stringify(initial);
+  const baselineRef = useRef(JSON.stringify(initial));
+  const saveGenRef = useRef(0);
+  const prevItemIdRef = useRef(itemId);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
+  useEffect(() => {
+    if (prevItemIdRef.current === itemId) return;
+    prevItemIdRef.current = itemId;
+    setValue(initial);
+    baselineRef.current = JSON.stringify(initial);
+    setSavedAt(null);
     setError(null);
-    const res = await updateItem({ itemId, ...value });
-    setSaving(false);
-    if (!res.ok) {
-      setError(res.error);
+  }, [itemId, initial]);
+
+  useEffect(() => {
+    const snapshot = JSON.stringify(value);
+    if (snapshot === baselineRef.current) return;
+
+    if (!value.name.trim()) {
+      setError("Name is required to save");
       return;
     }
-    setSavedAt(Date.now());
-    router.refresh();
-  }
+
+    const timer = setTimeout(() => {
+      const gen = ++saveGenRef.current;
+      void (async () => {
+        setSaving(true);
+        setError(null);
+        const res = await updateItem({ itemId, ...value });
+        if (gen !== saveGenRef.current) return;
+        setSaving(false);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        baselineRef.current = snapshot;
+        setSavedAt(Date.now());
+        router.refresh();
+      })();
+    }, AUTOSAVE_MS);
+
+    return () => clearTimeout(timer);
+  }, [value, itemId, router]);
 
   async function onWear() {
     startTransition(async () => {
@@ -50,7 +81,7 @@ export function EditForm({ itemId, initial }: Props) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -68,26 +99,24 @@ export function EditForm({ itemId, initial }: Props) {
         </button>
       </div>
 
-      <ItemFormFields value={value} onChange={(p) => setValue((v) => ({ ...v, ...p }))} disabled={saving} />
-
-      {error && (
-        <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-          {error}
+      <div className="flex items-center justify-end min-h-[1.25rem]">
+        <p className="text-[11px] text-ink-muted" aria-live="polite">
+          {saving ? (
+            "Saving…"
+          ) : error ? (
+            <span className="text-red-700">{error}</span>
+          ) : savedAt ? (
+            "Saved"
+          ) : null}
         </p>
-      )}
-
-      <div className="flex items-center gap-3 pt-2">
-        <button
-          type="submit"
-          disabled={saving || !dirty || !value.name.trim()}
-          className="rounded-full bg-ink text-paper px-6 py-2.5 text-sm tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save changes"}
-        </button>
-        {!dirty && savedAt && (
-          <span className="text-xs text-ink-muted">Saved</span>
-        )}
       </div>
-    </form>
+
+      <ItemFormFields
+        value={value}
+        onChange={(p) => setValue((v) => ({ ...v, ...p }))}
+        categories={categories}
+        styleTags={styleTagsList}
+      />
+    </div>
   );
 }

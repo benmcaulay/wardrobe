@@ -1,27 +1,53 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type ChangeEvent,
+  type RefObject,
+} from "react";
 import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
+import { ProductSearchPanel } from "@/components/product-search-panel";
+import { CreditMark } from "@/components/credit-mark";
 import { ImageCropper } from "@/components/image-cropper";
+import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
 import { imageUrl } from "@/lib/image-paths";
+import { canonicalCategoryChoice } from "@/lib/categories";
 import { previewGhostMannequin } from "@/lib/actions/ghost-mannequin";
 import { mapCategoryToGhost } from "@/lib/services/ghost-mannequin-shared";
 import type { ItemFormValue } from "@/lib/types";
+import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import {
   analyzeUpload,
+  applyProductMatchAction,
   createItem,
   discardUpload,
   discardExtraImage,
   saveExtraImage,
+  searchWebProductsAction,
   type AnalyzeUploadResponse,
 } from "./actions";
 
 type AnalyzeOk = Extract<AnalyzeUploadResponse, { ok: true }>;
 
 type ExtraImage = { id: string; path: string; previewUrl: string };
-type GhostView = { id: string; label: string; imagePath: string; creditsUsed: number };
-type PickImageState = { selectedExtraIds: string[]; label: string };
+type GhostView = {
+  id: string;
+  label: string;
+  imagePath: string;
+  creditsUsed: number;
+};
+type PickImageState = {
+  selectedExtraIds: string[];
+  label: string;
+  instructions: string;
+  /** `null` = main listing crop is the model's first input */
+  primaryExtraId: string | null;
+  compositionHint: "default" | "rear";
+};
 
 type ReadyState = {
   kind: "ready";
@@ -47,6 +73,9 @@ type FlowState =
 type Props = {
   credits: number;
   autoGenerateGhost: boolean;
+  categories: string[];
+  styleTagsList: string[];
+  webMatchAutofill: boolean;
 };
 
 function getClipboardImageFile(e: ClipboardEvent): File | null {
@@ -55,12 +84,37 @@ function getClipboardImageFile(e: ClipboardEvent): File | null {
   return item ? item.getAsFile() : null;
 }
 
-export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Props) {
+/** Matches server `ALLOWED_MIME` (lib/uploads). */
+const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+
+function clearFileInputs(...refs: Array<RefObject<HTMLInputElement | null>>) {
+  for (const r of refs) {
+    if (r.current) r.current.value = "";
+  }
+}
+
+export function AddItemFlow({
+  credits: initialCredits,
+  autoGenerateGhost,
+  categories,
+  styleTagsList,
+  webMatchAutofill,
+}: Props) {
   const [state, setState] = useState<FlowState>({ kind: "idle" });
   const [credits, setCredits] = useState(initialCredits);
   const [, startTransition] = useTransition();
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [webcam, setWebcam] = useState<null | { facing: "environment" | "user" }>(null);
+  const [pendingFormPatch, setPendingFormPatch] = useState<Partial<ItemFormValue> | null>(null);
+  const [selectedWebProductUrl, setSelectedWebProductUrl] = useState<string | null>(null);
+  const webcamHandlerRef = useRef<(file: File) => void>(() => {});
+
+  function openWebcamCapture(facing: "environment" | "user", onFile: (file: File) => void) {
+    webcamHandlerRef.current = onFile;
+    setWebcam({ facing });
+  }
+
+  const libraryInputRef = useRef<HTMLInputElement>(null);
   const extraInputRef = useRef<HTMLInputElement>(null);
 
   // Stable ref to current paste handler so we only register one listener
@@ -134,6 +188,32 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     }
   };
 
+  async function onSelectWebProduct(match: ProductMatch) {
+    setSelectedWebProductUrl(match.url);
+    const res = await applyProductMatchAction(match);
+    if (!res.ok) {
+      setState((s) => {
+        if (s.kind === "idle") return { ...s, error: res.error };
+        if (s.kind === "ready") return { ...s, ghostError: res.error };
+        return s;
+      });
+      return;
+    }
+    setState((s) => {
+      if (s.kind === "ready") {
+        return { ...s, ghostError: null, value: { ...s.value, ...res.patch } };
+      }
+      return s;
+    });
+    setPendingFormPatch((prev) => ({ ...prev, ...res.patch }));
+  }
+
+  async function runWebSearch(query: string): Promise<ProductMatch[]> {
+    const res = await searchWebProductsAction(query);
+    if (!res.ok) throw new Error(res.error);
+    return res.matches;
+  }
+
   async function handleCroppedBlob(blob: Blob) {
     if (state.kind === "cropping") URL.revokeObjectURL(state.sourceUrl);
 
@@ -152,6 +232,7 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     }
 
     const prefill = analyzeRes.bundle.prefill;
+    const merged = { ...prefill, ...pendingFormPatch };
     const ready: ReadyState = {
       kind: "ready",
       previewUrl,
@@ -162,41 +243,50 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
       ghostError: null,
       extras: [],
       value: {
-        name: prefill.name,
-        brand: prefill.brand,
-        category: prefill.category,
-        subcategory: prefill.subcategory,
-        colors: prefill.colors,
-        priceCents: prefill.priceCents,
-        currency: prefill.currency,
-        material: prefill.material,
-        pattern: prefill.pattern ?? "",
-        styleTags: prefill.styleTags,
-        season: prefill.season,
+        name: merged.name ?? "",
+        brand: merged.brand ?? "",
+        category: canonicalCategoryChoice(merged.category, categories),
+        subcategory: merged.subcategory ?? "",
+        colors: merged.colors ?? [],
+        priceCents: merged.priceCents ?? null,
+        currency: merged.currency ?? "USD",
+        material: merged.material ?? "",
+        pattern: merged.pattern ?? "",
+        styleTags: merged.styleTags ?? [],
+        season: merged.season ?? [],
         notes: "",
         isWishlist: false,
       },
       pickingImages: null,
     };
     setState(ready);
+    setPendingFormPatch(null);
 
     if (autoGenerateGhost && credits > 0) {
-      // No extras yet at this point, so generate immediately
-      await runGhost([], "", ready);
+      await runGhost(
+        {
+          selectedExtraIds: [],
+          label: "",
+          instructions: "",
+          primaryExtraId: null,
+          compositionHint: "default",
+        },
+        ready,
+      );
     }
   }
 
   function cancelCrop() {
     if (state.kind === "cropping") URL.revokeObjectURL(state.sourceUrl);
     setState({ kind: "idle" });
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    clearFileInputs(libraryInputRef);
   }
 
   function patchValue(patch: Partial<ItemFormValue>) {
     setState((s) => (s.kind === "ready" ? { ...s, value: { ...s.value, ...patch } } : s));
   }
 
-  async function runGhost(selectedExtraIds: string[], label: string, snapshot?: ReadyState) {
+  async function runGhost(pick: PickImageState, snapshot?: ReadyState) {
     setState((s) =>
       s.kind === "ready"
         ? { ...s, generatingGhost: true, ghostError: null, pickingImages: null }
@@ -206,17 +296,26 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
     if (!current) return;
 
     const selectedExtras = current.extras
-      .filter((e) => selectedExtraIds.includes(e.id))
+      .filter((e) => pick.selectedExtraIds.includes(e.id))
       .map((e) => e.path);
+
+    const primaryOverridePath =
+      pick.primaryExtraId === null
+        ? undefined
+        : current.extras.find((e) => e.id === pick.primaryExtraId)?.path;
 
     const defaultLabel =
       current.ghostViews.length === 0 ? "Ghost" : `View ${current.ghostViews.length + 1}`;
-    const viewLabel = label.trim() || defaultLabel;
+    const viewLabel = pick.label.trim() || defaultLabel;
+    const instructionsTrimmed = pick.instructions.trim();
 
     const res = await previewGhostMannequin({
       garmentImagePath: current.analyze.originalImagePath,
       extraImagePaths: selectedExtras,
+      primaryGarmentPathOverride: primaryOverridePath,
       category: mapCategoryToGhost(current.value.category),
+      instructions: instructionsTrimmed || undefined,
+      compositionHint: pick.compositionHint,
     });
 
     setState((s) => {
@@ -241,22 +340,20 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
 
   function requestGhost() {
     if (state.kind !== "ready") return;
-    if (state.extras.length > 0) {
-      // Show image picker so user can choose which extras to include
-      setState((s) =>
-        s.kind === "ready"
-          ? {
-              ...s,
-              pickingImages: {
-                selectedExtraIds: s.extras.map((e) => e.id),
-                label: "",
-              },
-            }
-          : s,
-      );
-    } else {
-      void runGhost([], "");
-    }
+    setState((s) =>
+      s.kind === "ready"
+        ? {
+            ...s,
+            pickingImages: {
+              selectedExtraIds: s.extras.map((e) => e.id),
+              label: "Front",
+              instructions: "",
+              primaryExtraId: null,
+              compositionHint: "default",
+            },
+          }
+        : s,
+    );
   }
 
   async function removeExtra(id: string) {
@@ -273,6 +370,8 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
               ? {
                   ...s.pickingImages,
                   selectedExtraIds: s.pickingImages.selectedExtraIds.filter((x) => x !== id),
+                  primaryExtraId:
+                    s.pickingImages.primaryExtraId === id ? null : s.pickingImages.primaryExtraId,
                 }
               : null,
           }
@@ -339,14 +438,33 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
       }
     }
     setState({ kind: "idle" });
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (extraInputRef.current) extraInputRef.current.value = "";
+    setPendingFormPatch(null);
+    setSelectedWebProductUrl(null);
+    clearFileInputs(libraryInputRef, extraInputRef);
   }
 
   return (
     <div className="space-y-8">
       {state.kind === "idle" && (
-        <IdleView onFile={handleFile} fileInputRef={fileInputRef} error={state.error} />
+        <>
+          <ProductSearchPanel
+            title="Search the web"
+            hint={
+              webMatchAutofill
+                ? "Find a listing first, then add your garment photo. Fields pre-fill when you pick a result."
+                : "Optional: search for a listing and pick one to copy details into the form after you add a photo."
+            }
+            onSearch={runWebSearch}
+            onSelect={(m) => void onSelectWebProduct(m)}
+            selectedUrl={selectedWebProductUrl}
+          />
+          <IdleView
+            onFile={handleFile}
+            libraryInputRef={libraryInputRef}
+            onTakePhoto={() => openWebcamCapture("environment", handleFile)}
+            error={state.error}
+          />
+        </>
       )}
 
       {state.kind === "cropping" && (
@@ -358,11 +476,18 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
       {state.kind === "ready" && (
         <ReadyView
           state={state}
+          categories={categories}
+          styleTagsList={styleTagsList}
           credits={credits}
           extraInputRef={extraInputRef}
+          onTakePhotoExtra={() => openWebcamCapture("environment", addExtra)}
+          webMatchAutofill={webMatchAutofill}
+          onSearchWeb={runWebSearch}
+          onSelectWebProduct={(m) => void onSelectWebProduct(m)}
+          selectedWebProductUrl={selectedWebProductUrl}
           onChange={patchValue}
           onRequestGhost={requestGhost}
-          onConfirmPick={(selectedExtraIds, label) => void runGhost(selectedExtraIds, label)}
+          onConfirmPick={(pick) => void runGhost(pick)}
           onCancelPick={() =>
             setState((s) => (s.kind === "ready" ? { ...s, pickingImages: null } : s))
           }
@@ -370,13 +495,18 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
             setState((s) => {
               if (s.kind !== "ready" || !s.pickingImages) return s;
               const sel = s.pickingImages.selectedExtraIds;
+              const wasSelected = sel.includes(id);
+              const selectedExtraIds = wasSelected ? sel.filter((x) => x !== id) : [...sel, id];
+              const primaryExtraId =
+                wasSelected && s.pickingImages.primaryExtraId === id
+                  ? null
+                  : s.pickingImages.primaryExtraId;
               return {
                 ...s,
                 pickingImages: {
                   ...s.pickingImages,
-                  selectedExtraIds: sel.includes(id)
-                    ? sel.filter((x) => x !== id)
-                    : [...sel, id],
+                  selectedExtraIds,
+                  primaryExtraId,
                 },
               };
             })
@@ -385,6 +515,38 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
             setState((s) =>
               s.kind === "ready" && s.pickingImages
                 ? { ...s, pickingImages: { ...s.pickingImages, label } }
+                : s,
+            )
+          }
+          onPickInstructionsChange={(instructions) =>
+            setState((s) =>
+              s.kind === "ready" && s.pickingImages
+                ? { ...s, pickingImages: { ...s.pickingImages, instructions } }
+                : s,
+            )
+          }
+          onPickPrimaryChange={(primaryExtraId) =>
+            setState((s) =>
+              s.kind === "ready" && s.pickingImages
+                ? {
+                    ...s,
+                    pickingImages: {
+                      ...s.pickingImages,
+                      primaryExtraId,
+                      selectedExtraIds:
+                        primaryExtraId !== null &&
+                        !s.pickingImages.selectedExtraIds.includes(primaryExtraId)
+                          ? [...s.pickingImages.selectedExtraIds, primaryExtraId]
+                          : s.pickingImages.selectedExtraIds,
+                    },
+                  }
+                : s,
+            )
+          }
+          onPickCompositionChange={(compositionHint) =>
+            setState((s) =>
+              s.kind === "ready" && s.pickingImages
+                ? { ...s, pickingImages: { ...s.pickingImages, compositionHint } }
                 : s,
             )
           }
@@ -418,20 +580,37 @@ export function AddItemFlow({ credits: initialCredits, autoGenerateGhost }: Prop
           </button>
         </div>
       )}
+
+      <WebcamCaptureModal
+        open={webcam !== null}
+        preferredFacing={webcam?.facing ?? "environment"}
+        title="Take a photo"
+        onClose={() => setWebcam(null)}
+        onCapture={(file) => webcamHandlerRef.current(file)}
+      />
     </div>
   );
 }
 
 function IdleView({
   onFile,
-  fileInputRef,
+  libraryInputRef,
+  onTakePhoto,
   error,
 }: {
   onFile: (f: File) => void;
-  fileInputRef: React.RefObject<HTMLInputElement>;
+  libraryInputRef: RefObject<HTMLInputElement | null>;
+  onTakePhoto: () => void;
   error?: string;
 }) {
   const [dragActive, setDragActive] = useState(false);
+
+  function onInputChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) onFile(file);
+    e.target.value = "";
+  }
+
   return (
     <div>
       <div
@@ -450,29 +629,39 @@ function IdleView({
           dragActive ? "border-accent bg-accent-soft/20" : "border-ink/15 bg-paper-warm"
         }`}
       >
-        <p className="font-serif text-2xl">Drop a photo here</p>
+        <p className="font-serif text-2xl">Add a garment photo</p>
         <p className="text-ink-muted text-sm mt-2">JPG, PNG or WebP · up to 10 MB</p>
-        <p className="text-ink-muted text-xs mt-1">or paste from clipboard</p>
-        <div className="mt-6 flex justify-center gap-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onFile(file);
-            }}
-          />
+        <p className="text-ink-muted text-xs mt-1">Drop, paste, use the webcam, or choose a file</p>
+        <input
+          ref={libraryInputRef}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          className="hidden"
+          aria-hidden
+          onChange={onInputChange}
+        />
+        <div className="mt-6 flex flex-col sm:flex-row justify-center gap-2 sm:gap-3">
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={onTakePhoto}
             className="rounded-full bg-ink text-paper px-6 py-2 text-sm tracking-wide hover:bg-ink-soft transition"
+            aria-label="Take photo with camera"
           >
-            Pick a file
+            Take photo
+          </button>
+          <button
+            type="button"
+            onClick={() => libraryInputRef.current?.click()}
+            className="rounded-full border border-ink/15 bg-white px-6 py-2 text-sm tracking-wide hover:bg-paper-warm transition"
+            aria-label="Choose image from photo library or files"
+          >
+            Choose file
           </button>
         </div>
+        <p className="text-ink-muted text-[11px] mt-4 max-w-md mx-auto leading-relaxed">
+          Take photo uses your browser&apos;s camera (built-in webcam on Mac, camera on phone).
+          Choose file only if you want an existing image from disk or Photos.
+        </p>
       </div>
       {error && (
         <p
@@ -538,9 +727,17 @@ function VariantPanel({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl overflow-hidden bg-paper-warm aspect-square shadow-tile">
+      <div
+        className={`rounded-2xl overflow-hidden aspect-square shadow-tile ring-1 ring-inset ring-black/[0.05] ${
+          activeGhost ? "bg-neutral-100" : "bg-paper-warm"
+        }`}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={activeSrc} alt={activeAlt} className="w-full h-full object-cover" />
+        <img
+          src={activeSrc}
+          alt={activeAlt}
+          className="w-full h-full object-cover"
+        />
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1">
         <ViewThumb
@@ -636,8 +833,12 @@ function ImagePickerPanel({
   extras,
   pickState,
   generating,
+  hasExistingGhostViews,
   onToggleExtra,
   onLabelChange,
+  onInstructionsChange,
+  onPrimaryChange,
+  onCompositionChange,
   onGenerate,
   onCancel,
 }: {
@@ -645,16 +846,74 @@ function ImagePickerPanel({
   extras: ExtraImage[];
   pickState: PickImageState;
   generating: boolean;
+  hasExistingGhostViews: boolean;
   onToggleExtra: (id: string) => void;
   onLabelChange: (label: string) => void;
+  onInstructionsChange: (instructions: string) => void;
+  onPrimaryChange: (primaryExtraId: string | null) => void;
+  onCompositionChange: (hint: "default" | "rear") => void;
   onGenerate: () => void;
   onCancel: () => void;
 }) {
+  const canGenerate = pickState.label.trim().length > 0;
+
   return (
     <div className="space-y-3 rounded-xl border border-ink/10 bg-paper-warm p-3">
-      <p className="text-xs font-medium">Select images for this view</p>
+      <div>
+        <p className="text-xs font-medium">
+          {hasExistingGhostViews ? "Generate another view" : "Generate ghost mannequin"}
+        </p>
+        <p className="text-[11px] text-ink-muted mt-1">
+          Name this view. The <span className="font-medium">first image</span> the model sees drives
+          pose — add a separate back photo, set it as the main source, choose &quot;Back / rear
+          catalog&quot;, then generate.
+        </p>
+      </div>
 
-      {/* Garment image — always included */}
+      <p className="text-[10px] uppercase tracking-wide text-ink-muted">Main photo for this render</p>
+      <select
+        value={pickState.primaryExtraId ?? "__listing__"}
+        onChange={(e) => {
+          const v = e.target.value;
+          onPrimaryChange(v === "__listing__" ? null : v);
+        }}
+        className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper focus:outline-none focus:border-ink/40"
+      >
+        <option value="__listing__">Listing photo (cropped main)</option>
+        {extras.map((extra, i) => (
+          <option key={extra.id} value={extra.id}>
+            Extra source {i + 1}
+          </option>
+        ))}
+      </select>
+
+      <fieldset className="space-y-1.5 border-0 p-0 m-0">
+        <legend className="text-[10px] uppercase tracking-wide text-ink-muted">Catalog angle</legend>
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="radio"
+            name="add-flow-composition"
+            checked={pickState.compositionHint === "default"}
+            onChange={() => onCompositionChange("default")}
+            className="accent-ink"
+          />
+          Front (default)
+        </label>
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="radio"
+            name="add-flow-composition"
+            checked={pickState.compositionHint === "rear"}
+            onChange={() => onCompositionChange("rear")}
+            className="accent-ink"
+          />
+          Back / rear catalog
+        </label>
+      </fieldset>
+
+      <p className="text-[11px] text-ink-muted font-medium">Context images for this generation</p>
+
+      {/* Garment image */}
       <div className="flex items-center gap-2">
         <div className="w-5 h-5 rounded flex items-center justify-center bg-ink/10 border border-ink/20 flex-shrink-0">
           <svg className="w-3 h-3 text-ink" viewBox="0 0 12 12" fill="currentColor">
@@ -665,7 +924,9 @@ function ImagePickerPanel({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={previewUrl} alt="Garment" className="w-full h-full object-cover" />
         </div>
-        <span className="text-xs text-ink-muted">Garment photo (always included)</span>
+        <span className="text-xs text-ink-muted">
+          Listing photo{pickState.primaryExtraId ? " (included as context)" : " (main input)"}
+        </span>
       </div>
 
       {extras.map((extra) => {
@@ -687,19 +948,33 @@ function ImagePickerPanel({
         );
       })}
 
-      <input
-        type="text"
-        placeholder="Label this view (e.g. Front, Back, Inside…)"
-        value={pickState.label}
-        onChange={(e) => onLabelChange(e.target.value)}
-        className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40"
-      />
-
+      <label className="block space-y-1">
+        <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
+        <input
+          type="text"
+          placeholder="e.g. Front flat lay, Back with collar…"
+          value={pickState.label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[10px] uppercase tracking-wide text-ink-muted">
+          Instructions for the model (optional)
+        </span>
+        <textarea
+          placeholder="Context or directions for this render…"
+          value={pickState.instructions}
+          onChange={(e) => onInstructionsChange(e.target.value)}
+          rows={3}
+          className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40 resize-none min-h-[4rem]"
+        />
+      </label>
       <div className="flex gap-2 pt-1">
         <button
           type="button"
           onClick={onGenerate}
-          disabled={generating}
+          disabled={generating || !canGenerate}
           className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
         >
           {generating ? "Generating…" : "Generate"}
@@ -718,14 +993,24 @@ function ImagePickerPanel({
 
 function ReadyView({
   state,
+  categories,
+  styleTagsList,
   credits,
   extraInputRef,
+  webMatchAutofill,
+  onTakePhotoExtra,
+  onSearchWeb,
+  onSelectWebProduct,
+  selectedWebProductUrl,
   onChange,
   onRequestGhost,
   onConfirmPick,
   onCancelPick,
   onTogglePickExtra,
   onPickLabelChange,
+  onPickInstructionsChange,
+  onPickPrimaryChange,
+  onPickCompositionChange,
   onActivateView,
   onRemoveGhostView,
   onAddExtra,
@@ -734,14 +1019,24 @@ function ReadyView({
   onDiscard,
 }: {
   state: ReadyState;
+  categories: string[];
+  styleTagsList: string[];
   credits: number;
-  extraInputRef: React.RefObject<HTMLInputElement>;
+  extraInputRef: RefObject<HTMLInputElement | null>;
+  webMatchAutofill: boolean;
+  onTakePhotoExtra: () => void;
+  onSearchWeb: (query: string) => Promise<ProductMatch[]>;
+  onSelectWebProduct: (match: ProductMatch) => void;
+  selectedWebProductUrl: string | null;
   onChange: (patch: Partial<ItemFormValue>) => void;
   onRequestGhost: () => void;
-  onConfirmPick: (selectedExtraIds: string[], label: string) => void;
+  onConfirmPick: (pick: PickImageState) => void;
   onCancelPick: () => void;
   onTogglePickExtra: (id: string) => void;
   onPickLabelChange: (label: string) => void;
+  onPickInstructionsChange: (instructions: string) => void;
+  onPickPrimaryChange: (primaryExtraId: string | null) => void;
+  onPickCompositionChange: (hint: "default" | "rear") => void;
   onActivateView: (id: string | null) => void;
   onRemoveGhostView: (id: string) => void;
   onAddExtra: (file: File) => void;
@@ -773,7 +1068,10 @@ function ReadyView({
         <div className="rounded-2xl border border-ink/10 p-4 space-y-3">
           <div className="flex items-baseline justify-between">
             <h3 className="text-xs uppercase tracking-wide text-ink-muted">Ghost mannequin</h3>
-            <span className="text-[10px] text-ink-muted">✨ {credits} credits</span>
+            <span className="inline-flex items-center gap-1 text-[10px] text-ink-muted">
+              <CreditMark className="h-3 w-3 shrink-0" title="Credits" />
+              {credits} credits
+            </span>
           </div>
 
           {state.pickingImages ? (
@@ -784,9 +1082,12 @@ function ReadyView({
               generating={state.generatingGhost}
               onToggleExtra={onTogglePickExtra}
               onLabelChange={onPickLabelChange}
+              onInstructionsChange={onPickInstructionsChange}
+              onPrimaryChange={onPickPrimaryChange}
+              onCompositionChange={onPickCompositionChange}
+              hasExistingGhostViews={state.ghostViews.length > 0}
               onGenerate={() =>
-                state.pickingImages &&
-                onConfirmPick(state.pickingImages.selectedExtraIds, state.pickingImages.label)
+                state.pickingImages && onConfirmPick(state.pickingImages)
               }
               onCancel={onCancelPick}
             />
@@ -826,7 +1127,7 @@ function ReadyView({
           <p className="text-[11px] text-ink-muted">
             Add extra shots (back, label, full-body wear). You can choose which ones to
             include when generating each ghost view — useful for front/back or reversible items.
-            Paste from clipboard or pick a file.
+            Paste from clipboard, take a photo, or pick files.
           </p>
           {state.extras.length > 0 && (
             <ul className="grid grid-cols-3 gap-2">
@@ -852,22 +1153,34 @@ function ReadyView({
           <input
             ref={extraInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept={IMAGE_ACCEPT}
             multiple
             className="hidden"
+            aria-hidden
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               files.forEach(onAddExtra);
               if (extraInputRef.current) extraInputRef.current.value = "";
             }}
           />
-          <button
-            type="button"
-            onClick={() => extraInputRef.current?.click()}
-            className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper-warm transition"
-          >
-            + Add photos
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onTakePhotoExtra}
+              className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper-warm transition"
+              aria-label="Take photo for context"
+            >
+              Take photo
+            </button>
+            <button
+              type="button"
+              onClick={() => extraInputRef.current?.click()}
+              className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper-warm transition"
+              aria-label="Add photos from library or files"
+            >
+              Add from files
+            </button>
+          </div>
         </div>
       </div>
 
@@ -878,7 +1191,25 @@ function ReadyView({
         }}
         className="space-y-6"
       >
-        <ItemFormFields value={state.value} onChange={onChange} />
+        <ProductSearchPanel
+          title={webMatchAutofill ? "Web matches" : "Find product online"}
+          hint={
+            webMatchAutofill
+              ? "From your photo (when SerpAPI is on) or search again by keyword."
+              : "Optional: search by keyword and pick a listing to copy details into the form."
+          }
+          matches={webMatchAutofill ? state.analyze.bundle.matches : undefined}
+          onSearch={onSearchWeb}
+          onSelect={onSelectWebProduct}
+          selectedUrl={selectedWebProductUrl}
+        />
+
+        <ItemFormFields
+          value={state.value}
+          onChange={onChange}
+          categories={categories}
+          styleTags={styleTagsList}
+        />
 
         <div className="flex items-center gap-3 pt-2">
           <button
