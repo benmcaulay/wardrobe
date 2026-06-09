@@ -39,8 +39,42 @@ export type PlannerItem = {
   season: Season[];
   weightGrams: number;
   volumeLiters: number;
+  priceCents: number | null;
+  currency: string;
   hasOverride: boolean;
 };
+
+const BUCKET_LABELS: Record<CategoryBucket, string> = {
+  top: "Tops",
+  bottom: "Bottoms",
+  dress: "Dresses",
+  outerwear: "Outerwear",
+  shoes: "Shoes",
+  accessory: "Accessories",
+  other: "Other",
+};
+
+const BUCKET_ORDER: CategoryBucket[] = [
+  "top",
+  "bottom",
+  "dress",
+  "outerwear",
+  "shoes",
+  "accessory",
+  "other",
+];
+
+function formatMoney(cents: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+      maximumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency}`;
+  }
+}
 
 export type PlannerTrip = {
   id: string;
@@ -165,6 +199,33 @@ export function TripPlanner({
     .filter((i) => !packedIds.has(i.id))
     .filter((i) => (filter ? i.name.toLowerCase().includes(filter.toLowerCase()) : true));
 
+  // Per-garment-type counts and total value of everything currently packed.
+  const summary = useMemo(() => {
+    const counts = {} as Record<CategoryBucket, number>;
+    const valueByCurrency = new Map<string, number>();
+    let pricedCount = 0;
+    let total = 0;
+    for (const item of items) {
+      if (!bagOfItem.has(item.id)) continue;
+      total += 1;
+      counts[item.bucket] = (counts[item.bucket] ?? 0) + 1;
+      if (item.priceCents != null) {
+        const cur = item.currency || "USD";
+        valueByCurrency.set(cur, (valueByCurrency.get(cur) ?? 0) + item.priceCents);
+        pricedCount += 1;
+      }
+    }
+    const typeRows = BUCKET_ORDER.filter((b) => (counts[b] ?? 0) > 0).map((b) => ({
+      label: BUCKET_LABELS[b],
+      count: counts[b],
+    }));
+    const valueLabel =
+      valueByCurrency.size === 0
+        ? null
+        : [...valueByCurrency.entries()].map(([cur, cents]) => formatMoney(cents, cur)).join(" + ");
+    return { typeRows, valueLabel, pricedCount, total };
+  }, [items, bagOfItem]);
+
   return (
     <div className="space-y-8">
       <TripHeader trip={trip} onSaved={() => router.refresh()} />
@@ -226,6 +287,38 @@ export function TripPlanner({
             <li key={i}>• {w}</li>
           ))}
         </ul>
+      ) : null}
+
+      {/* Packed summary: garment-type counts + total value */}
+      {summary.total > 0 ? (
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="font-serif text-xl">Packed summary</h2>
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-ink-muted">
+                Total value
+              </div>
+              <div className="text-lg">{summary.valueLabel ?? "—"}</div>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {summary.typeRows.map((row) => (
+              <span
+                key={row.label}
+                className="inline-flex items-center gap-1.5 rounded-full bg-paper-warm px-3 py-1 text-sm"
+              >
+                <span className="font-medium">{row.count}</span>
+                <span className="text-ink-muted">{row.label}</span>
+              </span>
+            ))}
+          </div>
+          {summary.valueLabel != null && summary.pricedCount < summary.total ? (
+            <p className="mt-3 text-[11px] text-ink-muted">
+              Value covers {summary.pricedCount} of {summary.total} packed{" "}
+              {summary.total === 1 ? "item" : "items"} with a recorded price.
+            </p>
+          ) : null}
+        </section>
       ) : null}
 
       {/* Bags */}

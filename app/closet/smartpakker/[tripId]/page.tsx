@@ -39,6 +39,8 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         ghostImagePath: true,
         weightGrams: true,
         volumeLiters: true,
+        priceCents: true,
+        currency: true,
       },
     }),
   ]);
@@ -70,6 +72,8 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       season: parseSeasons(r.season) as Season[],
       weightGrams: est.weightGrams,
       volumeLiters: est.volumeLiters,
+      priceCents: r.priceCents,
+      currency: r.currency,
       hasOverride: r.weightGrams != null || r.volumeLiters != null,
     };
   });
