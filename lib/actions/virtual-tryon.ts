@@ -151,6 +151,11 @@ export async function generateVirtualTryOn(
   const garmentCategories = orderedItems.map((item) =>
     [item.category, item.subcategory].filter(Boolean).join(" ").trim(),
   );
+  // Richer free-text per garment for text-driven VTON models (idm-vton):
+  // "Blue Linen Shirt shirt top" reads better as a description than the bare category.
+  const garmentDescriptions = orderedItems.map((item) =>
+    [item.name, item.subcategory, item.category].filter(Boolean).join(" ").trim(),
+  );
 
   let result: VirtualTryOnResult;
   try {
@@ -159,6 +164,7 @@ export async function generateVirtualTryOn(
       personImagePath: person.imagePath,
       garmentImagePaths: garmentPaths,
       garmentCategories,
+      garmentDescriptions,
       prompt: input.prompt,
     });
   } catch (err) {

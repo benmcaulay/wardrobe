@@ -30,6 +30,17 @@ export async function bufferToJpegDataUri(buf: Buffer): Promise<string> {
   return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
 }
 
+/**
+ * Re-encode as a PNG data URI for chaining between multi-garment steps. Used
+ * instead of {@link bufferToJpegDataUri} so each garment we add to an outfit
+ * doesn't re-JPEG the previous step's result — generational JPEG loss is
+ * visible (mushy textures, ringing on prints) by the third garment.
+ */
+export async function bufferToPngDataUri(buf: Buffer): Promise<string> {
+  const png = await sharp(buf).rotate().png().toBuffer();
+  return `data:image/png;base64,${png.toString("base64")}`;
+}
+
 export async function fashnRunTryOn(
   apiKey: string,
   modelName: string,

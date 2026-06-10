@@ -8,9 +8,10 @@ without a photographer.
 
 Background removal runs for real, free, client-side via
 `@imgly/background-removal`. Ghost mannequin generation runs for real on
-[fal.ai](https://fal.ai) (Gemini 2.5 Flash Image / Edit) when you set
+[fal.ai](https://fal.ai) (SeedDream v4 Edit by default) when you set
 `FAL_KEY` and `USE_REAL_GHOST_MANNEQUIN="true"`; otherwise it falls back to
-a stub composite. Vision, reverse-image search, and product scraping are
+a stub composite. Virtual try-on runs on Fashn (`FASHN_API_KEY`) or fal.ai
+(`fal-ai/idm-vton` by default). Vision, reverse-image search, and product scraping are
 still stubbed.
 
 ## Quick start (stub mode — no keys)
@@ -33,7 +34,7 @@ then put it in a local `.env` (gitignored — never commit):
 DATABASE_URL="file:./dev.db"
 USE_REAL_GHOST_MANNEQUIN="true"
 FAL_KEY="<your-fal-key>"
-# optional override (default: fal-ai/gemini-25-flash-image/edit)
+# optional override (default: fal-ai/seedream/v4/edit)
 # FAL_GHOST_MODEL="fal-ai/flux-pro/kontext"
 ```
 
@@ -61,10 +62,10 @@ pnpm test:fal
 
 | Model                                      | ~Cost / image | Notes                                |
 | ------------------------------------------ | ------------- | ------------------------------------ |
-| `fal-ai/gemini-25-flash-image/edit` *(default)* | ~$0.04   | Multi-image refs, 3–5s             |
+| `fal-ai/seedream/v4/edit` *(default)*      | ~$0.03        | ByteDance SeedDream, strong prompt adherence |
+| `fal-ai/gemini-25-flash-image/edit`        | ~$0.04        | Multi-image refs, 3–5s               |
 | `fal-ai/flux-pro/kontext`                  | ~$0.04        | Strong prompt fidelity               |
 | `fal-ai/flux-pro/kontext/max/multi`        | ~$0.08        | Up to 4 refs, max quality            |
-| `fal-ai/seedream/v4/edit`                  | ~$0.03        | ByteDance SeedDream                  |
 
 Switch by setting `FAL_GHOST_MODEL`. The seed gives the demo user **250
 credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
@@ -100,7 +101,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | | |
 |---|---|
 | Free credits per new user | **250** (~$10 at ~$0.04/call) |
-| Cost per ghost mannequin  | **1 credit ≈ $0.04** with `gemini-25-flash-image/edit` |
+| Cost per ghost mannequin  | **1 credit ≈ $0.03** with `seedream/v4/edit` (default) |
 | Behavior in stub mode     | Generations log to `TryOnGeneration` but `User.credits` is **not** decremented |
 | Behavior in real mode     | API call first; on success, `User.credits` decremented atomically with the row insert (no double-charge if the call fails) |
 | Mode switch               | `USE_REAL_GHOST_MANNEQUIN="true"` + `FAL_KEY="…"` in `.env` |
