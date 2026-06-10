@@ -18,12 +18,14 @@ still stubbed.
 
 ```bash
 pnpm install
-pnpm prisma migrate dev        # creates dev.db and runs migrations
+docker compose up -d db        # Postgres 16 on localhost:5432
+cp .env.example .env           # DATABASE_URL already points at the compose db
+pnpm prisma migrate deploy     # applies migrations
 pnpm db:seed                   # inserts demo user + 8 placeholder items
 pnpm dev                       # http://localhost:3000
 ```
 
-That's it. No keys, no cloud, no docker.
+No API keys needed — AI features run as stubs until you add keys.
 
 ## Production setup (real ghost mannequin)
 
@@ -31,7 +33,7 @@ Get a fal.ai key from <https://fal.ai/dashboard/keys>, load it with credit,
 then put it in a local `.env` (gitignored — never commit):
 
 ```
-DATABASE_URL="file:./dev.db"
+DATABASE_URL="postgresql://user:password@host:5432/wardrobe"
 USE_REAL_GHOST_MANNEQUIN="true"
 FAL_KEY="<your-fal-key>"
 # optional override (default: fal-ai/seedream/v4/edit)
@@ -82,7 +84,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | `pnpm test:watch`  | Vitest in watch mode                           |
 | `pnpm test:fal`    | Real fal.ai round-trip smoke (needs `.env`)    |
 | `pnpm db:seed`     | Re-run the seed script (idempotent)            |
-| `pnpm db:reset`    | Drop and re-create the SQLite DB, then re-seed |
+| `pnpm db:reset`    | Drop and re-create the database, then re-seed  |
 
 ## How an upload becomes a ghost mannequin
 
