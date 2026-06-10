@@ -15,5 +15,27 @@ services:
       timeout: 3s
       retries: 10
 
+  # S3-compatible object store for exercising the "s3" storage driver locally
+  # (stand-in for Cloudflare R2). Off by default; start with:
+  #   docker compose --profile s3 up -d
+  minio:
+    image: minio/minio
+    profiles: ["s3"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   pgdata:
+  miniodata:

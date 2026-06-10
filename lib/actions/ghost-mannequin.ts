@@ -1,12 +1,12 @@
 "use server";
 
-import { promises as fs } from "node:fs";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { cutoutPathFor } from "@/lib/image-paths";
 import { encode } from "@/lib/json";
-import { deleteUpload, saveUpload, UploadError, resolveUploadPath } from "@/lib/uploads";
+import { deleteUpload, saveUpload, UploadError } from "@/lib/uploads";
+import { deleteObject } from "@/lib/storage";
 import {
   createGhostMannequin,
   mapCategoryToGhost,
@@ -282,8 +282,7 @@ export async function replaceGhostViewImageWithCrop(
   });
 
   await deleteUpload(previousImagePath).catch(() => undefined);
-  const cutAbs = resolveUploadPath(cutoutPathFor(previousImagePath));
-  if (cutAbs) await fs.rm(cutAbs, { force: true });
+  await deleteObject(cutoutPathFor(previousImagePath)).catch(() => undefined);
 
   revalidatePath("/closet");
   revalidatePath(`/closet/${itemId}`);

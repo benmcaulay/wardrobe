@@ -1,9 +1,8 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
-import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
+import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
 import { whitenBackground } from "./whiten-background";
 
 // Real provider: fal.ai image-edit model (default: SeedDream v4 Edit). Takes a
@@ -196,17 +195,11 @@ Additional view instruction:
 - ${extra}`;
 }
 
-async function uploadToFal(absolutePath: string, fallbackName: string): Promise<string> {
-  const buf = await fs.readFile(absolutePath);
-  const ext = path.extname(absolutePath).toLowerCase();
-  const mime =
-    ext === ".png"
-      ? "image/png"
-      : ext === ".webp"
-        ? "image/webp"
-        : "image/jpeg";
-  const file = new File([new Uint8Array(buf)], path.basename(absolutePath) || fallbackName, {
-    type: mime,
+async function uploadKeyToFal(key: string, fallbackName: string): Promise<string> {
+  const buf = await getObject(key);
+  if (!buf) throw new Error(`Missing image: ${key}`);
+  const file = new File([new Uint8Array(buf)], path.basename(key) || fallbackName, {
+    type: contentTypeFor(key),
   });
   return fal.storage.upload(file);
 }
@@ -214,28 +207,21 @@ async function uploadToFal(absolutePath: string, fallbackName: string): Promise<
 async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMannequinResult> {
   ensureFalConfigured();
 
-  const garmentAbs = resolveUploadPath(input.garmentImagePath);
-  if (!garmentAbs) throw new Error(`Invalid garment path: ${input.garmentImagePath}`);
-  await fs.access(garmentAbs);
+  if (!(await objectExists(input.garmentImagePath))) {
+    throw new Error(`Invalid garment path: ${input.garmentImagePath}`);
+  }
 
-  // Resolve all inputs first (cheap fs checks), then upload to fal.ai storage.
-  const extraAbs: string[] = [];
+  // Keep only extras that exist (they're optional context shots).
+  const extraKeys: string[] = [];
   for (const rel of input.extraImagePaths ?? []) {
-    const abs = resolveUploadPath(rel);
-    if (!abs) continue;
-    try {
-      await fs.access(abs);
-      extraAbs.push(abs);
-    } catch {
-      // skip missing/unreadable extras silently — they're optional
-    }
+    if (await objectExists(rel)) extraKeys.push(rel);
   }
 
   // Uploads are independent network calls — run them concurrently. Promise.all
   // preserves order, so image_urls stays [garment, ...extras].
   const [garmentUrl, ...extraUrls] = await Promise.all([
-    uploadToFal(garmentAbs, "garment.jpg"),
-    ...extraAbs.map((abs) => uploadToFal(abs, "context.jpg")),
+    uploadKeyToFal(input.garmentImagePath, "garment.jpg"),
+    ...extraKeys.map((k) => uploadKeyToFal(k, "context.jpg")),
   ]);
 
   const startedAt = Date.now();
@@ -279,15 +265,10 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   if (!fetched.ok) throw new Error(`Failed to download result: ${fetched.status}`);
   const rawBuffer = Buffer.from(await fetched.arrayBuffer());
 
-  const dir = path.join(UPLOADS_ROOT, input.userId);
-  await fs.mkdir(dir, { recursive: true });
   const hash = deterministicHash(input);
-  const filename = `ghost-${hash}.jpg`;
-  const thumbName = `ghost-${hash}-thumb.jpg`;
-  const cutoutName = `ghost-${hash}-cutout.png`;
-  const outAbs = path.join(dir, filename);
-  const thumbAbs = path.join(dir, thumbName);
-  const cutoutAbs = path.join(dir, cutoutName);
+  const key = path.posix.join(input.userId, `ghost-${hash}.jpg`);
+  const thumbKey = path.posix.join(input.userId, `ghost-${hash}-thumb.jpg`);
+  const cutoutKey = path.posix.join(input.userId, `ghost-${hash}-cutout.png`);
 
   const normalised = await sharp(rawBuffer)
     .rotate()
@@ -297,17 +278,20 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
 
   const { flattened, cutout } = await whitenBackground(normalised);
 
-  await sharp(flattened).jpeg({ quality: 88 }).toFile(outAbs);
-  await sharp(flattened)
-    .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 80 })
-    .toFile(thumbAbs);
-  await fs.writeFile(cutoutAbs, cutout);
+  const [outJpeg, thumbJpeg] = await Promise.all([
+    sharp(flattened).jpeg({ quality: 88 }).toBuffer(),
+    sharp(flattened)
+      .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer(),
+  ]);
+  await Promise.all([
+    putObject(key, outJpeg, "image/jpeg"),
+    putObject(thumbKey, thumbJpeg, "image/jpeg"),
+    putObject(cutoutKey, cutout, "image/png"),
+  ]);
 
-  return {
-    resultImagePath: path.posix.join(input.userId, filename),
-    credits: 1,
-  };
+  return { resultImagePath: key, credits: 1 };
 }
 
 // -----------------------------------------------------------------------------
@@ -315,21 +299,15 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
 // -----------------------------------------------------------------------------
 
 async function stubGhostMannequin(input: GhostMannequinInput): Promise<GhostMannequinResult> {
-  const garmentAbs = resolveUploadPath(input.garmentImagePath);
-  if (!garmentAbs) throw new Error(`Invalid garment path: ${input.garmentImagePath}`);
-  await fs.access(garmentAbs);
-
-  const dir = path.join(UPLOADS_ROOT, input.userId);
-  await fs.mkdir(dir, { recursive: true });
+  const garmentSrc = await getObject(input.garmentImagePath);
+  if (!garmentSrc) throw new Error(`Invalid garment path: ${input.garmentImagePath}`);
 
   const hash = deterministicHash(input);
-  const filename = `ghost-${hash}.jpg`;
-  const thumbName = `ghost-${hash}-thumb.jpg`;
-  const outAbs = path.join(dir, filename);
-  const thumbAbs = path.join(dir, thumbName);
+  const key = path.posix.join(input.userId, `ghost-${hash}.jpg`);
+  const thumbKey = path.posix.join(input.userId, `ghost-${hash}-thumb.jpg`);
 
   const garmentSize = Math.round(BASE_HEIGHT * 0.72);
-  const garmentBuf = await sharp(garmentAbs)
+  const garmentBuf = await sharp(garmentSrc)
     .rotate()
     .resize({ width: garmentSize, height: garmentSize, fit: "inside" })
     .toBuffer();
@@ -361,15 +339,14 @@ async function stubGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
     ])
     .jpeg({ quality: 86 })
     .toBuffer();
-  await fs.writeFile(outAbs, composedBuffer);
-
-  await sharp(composedBuffer)
+  const thumbBuffer = await sharp(composedBuffer)
     .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 78 })
-    .toFile(thumbAbs);
+    .toBuffer();
+  await Promise.all([
+    putObject(key, composedBuffer, "image/jpeg"),
+    putObject(thumbKey, thumbBuffer, "image/jpeg"),
+  ]);
 
-  return {
-    resultImagePath: path.posix.join(input.userId, filename),
-    credits: 1,
-  };
+  return { resultImagePath: key, credits: 1 };
 }

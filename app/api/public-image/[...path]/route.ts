@@ -1,15 +1,6 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyPublicImageToken } from "@/lib/public-image-url";
-import { resolveUploadPath } from "@/lib/uploads";
-
-const CONTENT_TYPE: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-};
+import { contentTypeFor, getObject, getSignedReadUrl, safeKey } from "@/lib/storage";
 
 /** SerpAPI Google Lens fetches garment images via this route (signed, no session cookie). */
 export async function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
@@ -25,19 +16,19 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const absolute = resolveUploadPath(relativePath);
-  if (!absolute) return new NextResponse("Forbidden", { status: 403 });
+  const key = safeKey(relativePath);
+  if (!key) return new NextResponse("Forbidden", { status: 403 });
 
-  const ext = path.extname(absolute).toLowerCase();
-  const contentType = CONTENT_TYPE[ext];
-  if (!contentType) return new NextResponse("Unsupported type", { status: 415 });
-
-  let data: Buffer;
-  try {
-    data = await fs.readFile(absolute);
-  } catch {
-    return new NextResponse("Not found", { status: 404 });
+  const contentType = contentTypeFor(key);
+  if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+    return new NextResponse("Unsupported type", { status: 415 });
   }
+
+  const signed = await getSignedReadUrl(key, 300);
+  if (signed) return NextResponse.redirect(signed, 302);
+
+  const data = await getObject(key);
+  if (!data) return new NextResponse("Not found", { status: 404 });
 
   return new NextResponse(new Uint8Array(data), {
     headers: {

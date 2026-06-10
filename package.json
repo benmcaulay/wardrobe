@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:fal": "node --env-file=.env --import tsx scripts/test-fal.ts",
+    "test:s3": "tsx scripts/verify-s3.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "postinstall": "prisma generate"
@@ -24,10 +25,15 @@
       "esbuild",
       "prisma",
       "sharp"
-    ]
+    ],
+    "overrides": {
+      "is-generator-function": "1.0.10"
+    }
   },
   "dependencies": {
     "@auth/prisma-adapter": "2.11.2",
+    "@aws-sdk/client-s3": "^3.1066.0",
+    "@aws-sdk/s3-request-presigner": "^3.1066.0",
     "@fal-ai/client": "^1.10.0",
     "@prisma/client": "^5.22.0",
     "archiver": "5.3.2",
@@ -49,6 +55,7 @@
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "prisma": "^5.22.0",
+    "s3rver": "^3.7.1",
     "tailwindcss": "^3.4.14",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",

@@ -45,7 +45,7 @@ API keys** and can be switched to real providers one file at a time.
 | Swipe-to-sell (strategic core) | **Working, manual hand-off** | Drafts + deep-links; no marketplace API posting yet (§6.4) |
 | Auth | **Production-shaped** | NextAuth + Google OAuth, DB sessions in Postgres; demo mode is an explicit dev flag (§9.1) |
 | Persistence | **Production-shaped** | PostgreSQL 16; JSON columns still TEXT (§11.1) |
-| File storage | **Demonstration-grade** | Local disk; migrate to object storage + CDN (§11.2) |
+| File storage | **Production-shaped** | Storage seam: local disk (dev) or S3/R2 with signed URLs (§11.2) |
 | Payments / monetization | **Stub** | Credit ledger exists; no payment processor (§10) |
 
 ---
@@ -122,7 +122,7 @@ Browser ──HTTP──> Next.js (App Router)
   │                   └── Route Handlers    (/api/images, /api/demo, /api/backup)
   │                          │
   │                          ├── Prisma ──> PostgreSQL
-  │                          ├── uploads/  (local disk → object storage)
+  │                          ├── lib/storage ──> local disk | S3 / R2
   │                          └── lib/services/* ──> fal.ai / Fashn / SerpAPI / …
   └── @imgly/background-removal (WASM, in-browser; no server round-trip)
 ```
@@ -432,11 +432,19 @@ for local dev). Remaining: convert JSON-as-text columns to native `Json` — a
 deliberate follow-up, since it changes the write contract at every call site of
 the `lib/json.ts` helpers — and provision managed Postgres for deployment.
 
-### 11.2 Storage: local disk → object storage + CDN
+### 11.2 Storage: object storage — **done**
 
-Move `uploads/` to S3/GCS/R2; keep the authenticated indirection but issue
-**signed, expiring URLs** (or a CDN with signed cookies). The path seam
-(`resolveUploadPath`, DB-relative paths) localizes this change.
+`lib/storage.ts` is a key-based seam with two drivers behind one API
+(`putObject` / `getObject` / `objectExists` / `deleteObject` / `deletePrefix` /
+`getSignedReadUrl`): **local disk** (default, dev) and **S3/R2** (auto-selected
+when `R2_BUCKET` is set). The DB-relative paths already stored on rows are the
+object keys, so no data shape changed. On the S3 driver the image routes keep
+the per-user authorization check, then **302-redirect to a short-lived signed
+URL** so object bytes never transit the app server (a public/CDN base URL via
+`R2_PUBLIC_BASE_URL` skips signing). Traversal protection (`safeKey`) applies to
+both drivers. The S3 path is covered by an integration check (`pnpm test:s3`,
+runs against an in-process S3-compatible server). Remaining for deployment:
+provision an R2 bucket + credentials, and optionally front it with a CDN.
 
 ### 11.3 Other
 
@@ -510,7 +518,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 | R2 | Demo mode enabled on a real deployment | Medium | Explicit AUTH_DEMO_MODE flag, off by default in production; documented (§9.1) |
 | R3 | AI output quality variance (identity/angle/fidelity) | Medium | Dedicated models (idm-vton/SeeDream), strict prompts, env-tunable post-processing; all swapped this cycle |
 | R4 | AI cost scaling with usage | Medium | Credit metering exists; add per-user quotas + provider budget caps |
-| R5 | Local-disk uploads don't scale horizontally | Medium | Object storage + CDN (§11.2) — DB is already Postgres |
+| R5 | Single-region object store latency at scale | Low | Storage seam supports S3/R2 + `R2_PUBLIC_BASE_URL` CDN (§11.2) |
 | R6 | Provider dependence (fal.ai/Fashn) | Medium | Single-file service seam makes providers swappable; multi-provider already demonstrated |
 | R7 | No payment rails | Medium | Stripe integration (§10, §13 Phase 3) |
 | R8 | Legal/ToS exposure in cross-listing | Medium | Use official APIs/partner programs only; legal review per channel |
@@ -527,8 +535,9 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 `GHOST_APPAREL_ANGLE`, `GHOST_WHITEN_*`, `USE_REAL_VISION`,
 `USE_REAL_REVERSE_IMAGE_SEARCH`, `SERPAPI_KEY`, `USE_REAL_PRODUCT_SCRAPER`,
 `USE_REAL_WEATHER`, `DATABASE_URL`, `AUTH_DEMO_MODE`, `NEXTAUTH_SECRET`,
-`NEXTAUTH_URL`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`. Full list in
-`.env.example`.
+`NEXTAUTH_URL`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `STORAGE_DRIVER`,
+`R2_BUCKET`, `R2_ACCOUNT_ID`/`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`/
+`R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`. Full list in `.env.example`.
 
 ### 15.2 Server-action / route inventory (write surface)
 
