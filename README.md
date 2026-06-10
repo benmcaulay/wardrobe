@@ -111,16 +111,20 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 The credit balance shows in the closet header (`✨ N`, amber when < 10) and
 in Settings, with a Buy-credits stub and an "Auto-generate on upload" toggle.
 
-## How the demo user works
+## Auth
 
-Auth is intentionally fake. The landing page (`/`) has an "Enter demo"
-button that sets a cookie pointing at a single user (`demo@local.test`)
-created by the seed script. `middleware.ts` redirects any protected
-route back to `/` when the cookie is missing.
+Real sign-in is **NextAuth with Google OAuth** and database sessions stored
+in Postgres (Prisma adapter). Register an OAuth app in Google Cloud Console
+(redirect URI `<origin>/api/auth/callback/google`) and set
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_SECRET`, and
+`NEXTAUTH_URL`. New users get 250 starter credits on first sign-in.
 
-To add a real auth provider, replace the three functions in `lib/auth.ts`
-(`getCurrentUser`, `requireUser`, `getOrCreateDemoUser`) with NextAuth /
-Clerk equivalents. The rest of the app only touches those helpers.
+For keyless local dev there's an explicit **demo mode**
+(`AUTH_DEMO_MODE="true"`, on in `.env.example`): the landing page shows an
+"Enter demo" button that sets a cookie pointing at a single shared user
+(`demo@local.test`). The demo cookie is not a credential — never enable
+demo mode on a deployment with real users. Sign-out (both kinds) is
+`POST /api/logout`, which also revokes the database session row.
 
 ## Replacing the rest of the stubs
 

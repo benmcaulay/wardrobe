@@ -27,6 +27,21 @@ export default async function SettingsPage() {
         <h1 className="font-serif text-4xl tracking-tight">Settings</h1>
       </header>
 
+      <section className="mb-14 rounded-2xl border border-ink/10 bg-white p-5 flex items-center justify-between gap-4">
+        <div>
+          <h2 className="font-serif text-xl tracking-tight">Account</h2>
+          <p className="text-sm text-ink-muted mt-1">Signed in as {user.email}</p>
+        </div>
+        <form action="/api/logout" method="post">
+          <button
+            type="submit"
+            className="rounded-full border border-ink/15 px-5 py-2 text-sm tracking-wide hover:bg-paper-warm transition"
+          >
+            Sign out
+          </button>
+        </form>
+      </section>
+
       <section className="mb-14">
         <h2 className="font-serif text-2xl tracking-tight mb-6">Style preferences</h2>
         <SettingsClient
