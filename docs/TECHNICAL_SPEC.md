@@ -43,7 +43,7 @@ API keys** and can be switched to real providers one file at a time.
 | Virtual try-on | **Working w/ real provider** | Fashn or fal.ai (idm-vton) |
 | Background removal | **Production (client-side)** | Free WASM, no per-call cost |
 | Swipe-to-sell (strategic core) | **Working, manual hand-off** | Drafts + deep-links; no marketplace API posting yet (§6.4) |
-| Auth | **Demonstration-grade** | Single demo-user cookie; must be replaced (§9.1) |
+| Auth | **Production-shaped** | NextAuth + Google OAuth, DB sessions in Postgres; demo mode is an explicit dev flag (§9.1) |
 | Persistence | **Production-shaped** | PostgreSQL 16; JSON columns still TEXT (§11.1) |
 | File storage | **Demonstration-grade** | Local disk; migrate to object storage + CDN (§11.2) |
 | Payments / monetization | **Stub** | Credit ledger exists; no payment processor (§10) |
@@ -100,7 +100,8 @@ pricing intelligence, and an in-app transaction layer) is the path from
 | Language | TypeScript (strict) |
 | Server logic | React Server Components + Server Actions ("use server") |
 | Data access | Prisma ORM |
-| Database | SQLite (dev/demo); Postgres-ready (§11.1) |
+| Database | PostgreSQL 16 (Docker Compose for local dev) |
+| Auth | NextAuth v4 — Google OAuth, database sessions (Prisma adapter) |
 | Image processing | `sharp` (server), `@imgly/background-removal` (client WASM) |
 | Generative AI | fal.ai (`@fal-ai/client`), Fashn (REST) |
 | Styling | Tailwind CSS |
@@ -359,19 +360,23 @@ listing" page in a new tab → user pastes. The for-sale board
 
 ## 9. Security & Privacy
 
-### 9.1 Authentication — demonstration-grade (must replace)
+### 9.1 Authentication — NextAuth (Google OAuth, database sessions)
 
-Auth is intentionally a **single demo-user cookie** (`wardrobe_demo_uid`).
-`/api/demo/enter` sets it; `middleware.ts` redirects protected routes to `/` when
-absent. There are **no passwords, sessions, CSRF tokens, or multi-user
-isolation in practice** yet. The design *contains* this to three functions in
-`lib/auth.ts` (`getCurrentUser`, `requireUser`, `getOrCreateDemoUser`); swapping
-in NextAuth/Clerk is the documented path and the rest of the app is already
-written against `requireUser()` and per-`userId` scoping.
+Sign-in is **NextAuth v4 with Google OAuth**. Sessions use the **database
+strategy** — session rows live in the application's own Postgres via the Prisma
+adapter (revocable server-side; no JWT secrets to rotate), keeping identity in
+the same database as the credit ledger with no per-MAU vendor cost. New users
+receive starter credits via the `createUser` event. Sign-out
+(`POST /api/logout`) deletes the session row, not just the cookie.
 
-> **Diligence flag — highest-priority hardening item.** Production requires real
-> auth, session management, and CSRF protection on server actions before any
-> multi-user deployment.
+A **demo mode** remains for keyless local development behind an explicit
+`AUTH_DEMO_MODE="true"` flag: a single shared user behind a plain cookie. When
+the flag is off, the demo entry route returns 404, the landing page hides the
+demo button, and stale demo cookies are ignored by `getCurrentUser`.
+
+Remaining hardening: rate limiting on auth endpoints, and CSRF posture review
+on server actions (Next's server actions include origin checking; an explicit
+review is still warranted before public launch).
 
 ### 9.2 Authorization & file serving
 
@@ -394,7 +399,7 @@ data leaving the host is the garment/context image sent to the AI provider
 
 | Gap | Risk | Remediation |
 |---|---|---|
-| Demo cookie auth | No real identity/isolation | Real auth provider (§9.1) |
+| CSRF posture on server actions unreviewed | Session riding | Explicit origin-check review pre-launch (§9.1) |
 | No rate limiting on AI actions | Cost/abuse | Per-user quotas + provider budget caps |
 | `/api/public-image` route exists | Needs review for unauthenticated exposure (used for SerpAPI Lens callbacks) | Audit + signed, expiring URLs |
 | Local disk storage | No durability/sharing across instances | Object storage (§11.2) |
@@ -435,7 +440,7 @@ Move `uploads/` to S3/GCS/R2; keep the authenticated indirection but issue
 
 ### 11.3 Other
 
-- Real auth + sessions + CSRF (§9.1) — **gating item**.
+- ~~Real auth + sessions~~ — **done** (NextAuth, §9.1). Remaining: CSRF posture review.
 - Background job runner for generation (decouple from request lifecycle; enables
   retries, webhooks, batch ghosting).
 - Observability (structured logging exists at the service boundary; add metrics,
@@ -502,7 +507,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 | # | Risk | Severity | Mitigation |
 |---|---|---|---|
 | R1 | Marketplaces offer no listing API; auto-post blocked | **High (strategic)** | Phase 1/2 (§13); start with eBay; authorized integrations only |
-| R2 | Demo-grade auth blocks multi-user launch | **High** | Real auth provider; isolated to 3 functions (§9.1) |
+| R2 | Demo mode enabled on a real deployment | Medium | Explicit AUTH_DEMO_MODE flag, off by default in production; documented (§9.1) |
 | R3 | AI output quality variance (identity/angle/fidelity) | Medium | Dedicated models (idm-vton/SeeDream), strict prompts, env-tunable post-processing; all swapped this cycle |
 | R4 | AI cost scaling with usage | Medium | Credit metering exists; add per-user quotas + provider budget caps |
 | R5 | Local-disk uploads don't scale horizontally | Medium | Object storage + CDN (§11.2) — DB is already Postgres |
@@ -521,7 +526,9 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 `FASHN_TRYON_MODE`, `FASHN_GARMENT_PHOTO_TYPE`, `GHOST_FOOTWEAR_ANGLE`,
 `GHOST_APPAREL_ANGLE`, `GHOST_WHITEN_*`, `USE_REAL_VISION`,
 `USE_REAL_REVERSE_IMAGE_SEARCH`, `SERPAPI_KEY`, `USE_REAL_PRODUCT_SCRAPER`,
-`USE_REAL_WEATHER`, `DATABASE_URL`. Full list in `.env.example`.
+`USE_REAL_WEATHER`, `DATABASE_URL`, `AUTH_DEMO_MODE`, `NEXTAUTH_SECRET`,
+`NEXTAUTH_URL`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`. Full list in
+`.env.example`.
 
 ### 15.2 Server-action / route inventory (write surface)
 
