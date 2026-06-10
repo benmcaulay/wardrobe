@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
 import sharp from "sharp";
-import { whitenBackground } from "../lib/services/whiten-background";
+import { whitenBackground, computeHaloSnapMask } from "../lib/services/whiten-background";
+
+/** Build an RGBA raw buffer from a row of gray values (one pixel high). */
+function grayRowRgba(values: number[]): Buffer {
+  const buf = Buffer.alloc(values.length * 4);
+  values.forEach((v, p) => {
+    buf[p * 4] = v;
+    buf[p * 4 + 1] = v;
+    buf[p * 4 + 2] = v;
+    buf[p * 4 + 3] = 255;
+  });
+  return buf;
+}
 
 /** 16x16 image: solid #ededed background with a 6x6 saturated red square in
  *  the centre. Mirrors what fal returns: a near-white catalog backdrop with
@@ -144,5 +156,38 @@ describe("whitenBackground", () => {
     expect(center.b).toBe(240);
     const corner = await readPixel(flattened, 0, 0);
     expect(corner.r).toBe(255);
+  });
+});
+
+describe("computeHaloSnapMask", () => {
+  // Row: [bg, near-white fg, shaded fg, near-white fg, bg]
+  const data = grayRowRgba([255, 250, 235, 250, 255]);
+  const isBg = Uint8Array.from([1, 0, 0, 0, 1]);
+
+  it("snaps near-white foreground pixels that hug the background", () => {
+    const snap = computeHaloSnapMask(data, isBg, 5, 1, 244, 2);
+    expect(snap[1]).toBe(1);
+    expect(snap[3]).toBe(1);
+  });
+
+  it("leaves a shaded garment edge below the threshold untouched", () => {
+    const snap = computeHaloSnapMask(data, isBg, 5, 1, 244, 2);
+    expect(snap[2]).toBe(0); // 235 < 244 → preserved
+  });
+
+  it("does not reach interior whites beyond the pass radius", () => {
+    // Only p0 is background; p1..p4 are pure white foreground.
+    const interior = grayRowRgba([255, 250, 250, 250, 250]);
+    const bg = Uint8Array.from([1, 0, 0, 0, 0]);
+    const snap = computeHaloSnapMask(interior, bg, 5, 1, 244, 2);
+    expect(snap[1]).toBe(1); // touches bg
+    expect(snap[2]).toBe(1); // one pass inward
+    expect(snap[3]).toBe(0); // 3px from bg, beyond 2 passes
+    expect(snap[4]).toBe(0);
+  });
+
+  it("is a no-op when passes is 0", () => {
+    const snap = computeHaloSnapMask(data, isBg, 5, 1, 244, 0);
+    expect(Array.from(snap)).toEqual([0, 0, 0, 0, 0]);
   });
 });

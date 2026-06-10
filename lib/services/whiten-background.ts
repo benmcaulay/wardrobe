@@ -23,11 +23,28 @@ import sharp from "sharp";
  *  cutout:   the same image with background pixels made transparent
  *    (suitable for compositing into virtual try-on / outfit shots).
  */
-const SEED_MIN = 249;
-const EXPAND_MIN = 246;
-const DEFAULT_LEGACY_THRESHOLD = 232;
+function numEnv(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+const SEED_MIN = numEnv("GHOST_WHITEN_SEED_MIN", 249);
+const EXPAND_MIN = numEnv("GHOST_WHITEN_EXPAND_MIN", 246);
+const DEFAULT_LEGACY_THRESHOLD = numEnv("GHOST_WHITEN_LEGACY_MIN", 232);
 const MIN_BG_FRACTION = 0.012;
-const ERODE_PASSES = 2;
+const ERODE_PASSES = numEnv("GHOST_WHITEN_ERODE_PASSES", 2);
+/**
+ * Halo cleanup. After the binary mask + erosion, a thin band of near-white
+ * anti-alias pixels often survives as foreground right against the background —
+ * that band reads as a faint gray halo around the garment in the flattened
+ * catalog image. We snap foreground pixels at/above HALO_CLEAN_MIN that hug the
+ * background to pure white. The threshold is high on purpose: a white garment
+ * edge the model has shaded for separation (~#e6e6e6) stays below it and is
+ * preserved, so this kills the halo without eating shaded edges. Only the
+ * flattened image is touched; the cutout's alpha edge is left as-is.
+ */
+const HALO_CLEAN_MIN = numEnv("GHOST_WHITEN_HALO_MIN", 244);
+const HALO_CLEAN_PASSES = numEnv("GHOST_WHITEN_HALO_PASSES", 2);
 
 function rgbMin(data: Buffer, px: number): number {
   const i = px * 4;
@@ -111,9 +128,72 @@ function erodeBackgroundMask(
   }
 }
 
+/**
+ * Flag near-white FOREGROUND pixels hugging the background — the gray anti-alias
+ * fringe the binary mask + erosion leave as a halo. Only pixels at/above
+ * `minWhite` are caught (a shaded garment edge stays below it), and the flag
+ * grows up to `passes` pixels inward through further near-white foreground.
+ * Returns a mask of pixels the caller should clamp to white in the flattened
+ * image. Interior whites (not touching the background) are never flagged.
+ */
+export function computeHaloSnapMask(
+  data: Buffer,
+  isBg: Uint8Array,
+  width: number,
+  height: number,
+  minWhite: number,
+  passes: number,
+): Uint8Array {
+  const total = width * height;
+  const snap = new Uint8Array(total);
+  if (passes <= 0) return snap;
+
+  const isNearWhiteFg = (p: number) => !isBg[p] && rgbMin(data, p) >= minWhite;
+
+  let frontier: number[] = [];
+  for (let p = 0; p < total; p++) {
+    if (!isNearWhiteFg(p)) continue;
+    const x = p % width;
+    const y = (p - x) / width;
+    const touchesBg =
+      (x > 0 && isBg[p - 1] === 1) ||
+      (x < width - 1 && isBg[p + 1] === 1) ||
+      (y > 0 && isBg[p - width] === 1) ||
+      (y < height - 1 && isBg[p + width] === 1);
+    if (touchesBg) {
+      snap[p] = 1;
+      frontier.push(p);
+    }
+  }
+
+  for (let pass = 1; pass < passes && frontier.length > 0; pass++) {
+    const next: number[] = [];
+    for (const p of frontier) {
+      const x = p % width;
+      const y = (p - x) / width;
+      const tryNb = (n: number) => {
+        if (!snap[n] && isNearWhiteFg(n)) {
+          snap[n] = 1;
+          next.push(n);
+        }
+      };
+      if (x > 0) tryNb(p - 1);
+      if (x < width - 1) tryNb(p + 1);
+      if (y > 0) tryNb(p - width);
+      if (y < height - 1) tryNb(p + width);
+    }
+    frontier = next;
+  }
+  return snap;
+}
+
 export type WhitenBackgroundOptions = {
   /** Legacy fallback: edge seed + expansion both use this RGB minimum (default 232). */
   threshold?: number;
+  /** Min RGB for a foreground fringe pixel to be snapped white (default 244). */
+  haloMin?: number;
+  /** How many pixels inward the halo snap grows (default 2; 0 disables it). */
+  haloPasses?: number;
 };
 
 export async function whitenBackground(
@@ -156,6 +236,12 @@ export async function whitenBackground(
 
   erodeBackgroundMask(isBg, width, height, ERODE_PASSES);
 
+  // Snap the near-white anti-alias fringe (foreground hugging the background)
+  // to white in the flattened image so it doesn't read as a gray halo.
+  const haloMin = opts.haloMin ?? HALO_CLEAN_MIN;
+  const haloPasses = opts.haloPasses ?? HALO_CLEAN_PASSES;
+  const haloSnap = computeHaloSnapMask(data, isBg, width, height, haloMin, haloPasses);
+
   const flatRgb = Buffer.allocUnsafe(total * 3);
   const cutRgba = Buffer.allocUnsafe(total * 4);
   for (let p = 0; p < total; p++) {
@@ -174,9 +260,12 @@ export async function whitenBackground(
       cutRgba[di + 2] = 255;
       cutRgba[di + 3] = 0;
     } else {
-      flatRgb[fi] = r;
-      flatRgb[fi + 1] = g;
-      flatRgb[fi + 2] = b;
+      // Foreground: clamp the near-white halo fringe to white in the catalog
+      // image only; the cutout keeps original pixels + alpha for compositing.
+      const snapWhite = haloSnap[p] === 1;
+      flatRgb[fi] = snapWhite ? 255 : r;
+      flatRgb[fi + 1] = snapWhite ? 255 : g;
+      flatRgb[fi + 2] = snapWhite ? 255 : b;
       cutRgba[di] = r;
       cutRgba[di + 1] = g;
       cutRgba[di + 2] = b;
