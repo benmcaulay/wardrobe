@@ -1,10 +1,9 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Archiver } from "archiver";
 import { prisma } from "@/lib/db";
 import { cutoutPathFor, thumbnailPathFor } from "@/lib/image-paths";
 import { decode, parseStringArray } from "@/lib/json";
-import { resolveUploadPath } from "@/lib/uploads";
+import { getObject, objectExists } from "@/lib/storage";
 
 type GhostViewRow = { label?: string; imagePath?: string };
 
@@ -42,15 +41,8 @@ function safeLabel(s: string, max = 28): string {
   );
 }
 
-async function pathOk(rel: string): Promise<{ abs: string } | null> {
-  const abs = resolveUploadPath(rel);
-  if (!abs) return null;
-  try {
-    await fs.access(abs);
-    return { abs };
-  } catch {
-    return null;
-  }
+async function keyOk(rel: string): Promise<boolean> {
+  return objectExists(rel);
 }
 
 /**
@@ -81,7 +73,7 @@ export async function appendWardrobeBackupToArchiver(
   const skippedMissing: WardrobeBackupManifest["skippedMissing"] = [];
   const packedDbPaths = new Set<string>();
   const manifestItems: WardrobeBackupManifest["items"] = [];
-  const fileJobs: Array<{ abs: string; zipPath: string }> = [];
+  const fileJobs: Array<{ key: string; zipPath: string }> = [];
 
   function skip(dbPath: string, reason: string) {
     skippedMissing.push({ dbPath, reason });
@@ -93,13 +85,12 @@ export async function appendWardrobeBackupToArchiver(
 
     async function add(rel: string, zipPath: string, meta: (typeof files)[number]): Promise<void> {
       if (packedDbPaths.has(rel)) return;
-      const ok = await pathOk(rel);
-      if (!ok) {
+      if (!(await keyOk(rel))) {
         skip(rel, "missing_or_invalid");
         return;
       }
       packedDbPaths.add(rel);
-      fileJobs.push({ abs: ok.abs, zipPath });
+      fileJobs.push({ key: rel, zipPath });
       files.push(meta);
     }
 
@@ -196,6 +187,7 @@ export async function appendWardrobeBackupToArchiver(
   archive.append(Buffer.from(JSON.stringify(manifest, null, 2), "utf8"), { name: "manifest.json" });
 
   for (const job of fileJobs) {
-    archive.file(job.abs, { name: job.zipPath });
+    const data = await getObject(job.key);
+    if (data) archive.append(data, { name: job.zipPath });
   }
 }

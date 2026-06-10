@@ -1,14 +1,14 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
+import path from "node:path";
 import sharp from "sharp";
 import { thumbnailPathFor } from "./image-paths";
+import { putObject, deleteObject } from "./storage";
 
 // Re-export the pure helpers so existing imports keep working. Client code
 // should import from "@/lib/image-paths" directly to avoid pulling sharp in.
 export { thumbnailPathFor, imageUrl, thumbnailUrl } from "./image-paths";
-
-export const UPLOADS_ROOT = path.join(process.cwd(), "uploads");
+// Re-export storage helpers some callers still import from here.
+export { UPLOADS_ROOT, resolveUploadPath } from "./storage";
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const MAX_EDGE_PX = 1536;
 export const THUMB_EDGE_PX = 400;
@@ -30,23 +30,9 @@ export type SavedUpload = {
 };
 
 /**
- * Resolve a relative upload path (as stored in the DB) to an absolute path on
- * disk, rejecting anything that escapes the uploads root. Returns null if the
- * path is invalid.
- */
-export function resolveUploadPath(relativePath: string): string | null {
-  const normalized = path.posix.normalize(relativePath).replace(/^\/+/, "");
-  if (normalized.startsWith("..")) return null;
-  const absolute = path.resolve(UPLOADS_ROOT, normalized);
-  const root = path.resolve(UPLOADS_ROOT);
-  if (absolute !== root && !absolute.startsWith(root + path.sep)) return null;
-  return absolute;
-}
-
-/**
  * Validate + process an uploaded file: EXIF-rotate, resize to 1536px max edge,
- * and write both the full-size JPEG and a 400px thumbnail. Returns the
- * DB-relative paths.
+ * and write both the full-size JPEG and a 400px thumbnail through the storage
+ * seam. Returns the DB-relative paths (which double as storage keys).
  */
 export async function saveUpload(file: File, userId: string): Promise<SavedUpload> {
   if (!file || file.size === 0) throw new UploadError("empty", "File is empty");
@@ -59,35 +45,37 @@ export async function saveUpload(file: File, userId: string): Promise<SavedUploa
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const id = crypto.randomUUID();
-  const dir = path.join(UPLOADS_ROOT, userId);
-  await fs.mkdir(dir, { recursive: true });
+  const originalKey = path.posix.join(userId, `${id}.jpg`);
+  const thumbKey = path.posix.join(userId, `${id}-thumb.jpg`);
 
-  const originalName = `${id}.jpg`;
-  const thumbName = `${id}-thumb.jpg`;
-  const originalAbs = path.join(dir, originalName);
-  const thumbAbs = path.join(dir, thumbName);
-
+  let original: Buffer;
+  let thumb: Buffer;
   let meta: sharp.OutputInfo;
   try {
-    meta = await sharp(buffer)
+    const out = await sharp(buffer)
       .rotate()
       .resize({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 88, mozjpeg: true })
-      .toFile(originalAbs);
-    await sharp(buffer)
+      .toBuffer({ resolveWithObject: true });
+    original = out.data;
+    meta = out.info;
+    thumb = await sharp(buffer)
       .rotate()
       .resize({ width: THUMB_EDGE_PX, height: THUMB_EDGE_PX, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 78, mozjpeg: true })
-      .toFile(thumbAbs);
+      .toBuffer();
   } catch (err) {
-    await fs.rm(originalAbs, { force: true });
-    await fs.rm(thumbAbs, { force: true });
     throw new UploadError("decode_failed", `Could not decode image: ${(err as Error).message}`);
   }
 
+  await Promise.all([
+    putObject(originalKey, original, "image/jpeg"),
+    putObject(thumbKey, thumb, "image/jpeg"),
+  ]);
+
   return {
-    originalImagePath: path.posix.join(userId, originalName),
-    thumbnailImagePath: path.posix.join(userId, thumbName),
+    originalImagePath: originalKey,
+    thumbnailImagePath: thumbKey,
     width: meta.width,
     height: meta.height,
   };
@@ -95,8 +83,8 @@ export async function saveUpload(file: File, userId: string): Promise<SavedUploa
 
 /** Best-effort delete of an image and its thumbnail. Ignores missing files. */
 export async function deleteUpload(originalPath: string): Promise<void> {
-  const abs = resolveUploadPath(originalPath);
-  const thumbAbs = resolveUploadPath(thumbnailPathFor(originalPath));
-  if (abs) await fs.rm(abs, { force: true });
-  if (thumbAbs) await fs.rm(thumbAbs, { force: true });
+  await Promise.all([
+    deleteObject(originalPath),
+    deleteObject(thumbnailPathFor(originalPath)),
+  ]);
 }

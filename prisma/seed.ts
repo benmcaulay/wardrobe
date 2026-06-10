@@ -1,11 +1,9 @@
 import { PrismaClient } from "@prisma/client";
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
+import { putObject } from "../lib/storage";
 
 const prisma = new PrismaClient();
-
-const UPLOADS_ROOT = path.join(process.cwd(), "uploads");
 
 type SeedItem = {
   name: string;
@@ -140,21 +138,21 @@ const SEED_ITEMS: SeedItem[] = [
 ];
 
 async function writePlaceholder(userId: string, idx: number, color: string): Promise<string> {
-  const dir = path.join(UPLOADS_ROOT, userId);
-  await fs.mkdir(dir, { recursive: true });
-  const filename = `seed-${idx}.jpg`;
-  const thumbFilename = `seed-${idx}-thumb.jpg`;
-  await sharp({
+  const key = path.posix.join(userId, `seed-${idx}.jpg`);
+  const thumbKey = path.posix.join(userId, `seed-${idx}-thumb.jpg`);
+  const full = await sharp({
     create: { width: 1024, height: 1024, channels: 3, background: color },
   })
     .jpeg({ quality: 82 })
-    .toFile(path.join(dir, filename));
-  await sharp({
+    .toBuffer();
+  const thumb = await sharp({
     create: { width: 400, height: 400, channels: 3, background: color },
   })
     .jpeg({ quality: 78 })
-    .toFile(path.join(dir, thumbFilename));
-  return path.posix.join(userId, filename);
+    .toBuffer();
+  await putObject(key, full, "image/jpeg");
+  await putObject(thumbKey, thumb, "image/jpeg");
+  return key;
 }
 
 async function main() {

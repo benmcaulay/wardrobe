@@ -83,6 +83,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | `pnpm test`        | Vitest suite (uses stubs)                      |
 | `pnpm test:watch`  | Vitest in watch mode                           |
 | `pnpm test:fal`    | Real fal.ai round-trip smoke (needs `.env`)    |
+| `pnpm test:s3`     | S3/R2 storage-driver integration check         |
 | `pnpm db:seed`     | Re-run the seed script (idempotent)            |
 | `pnpm db:reset`    | Drop and re-create the database, then re-seed  |
 
@@ -154,6 +155,7 @@ lib/
   actions/            Shared server actions (preferences, ghost mannequin, account)
   auth.ts             Demo-user cookie — replace for real auth
   db.ts               Prisma client singleton
+  storage.ts          Storage seam (local disk | S3/R2), key-based API
   uploads.ts          File pipeline (sharp resize, thumbnails, cutout PNGs)
   image-paths.ts      Pure URL helpers, safe for client bundles
 components/           Shared UI (item form, cropper, filters, prefs editor, carousel)
@@ -166,12 +168,26 @@ uploads/              User-uploaded files (gitignored). Served via /api/images.
 __tests__/            Vitest suites
 ```
 
+## Storage
+
+Image files go through a key-based seam (`lib/storage.ts`) with two drivers:
+
+- **local** (default): files under `uploads/`, served by the authenticated
+  image routes. Zero config — great for dev and self-hosting.
+- **s3**: any S3-compatible store, built for **Cloudflare R2**. Set
+  `STORAGE_DRIVER="s3"` (auto when `R2_BUCKET` is set) plus the `R2_*`
+  credentials in `.env`. The image routes then 302-redirect to short-lived
+  signed URLs so object bytes bypass the app server.
+
+The DB-relative paths stored on rows are the object keys, so switching drivers
+needs no data migration. Verify the s3 path with `pnpm test:s3` (runs against an
+in-process S3 server; `docker compose --profile s3 up -d` also provides MinIO).
+
 ## Privacy
 
-Every image you upload stays on this machine — the `uploads/` directory,
-served by a local authenticated route. The background-removal WASM runs
-in-browser. The only payload that leaves your computer is the garment
-(and any context shots) sent to fal.ai when you click **Generate ghost
-mannequin**, plus the result image we download back. Check fal.ai's
-[privacy policy](https://fal.ai/privacy-policy) before uploading sensitive
-images.
+With the local driver, every uploaded image stays on the host (`uploads/`,
+served by an authenticated route); with the s3 driver they live in your bucket.
+The background-removal WASM runs in-browser. The only payload that leaves your
+infrastructure is the garment (and any context shots) sent to fal.ai/Fashn on
+**Generate**, plus the result image downloaded back. Check the provider privacy
+policies before uploading sensitive images.

@@ -1,10 +1,34 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
-import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
-import { bufferToPngDataUri, fileToDataUri, fashnRunTryOn } from "./fashnTryOn";
+import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
+import { bufferToDataUri, bufferToPngDataUri, fashnRunTryOn } from "./fashnTryOn";
+
+const BASE_WIDTH_THUMB = 400;
+
+/** Standard try-on output: a 1024×1366 JPEG + 400px thumbnail, written to storage. */
+async function writeStandardTryOn(userId: string, hash: string, buffer: Buffer): Promise<string> {
+  const key = path.posix.join(userId, `tryon-${hash}.jpg`);
+  const thumbKey = path.posix.join(userId, `tryon-${hash}-thumb.jpg`);
+  const [full, thumb] = await Promise.all([
+    sharp(buffer)
+      .rotate()
+      .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
+      .jpeg({ quality: 88 })
+      .toBuffer(),
+    sharp(buffer)
+      .rotate()
+      .resize({ width: BASE_WIDTH_THUMB, height: BASE_WIDTH_THUMB, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer(),
+  ]);
+  await Promise.all([
+    putObject(key, full, "image/jpeg"),
+    putObject(thumbKey, thumb, "image/jpeg"),
+  ]);
+  return key;
+}
 
 // Real providers (USE_REAL_VIRTUAL_TRYON === "true"):
 // 1) Fashn.ai try-on (FASHN_API_KEY) — one garment per API call; we chain
@@ -142,13 +166,11 @@ Strict requirements:
   return prompt;
 };
 
-async function uploadToFal(absolutePath: string, fallbackName: string): Promise<string> {
-  const buf = await fs.readFile(absolutePath);
-  const ext = path.extname(absolutePath).toLowerCase();
-  const mime =
-    ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-  const file = new File([new Uint8Array(buf)], path.basename(absolutePath) || fallbackName, {
-    type: mime,
+async function uploadKeyToFal(key: string, fallbackName: string): Promise<string> {
+  const buf = await getObject(key);
+  if (!buf) throw new Error(`Missing image: ${key}`);
+  const file = new File([new Uint8Array(buf)], path.basename(key) || fallbackName, {
+    type: contentTypeFor(key),
   });
   return fal.storage.upload(file);
 }
@@ -205,21 +227,15 @@ async function fashnRealVirtualTryOn(
   input: VirtualTryOnInput,
   apiKey: string,
 ): Promise<VirtualTryOnResult> {
-  const personAbs = resolveUploadPath(input.personImagePath);
-  if (!personAbs) throw new Error(`Invalid person path: ${input.personImagePath}`);
-  await fs.access(personAbs);
+  const personBuf = await getObject(input.personImagePath);
+  if (!personBuf) throw new Error(`Invalid person path: ${input.personImagePath}`);
 
-  type Step = { abs: string; category?: string };
+  type Step = { key: string; category?: string };
   const steps: Step[] = [];
   for (let i = 0; i < input.garmentImagePaths.length; i++) {
     const rel = input.garmentImagePaths[i];
-    const abs = resolveUploadPath(rel);
-    if (!abs) continue;
-    try {
-      await fs.access(abs);
-      steps.push({ abs, category: input.garmentCategories?.[i] });
-    } catch {
-      // skip missing garments
+    if (await objectExists(rel)) {
+      steps.push({ key: rel, category: input.garmentCategories?.[i] });
     }
   }
   if (steps.length === 0) {
@@ -228,14 +244,16 @@ async function fashnRealVirtualTryOn(
 
   const useMax = fashnModelIsTryOnMax(FASHN_TRYON_MODEL);
 
-  let modelImage = await fileToDataUri(personAbs);
+  let modelImage = bufferToDataUri(personBuf, contentTypeFor(input.personImagePath));
   const startedAt = Date.now();
   let lastResultBuf: Buffer | null = null;
 
   try {
     for (let i = 0; i < steps.length; i++) {
-      const { abs, category } = steps[i]!;
-      const garmentImage = await fileToDataUri(abs);
+      const { key, category } = steps[i]!;
+      const garmentBuf = await getObject(key);
+      if (!garmentBuf) throw new Error(`Missing garment image: ${key}`);
+      const garmentImage = bufferToDataUri(garmentBuf, contentTypeFor(key));
       // PNG output: the only lossy compression is then our single final JPEG
       // encode, instead of Fashn JPEG -> (re-JPEG per chained step) -> JPEG.
       const inputs: Record<string, unknown> = useMax
@@ -282,34 +300,12 @@ async function fashnRealVirtualTryOn(
   );
 
   if (!lastResultBuf) throw new Error("Fashn returned no image data");
-  const buffer = lastResultBuf;
 
-  const dir = path.join(UPLOADS_ROOT, input.userId);
-  await fs.mkdir(dir, { recursive: true });
-  const hash = deterministicHash(input);
-  const filename = `tryon-${hash}.jpg`;
-  const thumbName = `tryon-${hash}-thumb.jpg`;
-  const outAbs = path.join(dir, filename);
-  const thumbAbs = path.join(dir, thumbName);
-
-  await sharp(buffer)
-    .rotate()
-    .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
-    .jpeg({ quality: 88 })
-    .toFile(outAbs);
-  await sharp(buffer)
-    .rotate()
-    .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 80 })
-    .toFile(thumbAbs);
-
-  return {
-    resultImagePath: path.posix.join(input.userId, filename),
-    credits: 0,
-  };
+  const key = await writeStandardTryOn(input.userId, deterministicHash(input), lastResultBuf);
+  return { resultImagePath: key, credits: 0 };
 }
 
-type FalGarment = { abs: string; category?: string; description?: string };
+type FalGarment = { key: string; category?: string; description?: string };
 
 /** idm-vton `description`: prefer the rich per-garment text, fall back to category. */
 export function vtonDescription(g: {
@@ -326,10 +322,10 @@ export function vtonDescription(g: {
  * The result is already fal-hosted, so we feed the URL straight back without
  * re-downloading or re-encoding — the chain stays lossless.
  */
-async function runFalVtonChain(personAbs: string, garments: FalGarment[]): Promise<string> {
+async function runFalVtonChain(personKey: string, garments: FalGarment[]): Promise<string> {
   const [humanStart, ...garmentUrls] = await Promise.all([
-    uploadToFal(personAbs, "person.jpg"),
-    ...garments.map((g) => uploadToFal(g.abs, "garment.jpg")),
+    uploadKeyToFal(personKey, "person.jpg"),
+    ...garments.map((g) => uploadKeyToFal(g.key, "garment.jpg")),
   ]);
 
   let humanUrl = humanStart;
@@ -359,15 +355,15 @@ async function runFalVtonChain(personAbs: string, garments: FalGarment[]): Promi
  * image_urls plus a single descriptive prompt, and composite in one call.
  */
 async function runFalEditComposite(
-  personAbs: string,
+  personKey: string,
   garments: FalGarment[],
   extraPrompt: string | undefined,
 ): Promise<string> {
   // Independent uploads — run concurrently; Promise.all preserves order so
   // image_urls stays [person, ...garments].
   const [personUrl, ...garmentUrls] = await Promise.all([
-    uploadToFal(personAbs, "person.jpg"),
-    ...garments.map((g) => uploadToFal(g.abs, "garment.jpg")),
+    uploadKeyToFal(personKey, "person.jpg"),
+    ...garments.map((g) => uploadKeyToFal(g.key, "garment.jpg")),
   ]);
   const response = await fal.subscribe(FAL_VTON_MODEL, {
     input: {
@@ -391,25 +387,21 @@ async function runFalEditComposite(
 async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTryOnResult> {
   ensureFalConfigured();
 
-  const personAbs = resolveUploadPath(input.personImagePath);
-  if (!personAbs) throw new Error(`Invalid person path: ${input.personImagePath}`);
-  await fs.access(personAbs);
+  if (!(await objectExists(input.personImagePath))) {
+    throw new Error(`Invalid person path: ${input.personImagePath}`);
+  }
 
   // Keep each garment paired with its category + description; missing files are
   // dropped here so downstream indices stay aligned.
   const garments: FalGarment[] = [];
   for (let i = 0; i < input.garmentImagePaths.length; i++) {
-    const abs = resolveUploadPath(input.garmentImagePaths[i]);
-    if (!abs) continue;
-    try {
-      await fs.access(abs);
+    const rel = input.garmentImagePaths[i];
+    if (await objectExists(rel)) {
       garments.push({
-        abs,
+        key: rel,
         category: input.garmentCategories?.[i],
         description: input.garmentDescriptions?.[i],
       });
-    } catch {
-      // skip missing garments silently
     }
   }
   if (garments.length === 0) {
@@ -420,8 +412,8 @@ async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTry
   let resultUrl: string;
   try {
     resultUrl = falModelUsesVtonContract(FAL_VTON_MODEL)
-      ? await runFalVtonChain(personAbs, garments)
-      : await runFalEditComposite(personAbs, garments, input.prompt);
+      ? await runFalVtonChain(input.personImagePath, garments)
+      : await runFalEditComposite(input.personImagePath, garments, input.prompt);
   } catch (err) {
     const ms = Date.now() - startedAt;
     console.error(
@@ -439,29 +431,8 @@ async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTry
   if (!fetched.ok) throw new Error(`Failed to download result: ${fetched.status}`);
   const buffer = Buffer.from(await fetched.arrayBuffer());
 
-  const dir = path.join(UPLOADS_ROOT, input.userId);
-  await fs.mkdir(dir, { recursive: true });
-  const hash = deterministicHash(input);
-  const filename = `tryon-${hash}.jpg`;
-  const thumbName = `tryon-${hash}-thumb.jpg`;
-  const outAbs = path.join(dir, filename);
-  const thumbAbs = path.join(dir, thumbName);
-
-  await sharp(buffer)
-    .rotate()
-    .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
-    .jpeg({ quality: 88 })
-    .toFile(outAbs);
-  await sharp(buffer)
-    .rotate()
-    .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 80 })
-    .toFile(thumbAbs);
-
-  return {
-    resultImagePath: path.posix.join(input.userId, filename),
-    credits: 1,
-  };
+  const key = await writeStandardTryOn(input.userId, deterministicHash(input), buffer);
+  return { resultImagePath: key, credits: 1 };
 }
 
 // -----------------------------------------------------------------------------
@@ -469,20 +440,15 @@ async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTry
 // -----------------------------------------------------------------------------
 
 async function stubVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTryOnResult> {
-  const personAbs = resolveUploadPath(input.personImagePath);
-  if (!personAbs) throw new Error(`Invalid person path: ${input.personImagePath}`);
-  await fs.access(personAbs);
+  const personSrc = await getObject(input.personImagePath);
+  if (!personSrc) throw new Error(`Invalid person path: ${input.personImagePath}`);
 
-  const dir = path.join(UPLOADS_ROOT, input.userId);
-  await fs.mkdir(dir, { recursive: true });
   const hash = deterministicHash(input);
-  const filename = `tryon-${hash}.jpg`;
-  const thumbName = `tryon-${hash}-thumb.jpg`;
-  const outAbs = path.join(dir, filename);
-  const thumbAbs = path.join(dir, thumbName);
+  const key = path.posix.join(input.userId, `tryon-${hash}.jpg`);
+  const thumbKey = path.posix.join(input.userId, `tryon-${hash}-thumb.jpg`);
 
   // Resize person to fill the canvas.
-  const personBuf = await sharp(personAbs)
+  const personBuf = await sharp(personSrc)
     .rotate()
     .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "cover" })
     .toBuffer();
@@ -495,24 +461,19 @@ async function stubVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTryOnR
   const garmentPaths = input.garmentImagePaths.slice(0, 4);
   let cursorX = stripPad;
   for (const rel of garmentPaths) {
-    const abs = resolveUploadPath(rel);
-    if (!abs) continue;
-    try {
-      await fs.access(abs);
-      const garmentTile = await sharp(abs)
-        .rotate()
-        .resize({ width: slotSize, height: slotSize, fit: "cover" })
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      overlays.push({
-        input: garmentTile,
-        top: BASE_HEIGHT - stripHeight + stripPad,
-        left: cursorX,
-      });
-      cursorX += slotSize + stripPad;
-    } catch {
-      // skip
-    }
+    const src = await getObject(rel);
+    if (!src) continue;
+    const garmentTile = await sharp(src)
+      .rotate()
+      .resize({ width: slotSize, height: slotSize, fit: "cover" })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    overlays.push({
+      input: garmentTile,
+      top: BASE_HEIGHT - stripHeight + stripPad,
+      left: cursorX,
+    });
+    cursorX += slotSize + stripPad;
   }
 
   const stripBg = Buffer.from(
@@ -527,14 +488,14 @@ async function stubVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTryOnR
   overlays.unshift({ input: stripBg, top: BASE_HEIGHT - stripHeight, left: 0 });
 
   const composed = await sharp(personBuf).composite(overlays).jpeg({ quality: 88 }).toBuffer();
-  await fs.writeFile(outAbs, composed);
-  await sharp(composed)
+  const thumb = await sharp(composed)
     .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 78 })
-    .toFile(thumbAbs);
+    .toBuffer();
+  await Promise.all([
+    putObject(key, composed, "image/jpeg"),
+    putObject(thumbKey, thumb, "image/jpeg"),
+  ]);
 
-  return {
-    resultImagePath: path.posix.join(input.userId, filename),
-    credits: 1,
-  };
+  return { resultImagePath: key, credits: 1 };
 }

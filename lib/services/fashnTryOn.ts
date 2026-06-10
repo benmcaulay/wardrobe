@@ -24,6 +24,11 @@ export async function fileToDataUri(absolutePath: string): Promise<string> {
   return `data:${mime};base64,${buf.toString("base64")}`;
 }
 
+/** Build a data URI from an in-memory buffer + its content type. */
+export function bufferToDataUri(buf: Buffer, contentType: string): string {
+  return `data:${contentType};base64,${buf.toString("base64")}`;
+}
+
 /** Re-encode as JPEG data URI for chaining (consistent MIME for follow-up try-ons). */
 export async function bufferToJpegDataUri(buf: Buffer): Promise<string> {
   const jpeg = await sharp(buf).rotate().jpeg({ quality: 90, mozjpeg: true }).toBuffer();
