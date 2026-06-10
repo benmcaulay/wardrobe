@@ -52,7 +52,10 @@ const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
   full: "GENERAL",
 };
 
-const FAL_GHOST_MODEL = process.env.FAL_GHOST_MODEL ?? "fal-ai/gemini-25-flash-image/edit";
+// Default to Seedream v4 edit: top-tier prompt adherence (it actually obeys the
+// camera-angle requirements below, where the gemini editor tended to ignore
+// them) at the same ~$0.04/call. Override with FAL_GHOST_MODEL to switch.
+const FAL_GHOST_MODEL = process.env.FAL_GHOST_MODEL ?? "fal-ai/seedream/v4/edit";
 const REAL_MODE = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
 
 let falConfigured = false;
@@ -115,8 +118,20 @@ const SINGLE_ITEM_FIDELITY = `Single-item fidelity (required):
 const WHITE_ITEM_BACKGROUND_SEPARATION =
   "For white, off-white, or very pale items: add very light, natural shading on folds, seams, collars, cuffs, and silhouette edges (still soft even studio light, not heavy shadows) so every part of the garment or shoe reads clearly against the pure white background and no section visually merges into the backdrop.";
 
-const APPAREL_VIEW_DEFAULT =
-  "- Front-facing centred composition (or a natural product angle for non-apparel), the entire depicted item visible with comfortable margin around it.";
+/**
+ * Camera angle is the requirement image models most often ignore, so we state
+ * it as a STRICT lead requirement in directive language and never offer an
+ * "or" that lets the model choose. Both angles are env-overridable so the
+ * catalog look can change without a code edit.
+ */
+const APPAREL_ANGLE =
+  process.env.GHOST_APPAREL_ANGLE?.trim() ||
+  "facing straight forward, squared to the camera — the front of the piece flat to the lens, with no rotation, tilt, or three-quarter turn";
+const FOOTWEAR_ANGLE =
+  process.env.GHOST_FOOTWEAR_ANGLE?.trim() ||
+  "both shoes angled ~45° to the viewer's left (toes pointing left), shown together as a matched pair seen from the same outer side, at an identical angle and height";
+
+const APPAREL_VIEW_DEFAULT = `- Camera angle (STRICT — do not deviate): the garment is ${APPAREL_ANGLE}. Centred composition, the entire item visible with comfortable margin. For a non-apparel accessory, use its natural front-facing catalog angle.`;
 
 const APPAREL_VIEW_REAR =
   "- Rear-facing ghost-mannequin composition: the PRIMARY (first) reference image defines which side of the garment to show — if it shows the back, output a professional back view with that side centred; show yoke, shoulder blades, back neckline, and hem clearly. Do not substitute the front/chest unless the primary reference does not show the back of the piece.";
@@ -139,9 +154,9 @@ const APPAREL_PROMPT = (
 ${SINGLE_ITEM_FIDELITY}
 
 Requirements:
+${viewLine}
 - Pure white seamless studio background (#ffffff).
 - Garment shown in a 3D form as if worn by an invisible mannequin (when the piece is apparel): sleeves filled out, shoulders shaped, collar / neckline natural, garment hanging with realistic drape and silhouette. For small accessories (hats, bags, etc.), present them as a crisp catalog product shot — correct scale and proportion — without attaching them to a body or adding other garments.
-${viewLine}
 - Soft even studio lighting, no harsh cast shadows.
 - ${WHITE_ITEM_BACKGROUND_SEPARATION}
 - E-commerce catalog quality.
@@ -155,9 +170,10 @@ const FOOTWEAR_PROMPT = `Generate a clean e-commerce product photograph of this 
 ${SINGLE_ITEM_FIDELITY}
 
 Requirements:
+- Camera angle (STRICT — do not deviate): ${FOOTWEAR_ANGLE}. Do not face them toe-on to the camera, splay them apart, or mirror them into a heel-to-heel "V".
 - Pure white seamless studio background (#ffffff).
 - Reproduce only the footwear from the reference — same silhouette, colours, materials, soles, logos, and laces. Do not substitute shirts, jackets, pants, or any other apparel.
-- Pair presented in a professional catalog layout: natural three-quarter or front angle, balanced composition, entire pair visible with comfortable margin.
+- Balanced catalog composition, the entire pair visible with comfortable margin.
 - Soft even studio lighting, no harsh cast shadows.
 - ${WHITE_ITEM_BACKGROUND_SEPARATION}
 - Preserve fine detail: mesh, suede, stitching, sole tread, branding.
@@ -166,7 +182,7 @@ Requirements:
 const PROMPT = (category: GhostMannequinCategory, compositionHint: "default" | "rear"): string =>
   category === "footwear" ? FOOTWEAR_PROMPT : APPAREL_PROMPT(category, compositionHint);
 
-function buildPrompt(
+export function buildPrompt(
   category: GhostMannequinCategory,
   instructions: string | undefined,
   compositionHint: "default" | "rear",
