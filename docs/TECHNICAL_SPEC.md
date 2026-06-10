@@ -44,7 +44,7 @@ API keys** and can be switched to real providers one file at a time.
 | Background removal | **Production (client-side)** | Free WASM, no per-call cost |
 | Swipe-to-sell (strategic core) | **Working, manual hand-off** | Drafts + deep-links; no marketplace API posting yet (§6.4) |
 | Auth | **Demonstration-grade** | Single demo-user cookie; must be replaced (§9.1) |
-| Persistence | **Demonstration-grade** | SQLite + JSON-as-text; migrate to Postgres (§11.1) |
+| Persistence | **Production-shaped** | PostgreSQL 16; JSON columns still TEXT (§11.1) |
 | File storage | **Demonstration-grade** | Local disk; migrate to object storage + CDN (§11.2) |
 | Payments / monetization | **Stub** | Credit ledger exists; no payment processor (§10) |
 
@@ -120,7 +120,7 @@ Browser ──HTTP──> Next.js (App Router)
   │                   ├── Server Actions   (write: Prisma + services)
   │                   └── Route Handlers    (/api/images, /api/demo, /api/backup)
   │                          │
-  │                          ├── Prisma ──> SQLite (→ Postgres)
+  │                          ├── Prisma ──> PostgreSQL
   │                          ├── uploads/  (local disk → object storage)
   │                          └── lib/services/* ──> fal.ai / Fashn / SerpAPI / …
   └── @imgly/background-removal (WASM, in-browser; no server round-trip)
@@ -154,9 +154,10 @@ Browser ──HTTP──> Next.js (App Router)
 
 ## 4. Data Model
 
-Persisted via Prisma. SQLite today; structured fields are stored as
-JSON-encoded **text** (SQLite lacks a native JSON type) through helpers in
-`lib/json.ts`, with a documented one-migration path to Postgres `Json` columns.
+Persisted via Prisma on **PostgreSQL 16** (local dev via `docker-compose.yml`).
+Structured fields are stored as JSON-encoded **text** through helpers in
+`lib/json.ts` — a holdover from the original SQLite datasource, with a
+documented one-migration path to native `Json` columns (§11.1).
 
 ### 4.1 Entities
 
@@ -184,8 +185,8 @@ JSON-encoded **text** (SQLite lacks a native JSON type) through helpers in
 
 ### 4.3 Schema observations (diligence)
 
-- **JSON-as-text** is a deliberate SQLite accommodation, documented in-schema. It
-  is the single largest item in the Postgres migration but is mechanical.
+- **JSON-as-text** is a holdover from the original SQLite datasource, documented
+  in-schema. Converting to native `Json` is planned as its own migration (§11.1).
 - Money is stored as integer **cents** with an explicit `currency` — correct.
 - The model is multi-tenant-ready (every row is user-scoped and indexed); it has
   simply not yet been *run* multi-tenant because auth is demo-grade (§9.1).
@@ -419,11 +420,12 @@ The recommerce feature is **not yet monetized**; §13 outlines the take-rate mod
 
 ## 11. Productionization Roadmap (Infrastructure)
 
-### 11.1 Database: SQLite → Postgres
+### 11.1 Database: PostgreSQL — **done**; `Json` columns remaining
 
-Mechanical: switch the Prisma datasource, convert JSON-as-text columns to native
-`Json` (helpers already centralize encoding), provision managed Postgres. Schema,
-indexes, and relations are already production-shaped.
+The datasource is PostgreSQL 16 (migrations re-baselined; `docker-compose.yml`
+for local dev). Remaining: convert JSON-as-text columns to native `Json` — a
+deliberate follow-up, since it changes the write contract at every call site of
+the `lib/json.ts` helpers — and provision managed Postgres for deployment.
 
 ### 11.2 Storage: local disk → object storage + CDN
 
@@ -503,7 +505,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 | R2 | Demo-grade auth blocks multi-user launch | **High** | Real auth provider; isolated to 3 functions (§9.1) |
 | R3 | AI output quality variance (identity/angle/fidelity) | Medium | Dedicated models (idm-vton/SeeDream), strict prompts, env-tunable post-processing; all swapped this cycle |
 | R4 | AI cost scaling with usage | Medium | Credit metering exists; add per-user quotas + provider budget caps |
-| R5 | Local disk + SQLite don't scale horizontally | Medium | Postgres + object storage (§11) — mechanical |
+| R5 | Local-disk uploads don't scale horizontally | Medium | Object storage + CDN (§11.2) — DB is already Postgres |
 | R6 | Provider dependence (fal.ai/Fashn) | Medium | Single-file service seam makes providers swappable; multi-provider already demonstrated |
 | R7 | No payment rails | Medium | Stripe integration (§10, §13 Phase 3) |
 | R8 | Legal/ToS exposure in cross-listing | Medium | Use official APIs/partner programs only; legal review per channel |

@@ -3,16 +3,18 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 // NOTE on JSON columns:
-// SQLite doesn't support Prisma's native `Json` type, so structured fields
-// (colors, styleTags, season, stylePrefs, sourceData) are stored as
-// JSON-encoded strings. Use the helpers in lib/json.ts to read/write them so
-// the encoding stays consistent. When we migrate to Postgres we can switch
-// these back to `Json` with a single migration.
+// Structured fields (colors, styleTags, season, stylePrefs, sourceData) are
+// stored as JSON-encoded strings (TEXT), a holdover from the original SQLite
+// datasource. Use the helpers in lib/json.ts to read/write them so the
+// encoding stays consistent. Converting them to native `Json` columns is a
+// planned follow-up: it changes encode()'s contract at every write site, so
+// it gets its own migration + PR rather than riding along with the engine
+// switch.
 
 model User {
   id                String            @id @default(cuid())

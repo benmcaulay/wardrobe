@@ -11,8 +11,6 @@ tsconfig.tsbuildinfo
 .env.*.local
 
 # db
-prisma/dev.db
-prisma/dev.db-journal
 prisma/migrations/migration_lock.toml.bak
 
 # uploads (user data)
