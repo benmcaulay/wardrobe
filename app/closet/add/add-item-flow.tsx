@@ -87,7 +87,7 @@ function getClipboardImageFile(e: ClipboardEvent): File | null {
 /** Matches server `ALLOWED_MIME` (lib/uploads). */
 const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 
-function clearFileInputs(...refs: Array<RefObject<HTMLInputElement | null>>) {
+function clearFileInputs(...refs: Array<RefObject<HTMLInputElement>>) {
   for (const r of refs) {
     if (r.current) r.current.value = "";
   }
@@ -599,7 +599,7 @@ function IdleView({
   error,
 }: {
   onFile: (f: File) => void;
-  libraryInputRef: RefObject<HTMLInputElement | null>;
+  libraryInputRef: RefObject<HTMLInputElement>;
   onTakePhoto: () => void;
   error?: string;
 }) {
@@ -1022,7 +1022,7 @@ function ReadyView({
   categories: string[];
   styleTagsList: string[];
   credits: number;
-  extraInputRef: RefObject<HTMLInputElement | null>;
+  extraInputRef: RefObject<HTMLInputElement>;
   webMatchAutofill: boolean;
   onTakePhotoExtra: () => void;
   onSearchWeb: (query: string) => Promise<ProductMatch[]>;

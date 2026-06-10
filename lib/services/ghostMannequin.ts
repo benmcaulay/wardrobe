@@ -6,14 +6,14 @@ import { fal } from "@fal-ai/client";
 import { UPLOADS_ROOT, resolveUploadPath } from "../uploads";
 import { whitenBackground } from "./whiten-background";
 
-// Real provider: fal.ai Gemini 2.5 Flash Image (edit). Takes a primary garment
-// image plus optional context references and returns a single composite, all
-// in one request. ~3-5s wall time, ~$0.04 per call.
+// Real provider: fal.ai image-edit model (default: SeedDream v4 Edit). Takes a
+// primary garment image plus optional context references and returns a single
+// composite, all in one request. ~3-5s wall time, ~$0.03-0.04 per call.
 //
 // Alternative endpoints (drop-in via FAL_GHOST_MODEL env var):
+// - "fal-ai/gemini-25-flash-image/edit" — Gemini, weaker angle adherence
 // - "fal-ai/flux-pro/kontext"           — Flux Kontext, similar pricing
 // - "fal-ai/flux-pro/kontext/max/multi" — Flux Kontext Max (4 refs, $$$)
-// - "fal-ai/seedream/v4/edit"           — ByteDance SeedDream
 // - "fal-ai/idm-vton" / "fal-ai/ootd"   — true VTON (need a person ref)
 
 export { mapCategoryToGhost, type GhostMannequinCategory } from "./ghost-mannequin-shared";

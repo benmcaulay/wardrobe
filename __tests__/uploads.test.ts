@@ -28,7 +28,7 @@ async function makeJpeg(width = 2000, height = 2000): Promise<Buffer> {
 }
 
 function fileFrom(buf: Buffer, name: string, type: string): File {
-  return new File([buf], name, { type });
+  return new File([new Uint8Array(buf)], name, { type });
 }
 
 describe("thumbnailPathFor", () => {
