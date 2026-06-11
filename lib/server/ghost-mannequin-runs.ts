@@ -1,6 +1,8 @@
 import type { User } from "@prisma/client";
+import { checkAiQuota } from "@/lib/ai-guardrails";
 import { prisma } from "@/lib/db";
 import { encode } from "@/lib/json";
+import { log } from "@/lib/log";
 import {
   createGhostMannequin,
   mapCategoryToGhost,
@@ -77,6 +79,8 @@ export async function runPreviewGhostMannequin(
   if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
+  const quota = await checkAiQuota(user.id);
+  if (!quota.ok) return quota;
 
   let stack: { garmentImagePath: string; extraImagePaths: string[] };
   try {
@@ -100,7 +104,7 @@ export async function runPreviewGhostMannequin(
       compositionHint: input.compositionHint ?? "default",
     });
   } catch (err) {
-    console.error("[runPreviewGhostMannequin] failed:", (err as Error).message);
+    log.error("ghost.preview.failed", err, { userId: user.id });
     return { ok: false, error: (err as Error).message ?? "Generation failed" };
   }
 
@@ -139,6 +143,8 @@ export async function runGenerateGhostViewFor(
   if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
+  const quota = await checkAiQuota(user.id);
+  if (!quota.ok) return quota;
 
   let allowedExtras: string[] = [];
   try {
@@ -189,7 +195,7 @@ export async function runGenerateGhostViewFor(
       compositionHint: compositionHint ?? "default",
     });
   } catch (err) {
-    console.error("[runGenerateGhostViewFor] failed:", (err as Error).message);
+    log.error("ghost.view.failed", err, { userId: user.id, itemId });
     return { ok: false, error: (err as Error).message ?? "Generation failed" };
   }
 

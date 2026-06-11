@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { checkAiQuota } from "@/lib/ai-guardrails";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encode } from "@/lib/json";
+import { log } from "@/lib/log";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import {
   createVirtualTryOn,
@@ -136,6 +138,8 @@ export async function generateVirtualTryOn(
   if (REAL_VTON && virtualTryOnUsesAppCredits() && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
+  const quota = await checkAiQuota(user.id);
+  if (!quota.ok) return quota;
 
   if (input.outfitId) {
     const outfit = await prisma.outfit.findUnique({ where: { id: input.outfitId } });
@@ -168,7 +172,7 @@ export async function generateVirtualTryOn(
       prompt: input.prompt,
     });
   } catch (err) {
-    console.error("[generateVirtualTryOn] failed:", (err as Error).message);
+    log.error("tryon.generate.failed", err, { userId: user.id, items: input.itemIds.length });
     return { ok: false, error: (err as Error).message ?? "Generation failed" };
   }
 

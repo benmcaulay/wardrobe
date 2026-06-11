@@ -4,6 +4,9 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "12mb",
     },
+    // Keep @sentry/node (and its OpenTelemetry tree) out of the webpack bundle;
+    // it's server-only, loaded lazily at runtime when SENTRY_DSN is set.
+    serverComponentsExternalPackages: ["@sentry/node"],
   },
   async headers() {
     return [

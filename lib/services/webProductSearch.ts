@@ -1,3 +1,4 @@
+import { log } from "../log";
 import { serpApiEnabled, serpApiGet } from "./serpapi-client";
 import type { ProductMatch } from "./reverseImageSearch";
 import { pick, range, seededRng } from "./_rng";
@@ -126,7 +127,7 @@ export async function searchWebProducts(query: string): Promise<ProductMatch[]> 
     try {
       return await searchProductsSerp(q);
     } catch (err) {
-      console.error("[searchWebProducts] SerpAPI failed:", (err as Error).message);
+      log.error("web-product-search.serpapi.failed", err);
       throw err;
     }
   }

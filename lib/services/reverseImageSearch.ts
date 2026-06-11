@@ -1,3 +1,4 @@
+import { log } from "../log";
 import { signedPublicImageUrl } from "../public-image-url";
 import { serpApiEnabled, serpApiGet } from "./serpapi-client";
 import { pick, range, seededRng } from "./_rng";
@@ -109,9 +110,9 @@ function mapLensMatch(item: LensMatch, confidence: number): ProductMatch | null 
 async function reverseImageSearchSerp(imagePath: string): Promise<ProductMatch[]> {
   const imageUrl = signedPublicImageUrl(imagePath);
   if (!imageUrl) {
-    console.warn(
-      "[reverseImageSearch] PUBLIC_APP_URL and PUBLIC_IMAGE_SECRET required for Google Lens; using stub.",
-    );
+    log.warn("reverse-image.lens.unconfigured", {
+      hint: "PUBLIC_APP_URL and PUBLIC_IMAGE_SECRET required for Google Lens; using stub",
+    });
     return reverseImageSearchStub(imagePath);
   }
 
@@ -177,7 +178,7 @@ export async function reverseImageSearch(imagePath: string): Promise<ProductMatc
     try {
       return await reverseImageSearchSerp(imagePath);
     } catch (err) {
-      console.error("[reverseImageSearch] SerpAPI failed:", (err as Error).message);
+      log.error("reverse-image.serpapi.failed", err);
       throw err;
     }
   }

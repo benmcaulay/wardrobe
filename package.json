@@ -36,6 +36,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1066.0",
     "@fal-ai/client": "^1.10.0",
     "@prisma/client": "^5.22.0",
+    "@sentry/node": "^8.55.2",
     "archiver": "5.3.2",
     "clsx": "^2.1.1",
     "next": "14.2.18",

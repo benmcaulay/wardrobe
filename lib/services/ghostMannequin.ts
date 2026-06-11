@@ -2,6 +2,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
+import { log } from "../log";
 import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
 import { whitenBackground } from "./whiten-background";
 
@@ -249,12 +250,14 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
       throw new Error("fal.ai returned no image url");
     }
   } catch (err) {
-    const ms = Date.now() - startedAt;
-    console.error(`[ghost-mannequin] fal call failed after ${ms}ms (model=${FAL_GHOST_MODEL}):`, (err as Error).message);
+    log.error("ghost.fal.failed", err, { model: FAL_GHOST_MODEL, ms: Date.now() - startedAt });
     throw new Error(`Ghost-mannequin generation failed: ${(err as Error).message}`);
   }
-  const elapsedMs = Date.now() - startedAt;
-  console.log(`[ghost-mannequin] fal ${FAL_GHOST_MODEL} ok in ${elapsedMs}ms (refs=${1 + extraUrls.length})`);
+  log.info("ghost.fal.ok", {
+    model: FAL_GHOST_MODEL,
+    refs: 1 + extraUrls.length,
+    ms: Date.now() - startedAt,
+  });
 
   // Download the result. fal models prompt for #ffffff but routinely emit
   // near-white grays; whitenBackground() flood-fills the actual background to
