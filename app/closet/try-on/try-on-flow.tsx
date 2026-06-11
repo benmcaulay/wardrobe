@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreditMark } from "@/components/credit-mark";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
@@ -8,10 +8,15 @@ import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
   deletePersonPhoto,
   deleteOutfit,
-  generateVirtualTryOn,
+  enqueueVirtualTryOn,
+  getTryOnJobStatus,
   saveOutfit,
   uploadPersonPhoto,
 } from "@/lib/actions/virtual-tryon";
+
+/** Poll a queued try-on job until it finishes, or time out (~4 min). */
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 4 * 60 * 1000;
 
 const MAX_PHOTOS = 5;
 
@@ -80,7 +85,7 @@ export function TryOnFlow({
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
   const [credits, setCredits] = useState(initialCredits);
-  const [generating, startGenerate] = useTransition();
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GeneratedResult>(null);
   const [savingOutfit, setSavingOutfit] = useState(false);
@@ -177,13 +182,14 @@ export function TryOnFlow({
     }
   }
 
-  function onGenerate() {
-    if (!selectedPhotoId || selectedItemIds.length === 0) return;
+  async function onGenerate() {
+    if (!selectedPhotoId || selectedItemIds.length === 0 || generating) return;
     setError(null);
     setResult(null);
+    setGenerating(true);
     const itemIds = [...selectedItemIds];
-    startGenerate(async () => {
-      const res = await generateVirtualTryOn({
+    try {
+      const res = await enqueueVirtualTryOn({
         personPhotoId: selectedPhotoId,
         itemIds,
         outfitId: selectedOutfitId,
@@ -193,10 +199,28 @@ export function TryOnFlow({
         setError(res.error);
         return;
       }
-      setResult({ resultImagePath: res.resultImagePath, itemIds });
-      setCredits(res.creditsRemaining);
-      router.refresh();
-    });
+      // Poll the background job until it finishes (or we time out).
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        const status = await getTryOnJobStatus(res.jobId);
+        if (!status.ok) {
+          setError(status.error);
+          return;
+        }
+        if (status.status === "succeeded") {
+          setResult({ resultImagePath: status.resultImagePath, itemIds });
+          setCredits(status.creditsRemaining);
+          router.refresh();
+          return;
+        }
+      }
+      setError("This is taking longer than expected. Check your try-on history shortly.");
+    } catch {
+      setError("Something went wrong starting the try-on. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function onSaveOutfit() {

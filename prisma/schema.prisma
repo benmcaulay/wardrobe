@@ -37,6 +37,34 @@ model User {
   packingTrips      PackingTrip[]
   accounts          Account[]
   sessions          Session[]
+  generationJobs    GenerationJob[]
+}
+
+// Background generation job. Generation (esp. multi-garment virtual try-on,
+// which chains one provider call per garment) is too slow to run inside a
+// request on serverless hosts, so it's queued here and executed by a worker
+// (scripts/worker.ts). The UI enqueues, then polls status.
+//   type:   "virtual_tryon" (more later)
+//   status: "queued" | "running" | "succeeded" | "failed"
+//   payload/result: JSON-encoded (see lib/jobs/*)
+model GenerationJob {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String
+  status      String    @default("queued")
+  payload     String
+  result      String?
+  error       String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status, createdAt])
 }
 
 // --- NextAuth (Auth.js) adapter models -------------------------------------

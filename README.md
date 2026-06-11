@@ -82,8 +82,10 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | `pnpm start`       | Production server (`next start`)               |
 | `pnpm test`        | Vitest suite (uses stubs)                      |
 | `pnpm test:watch`  | Vitest in watch mode                           |
+| `pnpm worker`      | Background generation worker (try-on jobs)     |
 | `pnpm test:fal`    | Real fal.ai round-trip smoke (needs `.env`)    |
 | `pnpm test:s3`     | S3/R2 storage-driver integration check         |
+| `pnpm test:jobs`   | Job-queue integration check (needs DB)         |
 | `pnpm db:seed`     | Re-run the seed script (idempotent)            |
 | `pnpm db:reset`    | Drop and re-create the database, then re-seed  |
 
@@ -155,6 +157,7 @@ lib/
   actions/            Shared server actions (preferences, ghost mannequin, account)
   auth.ts             Demo-user cookie — replace for real auth
   db.ts               Prisma client singleton
+  jobs/               Generation job queue (enqueue, claim, runner, worker loop)
   storage.ts          Storage seam (local disk | S3/R2), key-based API
   uploads.ts          File pipeline (sharp resize, thumbnails, cutout PNGs)
   image-paths.ts      Pure URL helpers, safe for client bundles
@@ -167,6 +170,24 @@ scripts/
 uploads/              User-uploaded files (gitignored). Served via /api/images.
 __tests__/            Vitest suites
 ```
+
+## Background jobs
+
+Virtual try-on (especially multi-garment outfits, which chain one provider call
+per garment) is too slow to run inside a request on serverless hosts, so it's a
+**queued background job**. The UI enqueues via `enqueueVirtualTryOn`, then polls
+`getTryOnJobStatus`; a worker executes the job and writes the result.
+
+Run the worker alongside the web server:
+
+```bash
+pnpm worker        # polls the GenerationJob queue (Postgres) and runs jobs
+```
+
+Jobs are claimed with `FOR UPDATE SKIP LOCKED`, so you can run several workers
+safely. Transient failures retry (up to `maxAttempts`); bad input fails
+terminally. Ghost-mannequin generation is a single fast call and still runs
+synchronously. Verify the queue end-to-end with `pnpm test:jobs`.
 
 ## Storage
 

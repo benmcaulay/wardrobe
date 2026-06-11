@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "worker": "tsx scripts/worker.ts",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:fal": "node --env-file=.env --import tsx scripts/test-fal.ts",
     "test:s3": "tsx scripts/verify-s3.ts",
+    "test:jobs": "tsx scripts/verify-jobs.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "postinstall": "prisma generate"

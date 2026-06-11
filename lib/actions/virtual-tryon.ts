@@ -5,13 +5,9 @@ import { checkAiQuota } from "@/lib/ai-guardrails";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encode } from "@/lib/json";
-import { log } from "@/lib/log";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
-import {
-  createVirtualTryOn,
-  virtualTryOnUsesAppCredits,
-  type VirtualTryOnResult,
-} from "@/lib/services/virtualTryOn";
+import { virtualTryOnUsesAppCredits } from "@/lib/services/virtualTryOn";
+import { enqueueJob, getJobForUser, type VirtualTryOnJobResult } from "@/lib/jobs/queue";
 
 const REAL_VTON = process.env.USE_REAL_VIRTUAL_TRYON === "true";
 const MAX_PERSON_PHOTOS = 5;
@@ -88,53 +84,38 @@ export type GenerateTryOnInput = {
   prompt?: string;
 };
 
-export type GenerateTryOnResponse =
-  | {
-      ok: true;
-      tryOnId: string;
-      resultImagePath: string;
-      creditsRemaining: number;
-      creditsUsed: number;
-    }
+export type EnqueueTryOnResponse =
+  | { ok: true; jobId: string }
   | { ok: false; error: string };
 
 /**
- * Generate a virtual try-on image. Picks the best available image for each
- * selected wardrobe item (ghost > original) so the model has the
- * cleanest possible garment reference. Real-mode call decrements credits
- * atomically with the VirtualTryOn row insert; failure does not charge.
+ * Validate the request fast (ownership, credits, quota) and enqueue a
+ * background job — generation itself (esp. multi-garment chains) is too slow to
+ * run inside the request on serverless. The client polls getTryOnJobStatus.
+ * A worker (scripts/worker.ts) runs the job and decrements credits atomically
+ * with the VirtualTryOn row insert; failures don't charge.
  */
-export async function generateVirtualTryOn(
+export async function enqueueVirtualTryOn(
   input: GenerateTryOnInput,
-): Promise<GenerateTryOnResponse> {
+): Promise<EnqueueTryOnResponse> {
   const user = await requireUser();
 
   if (input.itemIds.length === 0) {
     return { ok: false, error: "Select at least one garment or a saved outfit." };
   }
 
-  const [person, items, dbUser] = await Promise.all([
+  const [person, itemCount, dbUser] = await Promise.all([
     prisma.personPhoto.findUnique({ where: { id: input.personPhotoId } }),
-    prisma.wardrobeItem.findMany({
-      where: { id: { in: input.itemIds }, userId: user.id },
-    }),
+    prisma.wardrobeItem.count({ where: { id: { in: input.itemIds }, userId: user.id } }),
     prisma.user.findUnique({ where: { id: user.id }, select: { credits: true } }),
   ]);
 
   if (!person || person.userId !== user.id) {
     return { ok: false, error: "Person photo not found" };
   }
-  if (items.length !== input.itemIds.length) {
+  if (itemCount !== new Set(input.itemIds).size) {
     return { ok: false, error: "One or more selected items could not be found." };
   }
-  const itemsById = new Map(items.map((item) => [item.id, item]));
-  const orderedItems = input.itemIds
-    .map((id) => itemsById.get(id))
-    .filter((item): item is NonNullable<typeof item> => item != null);
-  if (orderedItems.length !== items.length) {
-    return { ok: false, error: "One or more selected items could not be found." };
-  }
-
   if (REAL_VTON && virtualTryOnUsesAppCredits() && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
@@ -148,66 +129,48 @@ export async function generateVirtualTryOn(
     }
   }
 
-  // Pick the best image for each item: ghost > original (order matches UI selection).
-  const garmentPaths = orderedItems.map(
-    (item) => item.ghostImagePath ?? item.originalImagePath,
-  );
-  const garmentCategories = orderedItems.map((item) =>
-    [item.category, item.subcategory].filter(Boolean).join(" ").trim(),
-  );
-  // Richer free-text per garment for text-driven VTON models (idm-vton):
-  // "Blue Linen Shirt shirt top" reads better as a description than the bare category.
-  const garmentDescriptions = orderedItems.map((item) =>
-    [item.name, item.subcategory, item.category].filter(Boolean).join(" ").trim(),
-  );
-
-  let result: VirtualTryOnResult;
-  try {
-    result = await createVirtualTryOn({
-      userId: user.id,
-      personImagePath: person.imagePath,
-      garmentImagePaths: garmentPaths,
-      garmentCategories,
-      garmentDescriptions,
-      prompt: input.prompt,
-    });
-  } catch (err) {
-    log.error("tryon.generate.failed", err, { userId: user.id, items: input.itemIds.length });
-    return { ok: false, error: (err as Error).message ?? "Generation failed" };
-  }
-
-  const { tryOnId, creditsRemaining } = await prisma.$transaction(async (tx) => {
-    const created = await tx.virtualTryOn.create({
-      data: {
-        userId: user.id,
-        personPhotoId: person.id,
-        outfitId: input.outfitId ?? null,
-        itemIds: encode(input.itemIds),
-        prompt: input.prompt?.trim() || null,
-        resultImagePath: result.resultImagePath,
-        creditsUsed: result.credits,
-      },
-    });
-    let remaining = dbUser?.credits ?? 0;
-    if (REAL_VTON && result.credits > 0) {
-      const updated = await tx.user.update({
-        where: { id: user.id },
-        data: { credits: { decrement: result.credits } },
-        select: { credits: true },
-      });
-      remaining = updated.credits;
-    }
-    return { tryOnId: created.id, creditsRemaining: remaining };
+  const jobId = await enqueueJob(user.id, "virtual_tryon", {
+    personPhotoId: input.personPhotoId,
+    itemIds: input.itemIds,
+    outfitId: input.outfitId ?? null,
+    prompt: input.prompt,
   });
+  return { ok: true, jobId };
+}
 
-  revalidatePath("/closet/try-on");
-  return {
-    ok: true,
-    tryOnId,
-    resultImagePath: result.resultImagePath,
-    creditsRemaining,
-    creditsUsed: result.credits,
-  };
+export type TryOnJobStatusResponse =
+  | { ok: true; status: "queued" | "running" }
+  | {
+      ok: true;
+      status: "succeeded";
+      tryOnId: string;
+      resultImagePath: string;
+      creditsRemaining: number;
+      creditsUsed: number;
+    }
+  | { ok: false; error: string };
+
+/** Poll a try-on job. On success revalidates the page so history refreshes. */
+export async function getTryOnJobStatus(jobId: string): Promise<TryOnJobStatusResponse> {
+  const user = await requireUser();
+  const job = await getJobForUser<VirtualTryOnJobResult>(jobId, user.id);
+  if (!job) return { ok: false, error: "Job not found" };
+
+  if (job.status === "failed") {
+    return { ok: false, error: job.error ?? "Generation failed" };
+  }
+  if (job.status === "succeeded" && job.result) {
+    revalidatePath("/closet/try-on");
+    return {
+      ok: true,
+      status: "succeeded",
+      tryOnId: job.result.tryOnId,
+      resultImagePath: job.result.resultImagePath,
+      creditsRemaining: job.result.creditsRemaining,
+      creditsUsed: job.result.creditsUsed,
+    };
+  }
+  return { ok: true, status: job.status === "running" ? "running" : "queued" };
 }
 
 export type SaveOutfitResponse =
