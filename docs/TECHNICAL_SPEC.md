@@ -40,7 +40,7 @@ API keys** and can be switched to real providers one file at a time.
 |---|---|---|
 | Core app architecture / data model | **Production-shaped** | Clean module boundaries; needs DB + storage swap (§9, §11) |
 | Ghost-mannequin generation | **Working w/ real provider** | fal.ai; deterministic, credit-metered |
-| Virtual try-on | **Working w/ real provider** | Fashn or fal.ai (idm-vton) |
+| Virtual try-on | **Working w/ real provider** | Fashn or fal.ai (idm-vton); runs as a queued background job |
 | Background removal | **Production (client-side)** | Free WASM, no per-call cost |
 | Swipe-to-sell (strategic core) | **Working, manual hand-off** | Drafts + deep-links; no marketplace API posting yet (§6.4) |
 | Auth | **Production-shaped** | NextAuth + Google OAuth, DB sessions in Postgres; demo mode is an explicit dev flag (§9.1) |
@@ -110,10 +110,11 @@ pricing intelligence, and an in-app transaction layer) is the path from
 
 ### 3.2 Topology
 
-The application is a **single deployable Next.js server** plus a database and a
-file store. There is no separate API tier; the browser talks to Server
-Components (initial render) and Server Actions (mutations) directly. External AI
-calls are made **server-side only**, so provider keys never reach the client.
+The application is a **Next.js server** plus a database, a file store, and a
+**background worker process** (`scripts/worker.ts`) for slow generation. There
+is no separate API tier; the browser talks to Server Components (initial render)
+and Server Actions (mutations) directly. External AI calls are made
+**server-side only**, so provider keys never reach the client.
 
 ```
 Browser ──HTTP──> Next.js (App Router)
@@ -121,8 +122,8 @@ Browser ──HTTP──> Next.js (App Router)
   │                   ├── Server Actions   (write: Prisma + services)
   │                   └── Route Handlers    (/api/images, /api/demo, /api/backup)
   │                          │
-  │                          ├── Prisma ──> PostgreSQL
-  │                          ├── lib/storage ──> local disk | S3 / R2
+  │                          ├── Prisma ──> PostgreSQL  <── Worker process
+  │                          ├── lib/storage ──> local disk | S3 / R2  (drains GenerationJob queue)
   │                          └── lib/services/* ──> fal.ai / Fashn / SerpAPI / …
   └── @imgly/background-removal (WASM, in-browser; no server round-trip)
 ```
@@ -449,8 +450,11 @@ provision an R2 bucket + credentials, and optionally front it with a CDN.
 ### 11.3 Other
 
 - ~~Real auth + sessions~~ — **done** (NextAuth, §9.1). Remaining: CSRF posture review.
-- Background job runner for generation (decouple from request lifecycle; enables
-  retries, webhooks, batch ghosting).
+- ~~Background job runner for generation~~ — **done for virtual try-on**: a
+  Postgres-backed queue (`GenerationJob`) claimed with `FOR UPDATE SKIP LOCKED`,
+  executed by a worker (`pnpm worker`) with retries; the UI enqueues + polls.
+  Ghost generation (a single fast call) remains synchronous and can move to the
+  same runner when batch/webhook needs arise.
 - ~~Observability~~ — **done at the error/log layer**: structured JSON logging
   (`lib/log.ts`) across services/actions and server-side Sentry forwarding
   (`SENTRY_DSN`, inert when unset). Remaining: metrics/tracing dashboards.
@@ -521,6 +525,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 | R1 | Marketplaces offer no listing API; auto-post blocked | **High (strategic)** | Phase 1/2 (§13); start with eBay; authorized integrations only |
 | R2 | Demo mode enabled on a real deployment | Medium | Explicit AUTH_DEMO_MODE flag, off by default in production; documented (§9.1) |
 | R3 | AI output quality variance (identity/angle/fidelity) | Medium | Dedicated models (idm-vton/SeeDream), strict prompts, env-tunable post-processing; all swapped this cycle |
+| R9 | Provider latency/timeouts on long try-on chains | Low | Async job queue + worker with retries (§11.3) decouples from the request |
 | R4 | AI cost scaling with usage | Low | Credit metering + per-user/global daily quotas + kill switch (env-tunable) |
 | R5 | Single-region object store latency at scale | Low | Storage seam supports S3/R2 + `R2_PUBLIC_BASE_URL` CDN (§11.2) |
 | R6 | Provider dependence (fal.ai/Fashn) | Medium | Single-file service seam makes providers swappable; multi-provider already demonstrated |
