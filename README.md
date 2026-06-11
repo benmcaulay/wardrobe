@@ -86,6 +86,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | `pnpm test:fal`    | Real fal.ai round-trip smoke (needs `.env`)    |
 | `pnpm test:s3`     | S3/R2 storage-driver integration check         |
 | `pnpm test:jobs`   | Job-queue integration check (needs DB)         |
+| `pnpm test:stripe` | Credit-purchase fulfillment check (needs DB)   |
 | `pnpm db:seed`     | Re-run the seed script (idempotent)            |
 | `pnpm db:reset`    | Drop and re-create the database, then re-seed  |
 
@@ -112,7 +113,12 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | Mode switch               | `USE_REAL_GHOST_MANNEQUIN="true"` + `FAL_KEY="…"` in `.env` |
 
 The credit balance shows in the closet header (`✨ N`, amber when < 10) and
-in Settings, with a Buy-credits stub and an "Auto-generate on upload" toggle.
+in Settings. Credits are purchasable as **Stripe Checkout packs** (Starter
+100/$5 · Standard 300/$12 · Studio 1,000/$35 — defined in
+`lib/credit-packs.ts`). Set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` and
+point a webhook at `/api/stripe/webhook`; without keys the buy buttons are
+hidden. Fulfillment is webhook-driven and idempotent (replays can't
+double-grant).
 
 ## Auth
 

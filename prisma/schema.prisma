@@ -38,6 +38,24 @@ model User {
   accounts          Account[]
   sessions          Session[]
   generationJobs    GenerationJob[]
+  creditPurchases   CreditPurchase[]
+}
+
+// A completed Stripe Checkout purchase of a credit pack. The unique
+// stripeSessionId makes webhook delivery idempotent: replays hit the
+// constraint and are ignored instead of double-granting credits.
+model CreditPurchase {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSessionId String   @unique
+  packId          String
+  credits         Int
+  amountCents     Int
+  currency        String   @default("usd")
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
 }
 
 // Background generation job. Generation (esp. multi-garment virtual try-on,

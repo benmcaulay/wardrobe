@@ -15,7 +15,8 @@
     "test:jobs": "tsx scripts/verify-jobs.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test:stripe": "tsx scripts/verify-stripe.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -47,6 +48,7 @@
     "react-dom": "^18.3.1",
     "react-easy-crop": "^5.5.7",
     "sharp": "^0.33.5",
+    "stripe": "^22.2.0",
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
