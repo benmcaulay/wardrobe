@@ -4,6 +4,7 @@ import { getCategoriesListFromPrefs } from "@/lib/categories";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
+import { stripeEnabled } from "@/lib/stripe";
 import { SettingsClient } from "./settings-client";
 
 export default async function SettingsPage() {
@@ -50,6 +51,7 @@ export default async function SettingsPage() {
           styleTagsList={styleTagsList}
           credits={dbUser?.credits ?? 0}
           autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
+          purchasesEnabled={stripeEnabled()}
         />
       </section>
     </main>

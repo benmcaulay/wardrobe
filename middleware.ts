@@ -2,7 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DEMO_USER_COOKIE } from "@/lib/auth-shared";
 
 const PUBLIC_PATHS = ["/", "/api/demo/enter", "/api/logout"];
-const PUBLIC_PREFIXES = ["/_next", "/api/images", "/api/public-image", "/api/auth"];
+const PUBLIC_PREFIXES = [
+  "/_next",
+  "/api/images",
+  "/api/public-image",
+  "/api/auth",
+  // Stripe calls this server-to-server; it's authenticated by signature, not session.
+  "/api/stripe/webhook",
+];
 
 /**
  * Cheap redirect-to-landing for signed-out visitors. This is UX, not the

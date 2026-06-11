@@ -17,6 +17,8 @@ import {
   reorderWardrobeStyleTags,
 } from "@/lib/actions/wardrobeStyleTags";
 import { clearAllData } from "@/lib/actions/account";
+import { createCreditCheckout } from "@/lib/actions/billing";
+import { CREDIT_PACKS, formatPackPrice } from "@/lib/credit-packs";
 import type { StylePrefs } from "@/lib/json";
 
 type Props = {
@@ -25,6 +27,7 @@ type Props = {
   styleTagsList: string[];
   credits: number;
   autoGenerateGhost: boolean;
+  purchasesEnabled: boolean;
 };
 
 export function SettingsClient({
@@ -33,6 +36,7 @@ export function SettingsClient({
   styleTagsList,
   credits,
   autoGenerateGhost,
+  purchasesEnabled,
 }: Props) {
   const [prefs, setPrefs] = useState<StylePrefs>(initialPrefs);
   const [newCategory, setNewCategory] = useState("");
@@ -46,7 +50,26 @@ export function SettingsClient({
   const [localTags, setLocalTags] = useState(styleTagsList);
   const [, startCat] = useTransition();
   const [clearing, startClear] = useTransition();
+  const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
+  const [buyError, setBuyError] = useState<string | null>(null);
   const router = useRouter();
+
+  async function onBuyPack(packId: string) {
+    setBuyError(null);
+    setBuyingPackId(packId);
+    try {
+      const res = await createCreditCheckout(packId);
+      if (!res.ok) {
+        setBuyError(res.error);
+        return;
+      }
+      window.location.assign(res.url);
+    } catch {
+      setBuyError("Could not start checkout. Please try again.");
+    } finally {
+      setBuyingPackId(null);
+    }
+  }
 
   useEffect(() => {
     setLocalCategories(categoryList);
@@ -183,14 +206,32 @@ export function SettingsClient({
               1 credit = 1 ghost-mannequin generation (~$0.02 with the real provider).
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => alert("Credit purchase isn't wired up in the demo.")}
-            className="rounded-full bg-ink text-paper px-4 py-2 text-xs tracking-wide hover:bg-ink-soft transition"
-          >
-            Buy more credits
-          </button>
         </div>
+        {purchasesEnabled ? (
+          <div className="pt-2 border-t border-ink/10">
+            <p className="text-xs text-ink-muted mb-2">Buy more credits</p>
+            {buyError && <p className="text-xs text-rose-600 mb-2">{buyError}</p>}
+            <div className="flex flex-wrap gap-2">
+              {CREDIT_PACKS.map((pack) => (
+                <button
+                  key={pack.id}
+                  type="button"
+                  disabled={buyingPackId !== null}
+                  onClick={() => onBuyPack(pack.id)}
+                  className="rounded-full bg-ink text-paper px-4 py-2 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
+                >
+                  {buyingPackId === pack.id
+                    ? "Opening checkout…"
+                    : `${pack.label} · ${pack.credits} cr · ${formatPackPrice(pack)}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-muted pt-2 border-t border-ink/10">
+            Credit purchases aren&apos;t enabled on this deployment.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-sm pt-2 border-t border-ink/10">
           <input
             type="checkbox"

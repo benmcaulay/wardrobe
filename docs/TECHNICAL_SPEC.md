@@ -46,7 +46,7 @@ API keys** and can be switched to real providers one file at a time.
 | Auth | **Production-shaped** | NextAuth + Google OAuth, DB sessions in Postgres; demo mode is an explicit dev flag (§9.1) |
 | Persistence | **Production-shaped** | PostgreSQL 16; JSON columns still TEXT (§11.1) |
 | File storage | **Production-shaped** | Storage seam: local disk (dev) or S3/R2 with signed URLs (§11.2) |
-| Payments / monetization | **Stub** | Credit ledger exists; no payment processor (§10) |
+| Payments / monetization | **Production-shaped** | Stripe Checkout credit packs, idempotent webhook fulfillment (§10) |
 
 ---
 
@@ -404,7 +404,7 @@ data leaving the host is the garment/context image sent to the AI provider
 | Per-IP/auth-endpoint rate limiting absent | Abuse | Add at the edge/proxy pre-launch (AI spend is already quota-capped) |
 | `/api/public-image` route exists | Needs review for unauthenticated exposure (used for SerpAPI Lens callbacks) | Audit + signed, expiring URLs |
 | Local disk storage | No durability/sharing across instances | Object storage (§11.2) |
-| No payment processor | Credits not purchasable | Stripe (§10) |
+| Refund/dispute webhooks unhandled | Support burden at volume | Extend the webhook handler (§10) |
 
 ---
 
@@ -413,6 +413,13 @@ data leaving the host is the garment/context image sent to the AI provider
 A **credit ledger** exists on `User.credits` and meters AI generations:
 
 - New user seeded with 250 credits (~\$10 at ~\$0.04/call).
+- **Credit packs are purchasable via Stripe Checkout** (Starter 100/\$5,
+  Standard 300/\$12, Studio 1,000/\$35 — `lib/credit-packs.ts`, inline
+  `price_data`, no dashboard product setup). Fulfillment is **webhook-driven**
+  (`/api/stripe/webhook`, signature-verified) and **idempotent**: the unique
+  `stripeSessionId` on `CreditPurchase` makes replays no-ops, and the credit
+  increment commits atomically with the purchase row. The buy UI is hidden when
+  `STRIPE_SECRET_KEY` is unset.
 - Ghost mannequin = 1 credit; fal try-on = 1 credit; Fashn try-on bills on the
   Fashn plan (0 in-app credits).
 - **Real-mode crediting is atomic** with the generation log (no charge on
@@ -461,7 +468,7 @@ provision an R2 bucket + credentials, and optionally front it with a CDN.
 - ~~AI cost guardrails~~ — **done**: per-user + global daily generation quotas
   and an `AI_GENERATIONS_DISABLED` kill switch (`lib/ai-guardrails.ts`),
   enforced before every credit-spending entry point.
-- Payments (Stripe) for credits and, later, marketplace take-rate.
+- ~~Payments (Stripe) for credits~~ — **done** (§10). Later: marketplace take-rate (§13 Phase 3).
 
 ---
 
@@ -529,7 +536,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 | R4 | AI cost scaling with usage | Low | Credit metering + per-user/global daily quotas + kill switch (env-tunable) |
 | R5 | Single-region object store latency at scale | Low | Storage seam supports S3/R2 + `R2_PUBLIC_BASE_URL` CDN (§11.2) |
 | R6 | Provider dependence (fal.ai/Fashn) | Medium | Single-file service seam makes providers swappable; multi-provider already demonstrated |
-| R7 | No payment rails | Medium | Stripe integration (§10, §13 Phase 3) |
+| R7 | Payment edge cases (refunds, disputes) unhandled | Low | Core purchase rail is live + idempotent; add refund webhook handling with volume |
 | R8 | Legal/ToS exposure in cross-listing | Medium | Use official APIs/partner programs only; legal review per channel |
 
 ---
