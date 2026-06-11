@@ -2,6 +2,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
+import { log } from "../log";
 import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
 import { bufferToDataUri, bufferToPngDataUri, fashnRunTryOn } from "./fashnTryOn";
 
@@ -286,18 +287,19 @@ async function fashnRealVirtualTryOn(
       modelImage = await bufferToPngDataUri(buf);
     }
   } catch (err) {
-    const ms = Date.now() - startedAt;
-    console.error(
-      `[virtual-tryon] Fashn failed after ${ms}ms (model=${FASHN_TRYON_MODEL}, garments=${steps.length}):`,
-      (err as Error).message,
-    );
+    log.error("tryon.fashn.failed", err, {
+      model: FASHN_TRYON_MODEL,
+      garments: steps.length,
+      ms: Date.now() - startedAt,
+    });
     throw new Error(`Virtual try-on generation failed: ${(err as Error).message}`);
   }
 
-  const elapsedMs = Date.now() - startedAt;
-  console.log(
-    `[virtual-tryon] Fashn ${FASHN_TRYON_MODEL} ok in ${elapsedMs}ms (steps=${steps.length})`,
-  );
+  log.info("tryon.fashn.ok", {
+    model: FASHN_TRYON_MODEL,
+    steps: steps.length,
+    ms: Date.now() - startedAt,
+  });
 
   if (!lastResultBuf) throw new Error("Fashn returned no image data");
 
@@ -415,17 +417,18 @@ async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTry
       ? await runFalVtonChain(input.personImagePath, garments)
       : await runFalEditComposite(input.personImagePath, garments, input.prompt);
   } catch (err) {
-    const ms = Date.now() - startedAt;
-    console.error(
-      `[virtual-tryon] fal call failed after ${ms}ms (model=${FAL_VTON_MODEL}):`,
-      (err as Error).message,
-    );
+    log.error("tryon.fal.failed", err, {
+      model: FAL_VTON_MODEL,
+      garments: garments.length,
+      ms: Date.now() - startedAt,
+    });
     throw new Error(`Virtual try-on generation failed: ${(err as Error).message}`);
   }
-  const elapsedMs = Date.now() - startedAt;
-  console.log(
-    `[virtual-tryon] fal ${FAL_VTON_MODEL} ok in ${elapsedMs}ms (garments=${garments.length})`,
-  );
+  log.info("tryon.fal.ok", {
+    model: FAL_VTON_MODEL,
+    garments: garments.length,
+    ms: Date.now() - startedAt,
+  });
 
   const fetched = await fetch(resultUrl);
   if (!fetched.ok) throw new Error(`Failed to download result: ${fetched.status}`);

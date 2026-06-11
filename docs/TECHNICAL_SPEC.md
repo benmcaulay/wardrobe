@@ -400,7 +400,7 @@ data leaving the host is the garment/context image sent to the AI provider
 | Gap | Risk | Remediation |
 |---|---|---|
 | CSRF posture on server actions unreviewed | Session riding | Explicit origin-check review pre-launch (§9.1) |
-| No rate limiting on AI actions | Cost/abuse | Per-user quotas + provider budget caps |
+| Per-IP/auth-endpoint rate limiting absent | Abuse | Add at the edge/proxy pre-launch (AI spend is already quota-capped) |
 | `/api/public-image` route exists | Needs review for unauthenticated exposure (used for SerpAPI Lens callbacks) | Audit + signed, expiring URLs |
 | Local disk storage | No durability/sharing across instances | Object storage (§11.2) |
 | No payment processor | Credits not purchasable | Stripe (§10) |
@@ -451,8 +451,12 @@ provision an R2 bucket + credentials, and optionally front it with a CDN.
 - ~~Real auth + sessions~~ — **done** (NextAuth, §9.1). Remaining: CSRF posture review.
 - Background job runner for generation (decouple from request lifecycle; enables
   retries, webhooks, batch ghosting).
-- Observability (structured logging exists at the service boundary; add metrics,
-  tracing, per-user cost dashboards).
+- ~~Observability~~ — **done at the error/log layer**: structured JSON logging
+  (`lib/log.ts`) across services/actions and server-side Sentry forwarding
+  (`SENTRY_DSN`, inert when unset). Remaining: metrics/tracing dashboards.
+- ~~AI cost guardrails~~ — **done**: per-user + global daily generation quotas
+  and an `AI_GENERATIONS_DISABLED` kill switch (`lib/ai-guardrails.ts`),
+  enforced before every credit-spending entry point.
 - Payments (Stripe) for credits and, later, marketplace take-rate.
 
 ---
@@ -517,7 +521,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 | R1 | Marketplaces offer no listing API; auto-post blocked | **High (strategic)** | Phase 1/2 (§13); start with eBay; authorized integrations only |
 | R2 | Demo mode enabled on a real deployment | Medium | Explicit AUTH_DEMO_MODE flag, off by default in production; documented (§9.1) |
 | R3 | AI output quality variance (identity/angle/fidelity) | Medium | Dedicated models (idm-vton/SeeDream), strict prompts, env-tunable post-processing; all swapped this cycle |
-| R4 | AI cost scaling with usage | Medium | Credit metering exists; add per-user quotas + provider budget caps |
+| R4 | AI cost scaling with usage | Low | Credit metering + per-user/global daily quotas + kill switch (env-tunable) |
 | R5 | Single-region object store latency at scale | Low | Storage seam supports S3/R2 + `R2_PUBLIC_BASE_URL` CDN (§11.2) |
 | R6 | Provider dependence (fal.ai/Fashn) | Medium | Single-file service seam makes providers swappable; multi-provider already demonstrated |
 | R7 | No payment rails | Medium | Stripe integration (§10, §13 Phase 3) |

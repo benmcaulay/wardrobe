@@ -7,6 +7,8 @@ import { cutoutPathFor } from "@/lib/image-paths";
 import { encode } from "@/lib/json";
 import { deleteUpload, saveUpload, UploadError } from "@/lib/uploads";
 import { deleteObject } from "@/lib/storage";
+import { checkAiQuota } from "@/lib/ai-guardrails";
+import { log } from "@/lib/log";
 import {
   createGhostMannequin,
   mapCategoryToGhost,
@@ -51,6 +53,8 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
   if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
+  const quota = await checkAiQuota(user.id);
+  if (!quota.ok) return quota;
 
   const sourcePath = item.originalImagePath;
   let extras: string[] = [];
@@ -69,7 +73,7 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
       category: mapCategoryToGhost(item.category),
     });
   } catch (err) {
-    console.error("[generateGhostFor] failed:", (err as Error).message);
+    log.error("ghost.generate.failed", err, { userId: user.id, itemId });
     return { ok: false, error: (err as Error).message ?? "Generation failed" };
   }
 
