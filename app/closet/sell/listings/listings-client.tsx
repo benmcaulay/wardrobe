@@ -8,7 +8,9 @@ import {
   CONDITION_OPTIONS,
   buildListingDraft,
   formatCents,
+  listingClipboardText,
   suggestedAskingCents,
+  summarizeListings,
   type ItemCondition,
   type ListingItemInput,
   type SaleStatus,
@@ -32,8 +34,13 @@ export type Listing = {
 
 const STATUS_ORDER: SaleStatus[] = ["for_sale", "listed", "sold"];
 
+type Filter = "all" | "for_sale" | "listed" | "sold";
+
 export function ListingsClient({ initial }: { initial: Listing[] }) {
   const [listings, setListings] = useState<Listing[]>(initial);
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const summary = summarizeListings(listings);
 
   if (listings.length === 0) {
     return (
@@ -50,21 +57,88 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
     );
   }
 
+  function patch(itemId: string, next: Partial<Pick<Listing, "status" | "askingCents">>) {
+    setListings((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, ...next } : l)));
+  }
+
   const ordered = [...listings].sort(
     (a, b) =>
       STATUS_ORDER.indexOf(a.status as SaleStatus) - STATUS_ORDER.indexOf(b.status as SaleStatus),
   );
+  const visible = filter === "all" ? ordered : ordered.filter((l) => l.status === filter);
+
+  const tabs: { id: Filter; label: string; count: number }[] = [
+    { id: "all", label: "All", count: summary.activeCount + summary.soldCount },
+    { id: "for_sale", label: "For sale", count: summary.forSaleCount },
+    { id: "listed", label: "Listed", count: summary.listedCount },
+    { id: "sold", label: "Sold", count: summary.soldCount },
+  ];
 
   return (
-    <ul className="space-y-5">
-      {ordered.map((listing) => (
-        <ListingCard
-          key={listing.itemId}
-          listing={listing}
-          onRemoved={(id) => setListings((prev) => prev.filter((l) => l.itemId !== id))}
+    <div className="space-y-6">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat
+          label="Active"
+          value={String(summary.activeCount)}
+          sub={`${formatCents(summary.activeAskingCents, summary.currency)} asking`}
         />
-      ))}
-    </ul>
+        <Stat
+          label="Sold"
+          value={String(summary.soldCount)}
+          sub={`${formatCents(summary.soldValueCents, summary.currency)} value`}
+        />
+        <Stat
+          label="Potential"
+          value={formatCents(summary.activeAskingCents + summary.soldValueCents, summary.currency) || "$0"}
+          sub="asking + sold"
+        />
+      </dl>
+
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setFilter(t.id)}
+            aria-pressed={filter === t.id}
+            className={`rounded-full border px-3 py-1 text-xs transition ${
+              filter === t.id
+                ? "border-ink bg-ink text-paper"
+                : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+            }`}
+          >
+            {t.label} ({t.count})
+          </button>
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <p className="rounded-2xl border border-ink/10 bg-paper-warm p-8 text-center text-sm text-ink-muted">
+          Nothing in this view.
+        </p>
+      ) : (
+        <ul className="space-y-5">
+          {visible.map((listing) => (
+            <ListingCard
+              key={listing.itemId}
+              listing={listing}
+              onRemoved={(id) => setListings((prev) => prev.filter((l) => l.itemId !== id))}
+              onPatch={patch}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="rounded-2xl border border-ink/10 bg-white p-4">
+      <dt className="text-[11px] uppercase tracking-wide text-ink-muted">{label}</dt>
+      <dd className="mt-1 font-serif text-2xl tracking-tight">{value}</dd>
+      <dd className="text-[11px] text-ink-muted">{sub}</dd>
+    </div>
   );
 }
 
@@ -83,9 +157,11 @@ function centsToInput(cents: number | null): string {
 function ListingCard({
   listing,
   onRemoved,
+  onPatch,
 }: {
   listing: Listing;
   onRemoved: (itemId: string) => void;
+  onPatch: (itemId: string, next: Partial<Pick<Listing, "status" | "askingCents">>) => void;
 }) {
   const [title, setTitle] = useState(listing.title);
   const [description, setDescription] = useState(listing.description);
@@ -104,15 +180,17 @@ function ListingCard({
     }
     const timer = window.setTimeout(async () => {
       setSaveState("saving");
+      const nextAsking = dollarsToCents(priceInput);
       const res = await updateSaleListing({
         itemId: listing.itemId,
         title,
         description,
-        askingCents: dollarsToCents(priceInput),
+        askingCents: nextAsking,
         condition: condition || null,
         marketplaces,
       });
       setSaveState(res.ok ? "saved" : "error");
+      if (res.ok) onPatch(listing.itemId, { askingCents: nextAsking });
     }, 600);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -137,21 +215,37 @@ function ListingCard({
 
   async function changeStatus(next: SaleStatus) {
     setStatus(next);
+    onPatch(listing.itemId, { status: next });
     await setSaleStatus({ itemId: listing.itemId, status: next });
   }
 
-  async function copyDraft() {
-    const price = dollarsToCents(priceInput);
-    const text = [title, price != null ? `Price: ${formatCents(price, listing.currency)}` : null, "", description]
-      .filter((l) => l !== null)
-      .join("\n");
+  function clipboardText(): string {
+    return listingClipboardText({
+      title,
+      description,
+      askingCents: dollarsToCents(priceInput),
+      currency: listing.currency,
+      condition: condition || null,
+      hashtags: buildListingDraft(listing.item, { condition: condition || null }).hashtags,
+    });
+  }
+
+  async function copyDraft(): Promise<boolean> {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(clipboardText());
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
+      return true;
     } catch {
       setCopied(false);
+      return false;
     }
+  }
+
+  /** Copy the full listing, then open the marketplace's new-listing page ready to paste. */
+  async function copyAndOpen(url: string) {
+    await copyDraft();
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   const selectedMarketplaces = MARKETPLACES.filter((m) => marketplaces.includes(m.id));
@@ -287,16 +381,15 @@ function ListingCard({
             </button>
             {selectedMarketplaces.length > 0 ? (
               selectedMarketplaces.map((m) => (
-                <a
+                <button
                   key={m.id}
-                  href={m.sellUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  type="button"
+                  onClick={() => copyAndOpen(m.sellUrl)}
                   className="rounded-full border border-ink/15 px-4 py-2 text-xs transition hover:bg-paper-warm"
-                  title={m.note}
+                  title={m.note ? `${m.note} — copies the listing, then opens` : "Copies the listing, then opens"}
                 >
-                  Open {m.label} ↗
-                </a>
+                  Copy &amp; open {m.label} ↗
+                </button>
               ))
             ) : (
               <span className="text-[11px] text-ink-muted">
