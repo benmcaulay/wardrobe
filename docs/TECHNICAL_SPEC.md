@@ -503,8 +503,10 @@ architecture's seams.
 - Per-marketplace **URL prefill** where partially possible; clipboard-rich copy
   (formatted title/description/tags) and one-tap deep links.
 - Bulk actions on the for-sale board; image export bundles per listing.
-- Pricing intelligence: replace the static resale-factor with **sold-comp data**
-  (scraper seam already exists) to suggest a market price and sell-through odds.
+- Pricing intelligence: a first cut ships from the user's OWN sales
+  (`sellThroughInsight` — realized vs asking, retail recovery, sell-through, plus
+  a per-listing "likely net" hint). Next: blend in **sold-comp data** (scraper
+  seam already exists) for market price + sell-through odds.
 
 **Phase 2 — Cross-listing automation.**
 - Integrate the marketplaces that *do* have APIs/partner programs (eBay first;

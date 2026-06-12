@@ -8,7 +8,9 @@ import {
   CONDITION_OPTIONS,
   buildListingDraft,
   formatCents,
+  formatRate,
   listingClipboardText,
+  sellThroughInsight,
   suggestedAskingCents,
   summarizeListings,
   type ItemCondition,
@@ -42,6 +44,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const summary = summarizeListings(listings);
+  const insight = sellThroughInsight(listings);
 
   if (listings.length === 0) {
     return (
@@ -95,6 +98,41 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
         />
       </dl>
 
+      {insight.realizedCount > 0 && (
+        <div className="rounded-2xl border border-ink/10 bg-paper-warm px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wide text-ink-muted">
+            Sell-through insight · {insight.realizedCount}{" "}
+            {insight.realizedCount === 1 ? "sale" : "sales"}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            {insight.realizedRate != null && (
+              <span>
+                Sells at <span className="font-medium">{formatRate(insight.realizedRate)}</span> of
+                asking
+              </span>
+            )}
+            {insight.recoveryRate != null && (
+              <span>
+                Recovers <span className="font-medium">{formatRate(insight.recoveryRate)}</span> of
+                retail
+              </span>
+            )}
+            {insight.sellThroughRate != null && (
+              <span>
+                <span className="font-medium">{formatRate(insight.sellThroughRate)}</span>{" "}
+                sell-through
+              </span>
+            )}
+            {insight.avgDiscountCents != null && insight.avgDiscountCents !== 0 && (
+              <span className="text-ink-muted">
+                {insight.avgDiscountCents > 0 ? "−" : "+"}
+                {formatCents(Math.abs(insight.avgDiscountCents), summary.currency)} vs asking avg
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         {tabs.map((t) => (
           <button
@@ -123,6 +161,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
             <ListingCard
               key={listing.itemId}
               listing={listing}
+              realizedRate={insight.realizedRate}
               onRemoved={(id) => setListings((prev) => prev.filter((l) => l.itemId !== id))}
               onPatch={patch}
             />
@@ -157,10 +196,13 @@ function centsToInput(cents: number | null): string {
 
 function ListingCard({
   listing,
+  realizedRate,
   onRemoved,
   onPatch,
 }: {
   listing: Listing;
+  /** Board-wide realized rate (soldPrice ÷ asking) for the "likely net" hint; null if unknown. */
+  realizedRate: number | null;
   onRemoved: (itemId: string) => void;
   onPatch: (itemId: string, next: Partial<Pick<Listing, "status" | "askingCents" | "soldPriceCents">>) => void;
 }) {
@@ -343,6 +385,22 @@ function ListingCard({
               </button>
             ) : null}
           </div>
+
+          {(status === "for_sale" || status === "listed") &&
+            realizedRate != null &&
+            (() => {
+              const asking = dollarsToCents(priceInput);
+              if (!asking || asking <= 0) return null;
+              return (
+                <p className="-mt-2 text-[11px] text-ink-muted">
+                  Your pieces sell at {formatRate(realizedRate)} of asking — likely{" "}
+                  <span className="font-medium text-ink">
+                    {formatCents(Math.round(asking * realizedRate), listing.currency)}
+                  </span>{" "}
+                  at this price.
+                </p>
+              );
+            })()}
 
           <div>
             <div className="flex items-center justify-between">
