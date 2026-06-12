@@ -236,6 +236,79 @@ export function summarizeListings(listings: SummarizableListing[]): ListingsSumm
   return out;
 }
 
+/** Listing shape the sell-through analysis needs (adds retail to the summary shape). */
+export type InsightListing = SummarizableListing & {
+  retailCents?: number | null;
+};
+
+export type SellThroughInsight = {
+  /** Sold ÷ (sold + still-active). null when nothing has been listed. */
+  sellThroughRate: number | null;
+  /** How many sold items carry a recorded sale price (the realized/recovery basis). */
+  realizedCount: number;
+  /** Dollar-weighted soldPrice ÷ asking across sold items with both. null without data. */
+  realizedRate: number | null;
+  /** Dollar-weighted soldPrice ÷ retail across sold items with both. null without data. */
+  recoveryRate: number | null;
+  /** Mean (asking − soldPrice) across sold items with both, in cents. null without data. */
+  avgDiscountCents: number | null;
+};
+
+/**
+ * Pricing intelligence from the user's OWN sales — no external comps. Answers:
+ * how often do listed pieces sell, how close to asking do they go, and how much
+ * of the original retail is recovered. Only sold items with a recorded sale
+ * price feed the realized/recovery figures (that's the whole point — real
+ * proceeds, not the asking guess). Dollar-weighted so a $200 coat counts more
+ * than a $5 tee. Pure + deterministic.
+ */
+export function sellThroughInsight(listings: InsightListing[]): SellThroughInsight {
+  let soldCount = 0;
+  let activeCount = 0;
+  let realizedCount = 0;
+  let askCount = 0;
+  let askSum = 0;
+  let soldForAskSum = 0;
+  let retailSum = 0;
+  let soldForRetailSum = 0;
+  let discountSum = 0;
+
+  for (const l of listings) {
+    if (l.status === "for_sale" || l.status === "listed") {
+      activeCount += 1;
+    } else if (l.status === "sold") {
+      soldCount += 1;
+      const sold = l.soldPriceCents;
+      if (sold == null) continue; // no real proceeds recorded → not usable for rates
+      realizedCount += 1;
+      if (l.askingCents && l.askingCents > 0) {
+        askCount += 1;
+        askSum += l.askingCents;
+        soldForAskSum += sold;
+        discountSum += l.askingCents - sold;
+      }
+      if (l.retailCents && l.retailCents > 0) {
+        retailSum += l.retailCents;
+        soldForRetailSum += sold;
+      }
+    }
+  }
+
+  const listedTotal = soldCount + activeCount;
+  return {
+    sellThroughRate: listedTotal > 0 ? soldCount / listedTotal : null,
+    realizedCount,
+    realizedRate: askSum > 0 ? soldForAskSum / askSum : null,
+    recoveryRate: retailSum > 0 ? soldForRetailSum / retailSum : null,
+    avgDiscountCents: askCount > 0 ? Math.round(discountSum / askCount) : null,
+  };
+}
+
+/** Format a 0..1+ rate as a whole-percent string, e.g. 0.88 → "88%". */
+export function formatRate(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
 /** Full copy-to-clipboard text for a listing: title, price, condition, body, tags. */
 export function listingClipboardText(input: {
   title: string;
