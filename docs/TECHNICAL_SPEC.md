@@ -502,7 +502,9 @@ architecture's seams.
 **Phase 1 — Reduce hand-off friction (near term).**
 - Per-marketplace **URL prefill** where partially possible; clipboard-rich copy
   (formatted title/description/tags) and one-tap deep links.
-- Bulk actions on the for-sale board; image export bundles per listing.
+- ~~Bulk actions on the for-sale board~~ — **done** (multi-select → bulk
+  mark-listed / back-to-for-sale / remove), plus **stale-listing nudges**
+  (active listings idle 14+ days flagged). Next: per-listing image export bundles.
 - Pricing intelligence: a first cut ships from the user's OWN sales
   (`sellThroughInsight` — realized vs asking, retail recovery, sell-through, plus
   a per-listing "likely net" hint). Next: blend in **sold-comp data** (scraper
