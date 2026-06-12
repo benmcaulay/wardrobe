@@ -21,6 +21,7 @@ export type Listing = {
   itemId: string;
   status: string;
   askingCents: number | null;
+  soldPriceCents: number | null;
   currency: string;
   condition: ItemCondition | null;
   title: string;
@@ -57,7 +58,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
     );
   }
 
-  function patch(itemId: string, next: Partial<Pick<Listing, "status" | "askingCents">>) {
+  function patch(itemId: string, next: Partial<Pick<Listing, "status" | "askingCents" | "soldPriceCents">>) {
     setListings((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, ...next } : l)));
   }
 
@@ -161,7 +162,7 @@ function ListingCard({
 }: {
   listing: Listing;
   onRemoved: (itemId: string) => void;
-  onPatch: (itemId: string, next: Partial<Pick<Listing, "status" | "askingCents">>) => void;
+  onPatch: (itemId: string, next: Partial<Pick<Listing, "status" | "askingCents" | "soldPriceCents">>) => void;
 }) {
   const [title, setTitle] = useState(listing.title);
   const [description, setDescription] = useState(listing.description);
@@ -171,6 +172,11 @@ function ListingCard({
   const [status, setStatus] = useState<SaleStatus>(listing.status as SaleStatus);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [copied, setCopied] = useState(false);
+  const [markingSold, setMarkingSold] = useState(false);
+  // Default the sale price to the recorded proceeds, else the current asking price.
+  const [soldPriceInput, setSoldPriceInput] = useState(
+    centsToInput(listing.soldPriceCents ?? listing.askingCents),
+  );
 
   const firstRun = useRef(true);
   useEffect(() => {
@@ -213,10 +219,24 @@ function ListingCard({
     );
   }
 
-  async function changeStatus(next: SaleStatus) {
+  async function changeStatus(next: SaleStatus, soldPriceCents?: number | null) {
     setStatus(next);
-    onPatch(listing.itemId, { status: next });
-    await setSaleStatus({ itemId: listing.itemId, status: next });
+    // Leaving "sold" clears the recorded proceeds; the server does the same.
+    onPatch(listing.itemId, {
+      status: next,
+      ...(next === "sold" ? { soldPriceCents: soldPriceCents ?? null } : { soldPriceCents: null }),
+    });
+    await setSaleStatus({
+      itemId: listing.itemId,
+      status: next,
+      ...(next === "sold" ? { soldPriceCents: soldPriceCents ?? null } : {}),
+    });
+  }
+
+  async function confirmSold() {
+    const cents = dollarsToCents(soldPriceInput);
+    await changeStatus("sold", cents);
+    setMarkingSold(false);
   }
 
   function clipboardText(): string {
@@ -407,6 +427,50 @@ function ListingCard({
             </span>
           </div>
 
+          {status === "sold" && listing.soldPriceCents != null && (
+            <p className="text-xs text-ink-muted">
+              Sold for{" "}
+              <span className="font-medium text-ink">
+                {formatCents(listing.soldPriceCents, listing.currency)}
+              </span>
+            </p>
+          )}
+
+          {markingSold && (
+            <div className="flex flex-wrap items-end gap-2 rounded-2xl bg-paper-warm p-3">
+              <div className="w-28">
+                <label className="block text-[11px] uppercase tracking-wide text-ink-muted">
+                  Sold for
+                </label>
+                <div className="mt-1 flex items-center rounded-xl border border-ink/15 bg-paper px-3 py-2">
+                  <span className="text-sm text-ink-muted">$</span>
+                  <input
+                    value={soldPriceInput}
+                    onChange={(e) => setSoldPriceInput(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="0"
+                    autoFocus
+                    className="w-full bg-transparent pl-1 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={confirmSold}
+                className="rounded-full bg-ink px-4 py-2 text-xs tracking-wide text-paper transition hover:bg-ink-soft"
+              >
+                Confirm sold
+              </button>
+              <button
+                type="button"
+                onClick={() => setMarkingSold(false)}
+                className="rounded-full border border-ink/15 px-3 py-2 text-xs transition hover:bg-white"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
             {status !== "listed" && (
               <button
@@ -420,7 +484,10 @@ function ListingCard({
             {status !== "sold" && (
               <button
                 type="button"
-                onClick={() => changeStatus("sold")}
+                onClick={() => {
+                  setSoldPriceInput(centsToInput(listing.soldPriceCents ?? dollarsToCents(priceInput)));
+                  setMarkingSold(true);
+                }}
                 className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm"
               >
                 Mark sold
