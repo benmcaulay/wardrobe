@@ -194,3 +194,42 @@ export async function removeSaleListing(itemId: string): Promise<Result> {
   revalidatePath("/closet/sell/listings");
   return { ok: true };
 }
+
+type BulkResult = { ok: true; count: number } | { ok: false; error: string };
+
+/**
+ * Apply a lifecycle status to several listings at once (board bulk triage).
+ * Scoped to the caller's own listings; "sold" is intentionally excluded — it
+ * needs a per-item sale price, so it stays on the single-item flow.
+ */
+export async function bulkSetSaleStatus(input: {
+  itemIds: string[];
+  status: string;
+}): Promise<BulkResult> {
+  const user = await requireUser();
+  if (!isSaleStatus(input.status)) return { ok: false, error: "Invalid status" };
+  if (input.status === "sold") {
+    return { ok: false, error: "Mark items sold one at a time to record the sale price." };
+  }
+  if (input.itemIds.length === 0) return { ok: true, count: 0 };
+
+  const res = await prisma.saleListing.updateMany({
+    where: { userId: user.id, itemId: { in: input.itemIds } },
+    data: { status: input.status, soldPriceCents: null },
+  });
+  revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/listings");
+  return { ok: true, count: res.count };
+}
+
+/** Remove several listings at once; the items return to the swipe deck. */
+export async function bulkRemoveSaleListings(itemIds: string[]): Promise<BulkResult> {
+  const user = await requireUser();
+  if (itemIds.length === 0) return { ok: true, count: 0 };
+  const res = await prisma.saleListing.deleteMany({
+    where: { userId: user.id, itemId: { in: itemIds } },
+  });
+  revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/listings");
+  return { ok: true, count: res.count };
+}

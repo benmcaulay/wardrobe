@@ -7,8 +7,11 @@ import { MARKETPLACES } from "@/lib/marketplaces";
 import {
   CONDITION_OPTIONS,
   buildListingDraft,
+  daysBetween,
   formatCents,
   formatRate,
+  isStaleListing,
+  STALE_AFTER_DAYS,
   listingClipboardText,
   sellThroughInsight,
   suggestedAskingCents,
@@ -17,7 +20,13 @@ import {
   type ListingItemInput,
   type SaleStatus,
 } from "@/lib/sale-listing";
-import { removeSaleListing, setSaleStatus, updateSaleListing } from "../actions";
+import {
+  bulkRemoveSaleListings,
+  bulkSetSaleStatus,
+  removeSaleListing,
+  setSaleStatus,
+  updateSaleListing,
+} from "../actions";
 
 export type Listing = {
   itemId: string;
@@ -32,6 +41,7 @@ export type Listing = {
   retailCents: number | null;
   categoryLabel: string;
   imagePath: string;
+  updatedAtMs: number;
   item: ListingItemInput;
 };
 
@@ -42,9 +52,14 @@ type Filter = "all" | "for_sale" | "listed" | "sold";
 export function ListingsClient({ initial }: { initial: Listing[] }) {
   const [listings, setListings] = useState<Listing[]>(initial);
   const [filter, setFilter] = useState<Filter>("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  // Stable "now" for staleness; one read per mount avoids hydration drift.
+  const [nowMs] = useState(() => Date.now());
 
   const summary = summarizeListings(listings);
   const insight = sellThroughInsight(listings);
+  const staleCount = listings.filter((l) => isStaleListing(l, nowMs)).length;
 
   if (listings.length === 0) {
     return (
@@ -63,6 +78,44 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
 
   function patch(itemId: string, next: Partial<Pick<Listing, "status" | "askingCents" | "soldPriceCents">>) {
     setListings((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, ...next } : l)));
+  }
+
+  function toggleSelect(itemId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  async function bulkStatus(status: SaleStatus) {
+    const ids = [...selected];
+    if (ids.length === 0 || busy) return;
+    setBusy(true);
+    const res = await bulkSetSaleStatus({ itemIds: ids, status });
+    if (res.ok) {
+      const now = Date.now();
+      setListings((prev) =>
+        prev.map((l) =>
+          selected.has(l.itemId) ? { ...l, status, soldPriceCents: null, updatedAtMs: now } : l,
+        ),
+      );
+      setSelected(new Set());
+    }
+    setBusy(false);
+  }
+
+  async function bulkRemove() {
+    const ids = [...selected];
+    if (ids.length === 0 || busy) return;
+    setBusy(true);
+    const res = await bulkRemoveSaleListings(ids);
+    if (res.ok) {
+      setListings((prev) => prev.filter((l) => !selected.has(l.itemId)));
+      setSelected(new Set());
+    }
+    setBusy(false);
   }
 
   const ordered = [...listings].sort(
@@ -151,6 +204,77 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
         ))}
       </div>
 
+      {staleCount > 0 && (
+        <p className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          {staleCount} {staleCount === 1 ? "listing hasn't" : "listings haven't"} moved in{" "}
+          {STALE_AFTER_DAYS}+ days. Consider a price drop or a new marketplace.
+        </p>
+      )}
+
+      {(() => {
+        const selectableVisible = visible.filter((l) => l.status !== "sold");
+        const allSelected =
+          selectableVisible.length > 0 && selectableVisible.every((l) => selected.has(l.itemId));
+        if (selectableVisible.length === 0 && selected.size === 0) return null;
+        return (
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-white px-3 py-2 text-xs">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={(e) =>
+                  setSelected((prev) => {
+                    const next = new Set(prev);
+                    if (e.target.checked) selectableVisible.forEach((l) => next.add(l.itemId));
+                    else selectableVisible.forEach((l) => next.delete(l.itemId));
+                    return next;
+                  })
+                }
+                className="accent-ink"
+              />
+              Select {filter === "all" ? "all" : "shown"}
+            </label>
+            {selected.size > 0 && (
+              <>
+                <span className="text-ink-muted">{selected.size} selected</span>
+                <span className="mx-1 h-4 w-px bg-ink/10" />
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => bulkStatus("listed")}
+                  className="rounded-full border border-ink/15 px-3 py-1 transition hover:bg-paper-warm disabled:opacity-50"
+                >
+                  Mark listed
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => bulkStatus("for_sale")}
+                  className="rounded-full border border-ink/15 px-3 py-1 transition hover:bg-paper-warm disabled:opacity-50"
+                >
+                  Back to for sale
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={bulkRemove}
+                  className="rounded-full px-3 py-1 text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                >
+                  Remove
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  className="ml-auto text-ink-muted underline hover:text-ink"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })()}
+
       {visible.length === 0 ? (
         <p className="rounded-2xl border border-ink/10 bg-paper-warm p-8 text-center text-sm text-ink-muted">
           Nothing in this view.
@@ -162,6 +286,9 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
               key={listing.itemId}
               listing={listing}
               realizedRate={insight.realizedRate}
+              nowMs={nowMs}
+              selected={selected.has(listing.itemId)}
+              onToggleSelect={toggleSelect}
               onRemoved={(id) => setListings((prev) => prev.filter((l) => l.itemId !== id))}
               onPatch={patch}
             />
@@ -197,12 +324,18 @@ function centsToInput(cents: number | null): string {
 function ListingCard({
   listing,
   realizedRate,
+  nowMs,
+  selected,
+  onToggleSelect,
   onRemoved,
   onPatch,
 }: {
   listing: Listing;
   /** Board-wide realized rate (soldPrice ÷ asking) for the "likely net" hint; null if unknown. */
   realizedRate: number | null;
+  nowMs: number;
+  selected: boolean;
+  onToggleSelect: (itemId: string) => void;
   onRemoved: (itemId: string) => void;
   onPatch: (itemId: string, next: Partial<Pick<Listing, "status" | "askingCents" | "soldPriceCents">>) => void;
 }) {
@@ -215,6 +348,14 @@ function ListingCard({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [copied, setCopied] = useState(false);
   const [markingSold, setMarkingSold] = useState(false);
+
+  // Follow external status changes (bulk actions) without discarding edits.
+  useEffect(() => {
+    setStatus(listing.status as SaleStatus);
+  }, [listing.status]);
+
+  const stale = isStaleListing(listing, nowMs);
+  const daysIdle = daysBetween(listing.updatedAtMs, nowMs);
   // Default the sale price to the recorded proceeds, else the current asking price.
   const [soldPriceInput, setSoldPriceInput] = useState(
     centsToInput(listing.soldPriceCents ?? listing.askingCents),
@@ -313,19 +454,39 @@ function ListingCard({
   const selectedMarketplaces = MARKETPLACES.filter((m) => marketplaces.includes(m.id));
 
   return (
-    <li className="rounded-3xl border border-ink/10 bg-white p-4 shadow-tile sm:p-5">
+    <li
+      className={`rounded-3xl border bg-white p-4 shadow-tile sm:p-5 ${
+        selected ? "border-ink ring-1 ring-ink/30" : "border-ink/10"
+      }`}
+    >
       <div className="flex flex-col gap-5 sm:flex-row">
         <div className="flex gap-4 sm:block sm:w-40 sm:shrink-0">
-          <div className="h-40 w-32 shrink-0 overflow-hidden rounded-2xl bg-paper-warm sm:h-48 sm:w-40">
+          <div className="relative h-40 w-32 shrink-0 overflow-hidden rounded-2xl bg-paper-warm sm:h-48 sm:w-40">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageUrl(listing.imagePath)}
               alt={title}
               className="h-full w-full object-cover"
             />
+            {status !== "sold" && (
+              <label className="absolute left-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-white/90 shadow-sm">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={() => onToggleSelect(listing.itemId)}
+                  aria-label="Select listing"
+                  className="accent-ink"
+                />
+              </label>
+            )}
           </div>
           <div className="sm:mt-3">
             <StatusBadge status={status} />
+            {stale && (
+              <p className="mt-2 text-[11px] font-medium text-amber-700">
+                Idle {daysIdle}d — needs attention
+              </p>
+            )}
             {listing.retailCents ? (
               <p className="mt-2 text-[11px] text-ink-muted">
                 Paid {formatCents(listing.retailCents, listing.currency)}

@@ -309,6 +309,28 @@ export function formatRate(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+/** A listing goes "stale" after this many days of no status/price change. */
+export const STALE_AFTER_DAYS = 14;
+
+/** Whole days between two timestamps (ms), floored at 0. */
+export function daysBetween(fromMs: number, toMs: number): number {
+  return Math.max(0, Math.floor((toMs - fromMs) / (1000 * 60 * 60 * 24)));
+}
+
+/**
+ * A still-working listing (for_sale | listed) that hasn't moved in
+ * STALE_AFTER_DAYS deserves a nudge — drop the price, switch marketplace, etc.
+ * Sold/kept items are never stale. Pure so the board can flag without a round trip.
+ */
+export function isStaleListing(
+  listing: { status: string; updatedAtMs: number },
+  nowMs: number,
+  staleDays = STALE_AFTER_DAYS,
+): boolean {
+  if (listing.status !== "for_sale" && listing.status !== "listed") return false;
+  return daysBetween(listing.updatedAtMs, nowMs) >= staleDays;
+}
+
 /** Full copy-to-clipboard text for a listing: title, price, condition, body, tags. */
 export function listingClipboardText(input: {
   title: string;
