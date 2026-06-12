@@ -179,3 +179,75 @@ function buildHashtags(input: {
   push(input.material);
   return out.slice(0, 12);
 }
+
+/** Minimal listing shape the board summary needs. */
+export type SummarizableListing = {
+  status: string;
+  askingCents: number | null;
+  currency?: string | null;
+};
+
+export type ListingsSummary = {
+  forSaleCount: number;
+  listedCount: number;
+  soldCount: number;
+  /** for_sale + listed — pieces still working toward a sale. */
+  activeCount: number;
+  /** Sum of asking prices for active (for_sale + listed) listings, in cents. */
+  activeAskingCents: number;
+  /** Sum of asking prices for sold listings, in cents (recorded sale value). */
+  soldValueCents: number;
+  currency: string;
+};
+
+/**
+ * Aggregate a user's listings into the headline numbers a reseller cares about:
+ * how many pieces are working, what they could bring in, and what's already
+ * sold. Pure + deterministic so the board can render it without a round trip.
+ */
+export function summarizeListings(listings: SummarizableListing[]): ListingsSummary {
+  const out: ListingsSummary = {
+    forSaleCount: 0,
+    listedCount: 0,
+    soldCount: 0,
+    activeCount: 0,
+    activeAskingCents: 0,
+    soldValueCents: 0,
+    currency: listings.find((l) => l.currency)?.currency || "USD",
+  };
+  for (const l of listings) {
+    const asking = l.askingCents ?? 0;
+    if (l.status === "for_sale") {
+      out.forSaleCount += 1;
+      out.activeCount += 1;
+      out.activeAskingCents += asking;
+    } else if (l.status === "listed") {
+      out.listedCount += 1;
+      out.activeCount += 1;
+      out.activeAskingCents += asking;
+    } else if (l.status === "sold") {
+      out.soldCount += 1;
+      out.soldValueCents += asking;
+    }
+  }
+  return out;
+}
+
+/** Full copy-to-clipboard text for a listing: title, price, condition, body, tags. */
+export function listingClipboardText(input: {
+  title: string;
+  description: string;
+  askingCents: number | null;
+  currency?: string;
+  condition?: ItemCondition | null;
+  hashtags?: string[];
+}): string {
+  const lines: (string | null)[] = [input.title];
+  if (input.askingCents != null) {
+    lines.push(`Price: ${formatCents(input.askingCents, input.currency ?? "USD")}`);
+  }
+  if (input.condition) lines.push(`Condition: ${conditionLabel(input.condition)}`);
+  lines.push("", input.description);
+  if (input.hashtags && input.hashtags.length) lines.push("", input.hashtags.join(" "));
+  return lines.filter((l) => l !== null).join("\n");
+}
