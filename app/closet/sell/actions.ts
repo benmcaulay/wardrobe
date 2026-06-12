@@ -143,10 +143,15 @@ export async function updateSaleListing(input: {
   return { ok: true };
 }
 
-/** Move a listing through its lifecycle (for_sale → listed → sold, etc.). */
+/**
+ * Move a listing through its lifecycle (for_sale → listed → sold, etc.).
+ * When marking sold, an optional soldPriceCents records the actual proceeds;
+ * moving back out of "sold" clears any recorded price so it doesn't linger.
+ */
 export async function setSaleStatus(input: {
   itemId: string;
   status: string;
+  soldPriceCents?: number | null;
 }): Promise<Result> {
   const user = await requireUser();
   if (!isSaleStatus(input.status)) return { ok: false, error: "Invalid status" };
@@ -157,10 +162,18 @@ export async function setSaleStatus(input: {
   if (!existing || existing.userId !== user.id) {
     return { ok: false, error: "Listing not found" };
   }
-  await prisma.saleListing.update({
-    where: { itemId: input.itemId },
-    data: { status: input.status },
-  });
+
+  const data: { status: string; soldPriceCents?: number | null } = { status: input.status };
+  if (input.status === "sold") {
+    if (input.soldPriceCents !== undefined) {
+      data.soldPriceCents =
+        input.soldPriceCents == null ? null : Math.max(0, Math.round(input.soldPriceCents));
+    }
+  } else {
+    data.soldPriceCents = null;
+  }
+
+  await prisma.saleListing.update({ where: { itemId: input.itemId }, data });
   revalidatePath("/closet/sell");
   revalidatePath("/closet/sell/listings");
   return { ok: true };

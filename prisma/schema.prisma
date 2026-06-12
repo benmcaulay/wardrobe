@@ -239,6 +239,7 @@ model SaleListing {
   item         WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   status       String       @default("for_sale")
   askingCents  Int?
+  soldPriceCents Int?       // actual sale proceeds, recorded when marked sold
   currency     String       @default("USD")
   condition    String?      // "new_with_tags" | "like_new" | "good" | "fair"
   title        String?

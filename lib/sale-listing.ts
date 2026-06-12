@@ -184,6 +184,8 @@ function buildHashtags(input: {
 export type SummarizableListing = {
   status: string;
   askingCents: number | null;
+  /** Actual proceeds once sold; falls back to askingCents when unset. */
+  soldPriceCents?: number | null;
   currency?: string | null;
 };
 
@@ -227,7 +229,8 @@ export function summarizeListings(listings: SummarizableListing[]): ListingsSumm
       out.activeAskingCents += asking;
     } else if (l.status === "sold") {
       out.soldCount += 1;
-      out.soldValueCents += asking;
+      // Prefer the recorded sale price; fall back to asking for older rows.
+      out.soldValueCents += l.soldPriceCents ?? asking;
     }
   }
   return out;

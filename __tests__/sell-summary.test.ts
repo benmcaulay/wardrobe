@@ -43,6 +43,14 @@ describe("summarizeListings", () => {
   it("adopts the currency of the first listing that has one", () => {
     expect(summarizeListings([{ status: "sold", askingCents: 100, currency: "EUR" }]).currency).toBe("EUR");
   });
+
+  it("counts actual sold price when recorded, falling back to asking", () => {
+    const s = summarizeListings([
+      { status: "sold", askingCents: 5000, soldPriceCents: 4200 }, // sold below asking
+      { status: "sold", askingCents: 3000, soldPriceCents: null }, // legacy row → asking
+    ]);
+    expect(s.soldValueCents).toBe(4200 + 3000);
+  });
 });
 
 describe("listingClipboardText", () => {
