@@ -321,9 +321,14 @@ upgrade point to an LLM):
 Seven marketplaces are modeled (Depop, Poshmark, Mercari, Vinted, eBay, Grailed,
 Facebook). **None expose a public listing-creation API**, so `prefillSupported`
 is `false` everywhere and the product **cannot auto-post**. The
-flow is: generate a copy-ready draft → deep-link to the marketplace's "new
-listing" page in a new tab → user pastes. The for-sale board
-(`/closet/sell/listings`) is the staging area for this.
+flow is: generate a copy-ready draft → **one-tap "Copy & open"** (copies the
+full listing — title, price, condition, body, hashtags — then opens the
+marketplace's new-listing page) → user pastes. The for-sale board
+(`/closet/sell/listings`) is the operator cockpit: a portfolio summary (active
+count + asking value, sold count + value, potential total via the pure
+`summarizeListings`), status filter tabs, inline editing with debounced save,
+and lifecycle controls. It's the staging area until cross-listing is automated
+(§13).
 
 > **Diligence flag.** This manual hand-off is the single biggest product
 > limitation and the central roadmap bet (§13). It is cleanly isolated: the data
