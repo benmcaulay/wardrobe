@@ -61,7 +61,7 @@ const KEYWORD_BASE: { match: string[]; base: BaseEstimate }[] = [
   { match: ["sneaker", "trainer", "running"], base: { weightGrams: 800, volumeLiters: 3.6 } },
   { match: ["sandal", "flip", "slide"], base: { weightGrams: 350, volumeLiters: 1.4 } },
   { match: ["heel", "flat", "loafer"], base: { weightGrams: 600, volumeLiters: 2.6 } },
-  { match: ["hat", "cap", "beanie"], base: { weightGrams: 110, volumeLiters: 1 } },
+  { match: ["hat", "cap", "beanie"], base: { weightGrams: 110, volumeLiters: 0.2 } },
   { match: ["scarf"], base: { weightGrams: 150, volumeLiters: 0.9 } },
   { match: ["belt"], base: { weightGrams: 200, volumeLiters: 0.4 } },
   { match: ["bag", "purse", "backpack"], base: { weightGrams: 500, volumeLiters: 3 } },

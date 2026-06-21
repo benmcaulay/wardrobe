@@ -195,9 +195,10 @@ export function TripPlanner({
   }
 
   const packedIds = new Set(bagOfItem.keys());
-  const unpacked = items
-    .filter((i) => !packedIds.has(i.id))
-    .filter((i) => (filter ? i.name.toLowerCase().includes(filter.toLowerCase()) : true));
+  const unpackedAll = items.filter((i) => !packedIds.has(i.id));
+  const unpacked = unpackedAll.filter((i) =>
+    filter ? i.name.toLowerCase().includes(filter.toLowerCase()) : true,
+  );
 
   // Per-garment-type counts and total value of everything currently packed.
   const summary = useMemo(() => {
@@ -340,6 +341,7 @@ export function TripPlanner({
                 bag={bag}
                 usage={u}
                 items={(assignments[bag.id] ?? []).map((id) => itemById.get(id)).filter(Boolean) as PlannerItem[]}
+                addableItems={unpackedAll}
                 allBags={bags}
                 estimates={estimates}
                 climate={climate}
@@ -503,6 +505,7 @@ function BagPanel({
   bag,
   usage,
   items,
+  addableItems,
   allBags,
   estimates,
   climate,
@@ -512,23 +515,45 @@ function BagPanel({
   bag: PlannerBag;
   usage: ReturnType<typeof computeUsage>["perBag"][number];
   items: PlannerItem[];
+  addableItems: PlannerItem[];
   allBags: PlannerBag[];
   estimates: Map<string, { weightGrams: number; volumeLiters: number }>;
   climate: ClimateSummary | null;
   onMove: (itemId: string, targetBagId: string) => void;
   onSaveOverride: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
 }) {
+  const [adding, setAdding] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
+
   const volumePct = Math.min(100, (usage.usedVolumeLiters / bag.volumeLiters) * 100);
   const weightPct =
     usage.maxWeightGrams != null
       ? Math.min(100, (usage.usedWeightGrams / usage.maxWeightGrams) * 100)
       : null;
 
+  const pickerMatches = addableItems.filter((i) =>
+    pickerSearch ? i.name.toLowerCase().includes(pickerSearch.toLowerCase()) : true,
+  );
+
   return (
     <div className="flex flex-col rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-3">
         <h3 className="font-medium">{bag.name}</h3>
-        <span className="text-xs text-ink-muted">{items.length} items</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-ink-muted">
+            {items.length} {items.length === 1 ? "item" : "items"}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setAdding((o) => !o);
+              setPickerSearch("");
+            }}
+            className="rounded-full border border-ink/15 px-3 py-1 text-xs transition hover:bg-paper-warm"
+          >
+            {adding ? "Done" : "+ Add items"}
+          </button>
+        </div>
       </div>
 
       {/* Volume meter */}
@@ -569,10 +594,57 @@ function BagPanel({
         </div>
       ) : null}
 
+      {/* Add-items picker */}
+      {adding ? (
+        <div className="mt-4 rounded-xl border border-ink/15 bg-paper/60 p-3">
+          <input
+            value={pickerSearch}
+            onChange={(e) => setPickerSearch(e.target.value)}
+            placeholder={`Search items to add to ${bag.name}…`}
+            autoFocus
+            className="w-full rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-xs focus:border-ink/40 focus:outline-none"
+          />
+          {pickerMatches.length === 0 ? (
+            <p className="mt-3 px-1 text-center text-xs text-ink-muted">
+              {addableItems.length === 0 ? "Everything's already packed." : "No matching items."}
+            </p>
+          ) : (
+            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
+              {pickerMatches.map((item) => {
+                const est = estimates.get(item.id);
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => onMove(item.id, bag.id)}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-paper-warm"
+                    >
+                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-paper-warm">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={thumbnailUrl(item.imagePath)}
+                          alt={item.name}
+                          className="h-full w-full object-cover"
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-xs">{item.name}</span>
+                      <span className="text-[11px] text-ink-muted">
+                        {formatVolume(est?.volumeLiters ?? item.volumeLiters)}
+                      </span>
+                      <span className="text-[11px] font-medium text-ink">Add</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
       <ul className="mt-4 space-y-2">
         {items.length === 0 ? (
           <li className="rounded-xl bg-paper-warm/60 px-3 py-6 text-center text-xs text-ink-muted">
-            Empty — auto-pack or add items below.
+            Empty — auto-pack or use “+ Add items” above.
           </li>
         ) : (
           items.map((item) => (
@@ -638,18 +710,44 @@ function ItemRow({
             ) : null}
           </div>
         </div>
-        <select
-          value={currentBagId}
-          onChange={(e) => onMove(item.id, e.target.value)}
-          className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
-        >
-          <option value={NONE}>Not packed</option>
-          {allBags.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
+        {currentBagId === NONE ? (
+          <select
+            value={NONE}
+            onChange={(e) => onMove(item.id, e.target.value)}
+            className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+          >
+            <option value={NONE}>Add to…</option>
+            {allBags.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <>
+            {allBags.length > 1 ? (
+              <select
+                value={currentBagId}
+                onChange={(e) => onMove(item.id, e.target.value)}
+                className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+                title="Move to another bag"
+              >
+                {allBags.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => onMove(item.id, NONE)}
+              className="rounded-lg border border-rose-200 px-2 py-1 text-[11px] text-rose-700 transition hover:bg-rose-50"
+            >
+              Remove
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
