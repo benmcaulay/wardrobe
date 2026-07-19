@@ -1,7 +1,8 @@
 "use client";
 
 import type { StylePrefs } from "@/lib/json";
-import { FAVORITE_COLOR_OPTIONS, SIZE_SLOTS, STYLE_OPTIONS } from "@/lib/preferences";
+import { getColorsListFromPrefs } from "@/lib/colors";
+import { SIZE_SLOTS, STYLE_OPTIONS } from "@/lib/preferences";
 
 type Props = {
   value: StylePrefs;
@@ -13,6 +14,7 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
   const styles = value.styles ?? [];
   const favoriteColors = value.favoriteColors ?? [];
   const sizes = value.sizes ?? {};
+  const colorOptions = getColorsListFromPrefs(value);
 
   function toggleStyle(s: string) {
     const next = styles.includes(s) ? styles.filter((x) => x !== s) : [...styles, s];
@@ -60,7 +62,7 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
       <section>
         <h3 className="text-xs uppercase tracking-wide text-ink-muted mb-3">Favorite colors</h3>
         <div className="flex flex-wrap gap-3">
-          {FAVORITE_COLOR_OPTIONS.map((c) => {
+          {colorOptions.map((c) => {
             const active = favoriteColors.includes(c.name);
             return (
               <button

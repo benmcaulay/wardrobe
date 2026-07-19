@@ -1,30 +1,58 @@
 import { describe, it, expect } from "vitest";
 import { buildPrompt } from "../lib/services/ghostMannequin";
 
-describe("ghost-mannequin camera-angle prompt", () => {
-  it("pins footwear to a single strict angle (no vague 'or' the model can dodge)", () => {
-    const p = buildPrompt("footwear", undefined, "default");
-    expect(p).toMatch(/STRICT/);
-    expect(p).toMatch(/45°/);
-    expect(p).toMatch(/left/i);
-    // The old wording let the model pick between angles — make sure it's gone.
-    expect(p).not.toMatch(/three-quarter or front angle/);
+describe("ghost catalog fal prompt (six tenets)", () => {
+  it("never says mannequin in apparel or footwear prompts", () => {
+    for (const cat of ["upperbody", "lowerbody", "dress", "full", "footwear"] as const) {
+      const p = buildPrompt(cat, undefined, "default");
+      expect(p).not.toMatch(/mannequin/i);
+    }
   });
 
-  it("squares apparel to the camera as a strict requirement", () => {
+  it("requires visible back lining through the neck opening", () => {
     const p = buildPrompt("upperbody", undefined, "default");
-    expect(p).toMatch(/STRICT/);
-    expect(p).toMatch(/squared to the camera/);
+    expect(p).toMatch(/back lining/i);
+    expect(p).toMatch(/No white plastic tube/i);
   });
 
-  it("still honours an explicit rear composition hint for apparel", () => {
-    const p = buildPrompt("upperbody", undefined, "rear");
-    expect(p).toMatch(/[Rr]ear-facing/);
+  it("requires fully inflated volume", () => {
+    const p = buildPrompt("upperbody", undefined, "default");
+    expect(p).toMatch(/Fully inflated/i);
+    expect(p).toMatch(/Not flat, deflated/i);
   });
 
-  it("appends caller instructions after the baked-in angle", () => {
-    const p = buildPrompt("dress", "shot on a marble plinth", "default");
-    expect(p).toMatch(/Additional view instruction/);
-    expect(p).toMatch(/marble plinth/);
+  it("requires straight arms for tops", () => {
+    const p = buildPrompt("upperbody", undefined, "default");
+    expect(p).toMatch(/Arms straight/i);
+    expect(p).toMatch(/straight down at the sides/i);
+  });
+
+  it("requires pure white background and no shadows", () => {
+    const p = buildPrompt("upperbody", undefined, "default");
+    expect(p).toMatch(/#ffffff/);
+    expect(p).toMatch(/No shadows/i);
+    expect(p).toMatch(/No cast shadow/i);
+  });
+
+  it("requires straight-on camera for front and rear", () => {
+    const front = buildPrompt("upperbody", undefined, "default");
+    expect(front).toMatch(/Straight-on camera only/i);
+    expect(front).toMatch(/0° yaw/);
+    const rear = buildPrompt("upperbody", undefined, "rear");
+    expect(rear).toMatch(/back of the garment/i);
+    expect(rear).toMatch(/0° yaw/);
+  });
+
+  it("uses footwear-specific framing without saying mannequin", () => {
+    const p = buildPrompt("footwear", undefined, "default");
+    expect(p).toMatch(/45°/);
+    expect(p).toMatch(/No legs/i);
+    expect(p).not.toMatch(/mannequin/i);
+  });
+
+  it("appends optional per-view UI instructions", () => {
+    const p = buildPrompt("dress", "emphasize the collar stitching", "default");
+    expect(p).toMatch(/Additional direction/);
+    expect(p).toMatch(/collar stitching/);
   });
 });

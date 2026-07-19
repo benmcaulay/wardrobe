@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
 import type { ItemFormValue } from "@/lib/types";
+import type { Color } from "@/lib/json";
 import { updateItem, wearToday, deleteItem } from "./actions";
 
 const AUTOSAVE_MS = 600;
@@ -13,9 +14,10 @@ type Props = {
   initial: ItemFormValue;
   categories: string[];
   styleTagsList: string[];
+  colorOptions: Color[];
 };
 
-export function EditForm({ itemId, initial, categories, styleTagsList }: Props) {
+export function EditForm({ itemId, initial, categories, styleTagsList, colorOptions }: Props) {
   const [value, setValue] = useState<ItemFormValue>(initial);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -116,6 +118,7 @@ export function EditForm({ itemId, initial, categories, styleTagsList }: Props) 
         onChange={(p) => setValue((v) => ({ ...v, ...p }))}
         categories={categories}
         styleTags={styleTagsList}
+        colorOptions={colorOptions}
       />
     </div>
   );

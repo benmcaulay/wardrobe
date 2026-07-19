@@ -13,9 +13,27 @@ import {
   type VirtualTryOnResult,
 } from "../services/virtualTryOn";
 import {
+  runGenerateGhostViewFor,
+  runPreviewGhostMannequin,
+  type PreviewGhostInput,
+} from "../server/ghost-mannequin-runs";
+import {
+  processScanPhotoForReview,
+  tallyScanProgress,
+} from "../server/camera-roll-scan";
+import { assignDuplicateGroups } from "../server/scan-duplicate-groups";
+import {
   markJobSucceeded,
   markJobFailed,
   parsePayload,
+  updateJobProgress,
+  type CameraRollScanPayload,
+  type CameraRollScanProgress,
+  type CameraRollScanResult,
+  type GhostPreviewJobPayload,
+  type GhostPreviewJobResult,
+  type GhostViewJobPayload,
+  type GhostViewJobResult,
   type VirtualTryOnJobPayload,
   type VirtualTryOnJobResult,
 } from "./queue";
@@ -24,6 +42,22 @@ const REAL_VTON = process.env.USE_REAL_VIRTUAL_TRYON === "true";
 
 /** A failure the caller should NOT retry (bad input, gone resource, no credits). */
 class PermanentJobError extends Error {}
+
+function ghostFailureIsPermanent(message: string): boolean {
+  return /not found|out of credits|does not belong|invalid|primary source|quota/i.test(
+    message,
+  );
+}
+
+function assertGhostOk<T extends { ok: boolean; error?: string }>(
+  out: T,
+): asserts out is T & { ok: true } {
+  if (!out.ok) {
+    const message = out.error ?? "Generation failed";
+    if (ghostFailureIsPermanent(message)) throw new PermanentJobError(message);
+    throw new Error(message);
+  }
+}
 
 async function runVirtualTryOn(
   userId: string,
@@ -107,6 +141,93 @@ async function runVirtualTryOn(
   };
 }
 
+async function runGhostView(
+  userId: string,
+  payload: GhostViewJobPayload,
+): Promise<GhostViewJobResult> {
+  const out = await runGenerateGhostViewFor(
+    { id: userId },
+    payload.itemId,
+    payload.selectedExtraPaths,
+    payload.label,
+    payload.instructions,
+    payload.primaryGarmentPath,
+    payload.compositionHint,
+  );
+  assertGhostOk(out);
+  return {
+    ghostImagePath: out.ghostImagePath,
+    creditsRemaining: out.creditsRemaining,
+    viewLabel: payload.label.trim() || "Ghost",
+  };
+}
+
+async function runGhostPreview(
+  userId: string,
+  payload: GhostPreviewJobPayload,
+): Promise<GhostPreviewJobResult> {
+  const out = await runPreviewGhostMannequin(
+    { id: userId },
+    {
+      garmentImagePath: payload.garmentImagePath,
+      extraImagePaths: payload.extraImagePaths,
+      primaryGarmentPathOverride: payload.primaryGarmentPathOverride,
+      category: payload.category as PreviewGhostInput["category"],
+      instructions: payload.instructions,
+      compositionHint: payload.compositionHint,
+    },
+  );
+  assertGhostOk(out);
+  return {
+    ghostImagePath: out.ghostImagePath,
+    creditsRemaining: out.creditsRemaining,
+    creditsUsed: out.creditsUsed,
+  };
+}
+
+async function runCameraRollScan(
+  userId: string,
+  jobId: string,
+  payload: CameraRollScanPayload,
+): Promise<CameraRollScanResult> {
+  const items: CameraRollScanProgress["items"] = [];
+  let creditsRemaining: number | undefined;
+  let photosProcessed = 0;
+
+  for (const photoPath of payload.photoPaths) {
+    const batch = await processScanPhotoForReview(userId, photoPath);
+    items.push(...batch);
+    photosProcessed += 1;
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { credits: true },
+    });
+    creditsRemaining = dbUser?.credits;
+    const progress: CameraRollScanProgress = {
+      total: payload.photoPaths.length,
+      processed: photosProcessed,
+      ...tallyScanProgress(items),
+      items,
+      creditsRemaining,
+    };
+    await updateJobProgress(jobId, progress);
+
+    if (batch.some((r) => r.status === "failed" && r.error === "Out of credits")) {
+      break;
+    }
+  }
+
+  const groupedItems = await assignDuplicateGroups(items);
+
+  return {
+    total: payload.photoPaths.length,
+    processed: photosProcessed,
+    ...tallyScanProgress(groupedItems),
+    items: groupedItems,
+    creditsRemaining,
+  };
+}
+
 /**
  * Execute a claimed job. On success marks it succeeded; on failure either
  * re-queues for retry (transient) or marks it terminally failed (permanent or
@@ -118,6 +239,35 @@ export async function runJob(job: GenerationJob): Promise<void> {
       const result = await runVirtualTryOn(job.userId, parsePayload(job));
       await markJobSucceeded(job.id, result);
       log.info("job.succeeded", { jobId: job.id, type: job.type, userId: job.userId });
+      return;
+    }
+    if (job.type === "ghost_view") {
+      const payload = parsePayload<GhostViewJobPayload>(job);
+      const result = await runGhostView(job.userId, payload);
+      await markJobSucceeded(job.id, result);
+      log.info("job.succeeded", { jobId: job.id, type: job.type, userId: job.userId });
+      return;
+    }
+    if (job.type === "ghost_preview") {
+      const payload = parsePayload<GhostPreviewJobPayload>(job);
+      const result = await runGhostPreview(job.userId, payload);
+      await markJobSucceeded(job.id, result);
+      log.info("job.succeeded", { jobId: job.id, type: job.type, userId: job.userId });
+      return;
+    }
+    if (job.type === "camera_roll_scan") {
+      const payload = parsePayload<CameraRollScanPayload>(job);
+      if (!payload.photoPaths?.length) {
+        throw new PermanentJobError("Scan has no photos");
+      }
+      const result = await runCameraRollScan(job.userId, job.id, payload);
+      await markJobSucceeded(job.id, result);
+      log.info("job.succeeded", {
+        jobId: job.id,
+        type: job.type,
+        userId: job.userId,
+        ready: result.ready,
+      });
       return;
     }
     throw new PermanentJobError(`Unknown job type: ${job.type}`);

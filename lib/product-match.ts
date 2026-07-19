@@ -1,7 +1,10 @@
 import type { Color } from "./json";
+import { isAggregatorProductUrl, parseBrandFromTitle } from "./shopping-parse";
 import type { PrefillResult } from "./prefill";
 import type { ProductMatch } from "./services/reverseImageSearch";
 import type { ProductMetadata } from "./services/productScraper";
+import { scrapeProduct } from "./services/productScraper";
+import { tryImmersiveProductMetadata } from "./services/immersiveProduct";
 import type { ItemFormValue } from "./types";
 
 const COLOR_NAME_TO_HEX: Record<string, string> = {
@@ -42,29 +45,66 @@ function colorsFromNames(names: string[]): Color[] {
   return out;
 }
 
-/** Map web / lens match (+ optional scrape) into form + prefill fields. */
+function matchBrand(match: ProductMatch): string {
+  return match.brand || parseBrandFromTitle(match.name) || match.retailer;
+}
+
+function trustedScrape(scraped: ProductMetadata | null | undefined): ProductMetadata | null {
+  if (!scraped) return null;
+  if (isAggregatorProductUrl(scraped.productUrl)) return null;
+  return scraped;
+}
+
+/**
+ * Resolve listing metadata: Immersive Product (SerpAPI) when available, else
+ * direct URL scrape for real merchant PDPs. Never returns aggregator junk.
+ */
+export async function resolveProductMetadata(match: ProductMatch): Promise<ProductMetadata | null> {
+  const immersive = await tryImmersiveProductMetadata(match.immersiveProductPageToken);
+  if (immersive?.name) return immersive;
+
+  if (!isAggregatorProductUrl(match.url)) {
+    try {
+      return trustedScrape(await scrapeProduct(match.url));
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/** Map web / lens match (+ optional enrichment) into form + prefill fields. */
 export function productMatchToFormPatch(
   match: ProductMatch,
-  scraped?: ProductMetadata | null,
+  enriched?: ProductMetadata | null,
 ): Partial<ItemFormValue> & { retailer?: string; productUrl?: string } {
-  const src = scraped ?? null;
+  const extra = trustedScrape(enriched);
+  const brand = extra?.brand?.trim() || matchBrand(match);
+  const priceCents =
+    extra?.priceCents && extra.priceCents > 0
+      ? extra.priceCents
+      : match.priceCents > 0
+        ? match.priceCents
+        : null;
+
   return {
-    name: src?.name || match.name,
-    brand: src?.brand || match.brand,
-    priceCents: src?.priceCents ?? match.priceCents,
-    currency: src?.currency || match.currency,
-    material: src?.material ?? "",
-    colors: src?.colors?.length ? colorsFromNames(src.colors) : [],
-    retailer: src?.retailer || match.retailer,
-    productUrl: src?.productUrl || match.url,
+    name: extra?.name?.trim() || match.name,
+    brand,
+    priceCents,
+    currency: extra?.currency || match.currency,
+    material: extra?.material?.trim() ?? "",
+    colors: extra?.colors?.length ? colorsFromNames(extra.colors) : [],
+    retailer: extra?.retailer?.trim() || match.retailer,
+    productUrl: extra?.productUrl?.trim() || match.url,
   };
 }
 
 export function productMatchToPrefill(
   match: ProductMatch,
-  scraped?: ProductMetadata | null,
+  enriched?: ProductMetadata | null,
 ): PrefillResult {
-  const patch = productMatchToFormPatch(match, scraped);
+  const patch = productMatchToFormPatch(match, enriched);
   return {
     name: patch.name ?? "",
     brand: patch.brand ?? "",

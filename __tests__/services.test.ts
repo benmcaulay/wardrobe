@@ -52,19 +52,24 @@ describe("reverseImageSearch", () => {
 });
 
 describe("scrapeProduct", () => {
-  it("returns a ProductMetadata shape", async () => {
+  it("returns null for Google Shopping aggregator URLs", async () => {
+    const meta = await scrapeProduct("https://www.google.com/shopping/product/123");
+    expect(meta).toBeNull();
+  });
+
+  it("returns a ProductMetadata shape for merchant URLs", async () => {
     const meta = await scrapeProduct("https://everlane.com/products/linen-shirt");
-    expect(meta.productUrl).toBe("https://everlane.com/products/linen-shirt");
-    expect(meta.brand.length).toBeGreaterThan(0);
-    expect(meta.currency).toBe("USD");
-    expect(meta.priceCents).toBeGreaterThan(0);
-    expect(meta.colors.length).toBeGreaterThanOrEqual(1);
+    expect(meta).not.toBeNull();
+    expect(meta!.productUrl).toBe("https://everlane.com/products/linen-shirt");
+    expect(meta!.brand.length).toBeGreaterThan(0);
+    expect(meta!.currency).toBe("USD");
+    expect(meta!.priceCents).toBeGreaterThan(0);
+    expect(meta!.colors.length).toBeGreaterThanOrEqual(1);
   });
 
   it("tolerates bad URLs", async () => {
     const meta = await scrapeProduct("not-a-real-url");
-    expect(meta.productUrl).toBe("not-a-real-url");
-    expect(meta.priceCents).toBeGreaterThan(0);
+    expect(meta).toBeNull();
   });
 
   it("is deterministic for the same URL", async () => {

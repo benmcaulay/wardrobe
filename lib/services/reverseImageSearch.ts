@@ -1,4 +1,5 @@
 import { log } from "../log";
+import { parseBrandFromTitle } from "../shopping-parse";
 import { signedPublicImageUrl } from "../public-image-url";
 import { serpApiEnabled, serpApiGet } from "./serpapi-client";
 import { pick, range, seededRng } from "./_rng";
@@ -11,6 +12,8 @@ export type ProductMatch = {
   retailer: string;
   url: string;
   thumbnailUrl: string | null;
+  /** SerpAPI token for Google Immersive Product (brand, specs, store links). */
+  immersiveProductPageToken?: string;
   /** 0..1 — how confident the match is. Highest first in the returned array. */
   confidence: number;
 };
@@ -94,10 +97,11 @@ function mapLensMatch(item: LensMatch, confidence: number): ProductMatch | null 
 
   const { cents, currency } = parseLensPrice(item.price);
   const retailer = item.source?.trim() || "Shop";
+  const brand = parseBrandFromTitle(name) || retailer;
 
   return {
     name,
-    brand: retailer,
+    brand,
     priceCents: cents,
     currency,
     retailer,

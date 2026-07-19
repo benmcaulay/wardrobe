@@ -76,6 +76,103 @@ describe("sortWardrobeItems", () => {
     expect(out.map((r) => r.id)).toEqual(["b", "a"]);
   });
 
+  it("uses custom color order from settings when provided", () => {
+    const rows = [
+      item({
+        id: "black",
+        priceCents: 0,
+        category: "x",
+        colors: `[{"hex":"#000","name":"black"}]`,
+        season: "[]",
+        createdAt: d("2024-01-01"),
+      }),
+      item({
+        id: "red",
+        priceCents: 0,
+        category: "x",
+        colors: `[{"hex":"#f00","name":"red"}]`,
+        season: "[]",
+        createdAt: d("2024-01-02"),
+      }),
+      item({
+        id: "blue",
+        priceCents: 0,
+        category: "x",
+        colors: `[{"hex":"#00f","name":"blue"}]`,
+        season: "[]",
+        createdAt: d("2024-01-03"),
+      }),
+    ];
+    const out = sortWardrobeItems(rows, "color_asc", { colorOrder: ["blue", "red", "black"] });
+    expect(out.map((r) => r.id)).toEqual(["blue", "red", "black"]);
+  });
+
+  it("uses custom category order and reverses with color_desc", () => {
+    const rows = [
+      item({
+        id: "shoes",
+        priceCents: 0,
+        category: "shoes",
+        colors: "[]",
+        season: "[]",
+        createdAt: d("2024-01-01"),
+      }),
+      item({
+        id: "top",
+        priceCents: 0,
+        category: "top",
+        colors: "[]",
+        season: "[]",
+        createdAt: d("2024-01-02"),
+      }),
+      item({
+        id: "bottom",
+        priceCents: 0,
+        category: "bottom",
+        colors: "[]",
+        season: "[]",
+        createdAt: d("2024-01-03"),
+      }),
+    ];
+    const out = sortWardrobeItems(rows, "category_desc", {
+      categoryOrder: ["top", "bottom", "shoes"],
+    });
+    expect(out.map((r) => r.id)).toEqual(["shoes", "bottom", "top"]);
+  });
+
+  it("uses manual group order within matching category and color", () => {
+    const rows = [
+      item({
+        id: "a",
+        priceCents: 0,
+        category: "shirt",
+        colors: `[{"hex":"#000","name":"black"}]`,
+        season: "[]",
+        createdAt: d("2024-01-03"),
+      }),
+      item({
+        id: "b",
+        priceCents: 0,
+        category: "shirt",
+        colors: `[{"hex":"#000","name":"black"}]`,
+        season: "[]",
+        createdAt: d("2024-01-02"),
+      }),
+      item({
+        id: "c",
+        priceCents: 0,
+        category: "shirt",
+        colors: `[{"hex":"#000","name":"black"}]`,
+        season: "[]",
+        createdAt: d("2024-01-01"),
+      }),
+    ];
+    const out = sortWardrobeItems(rows, "color_asc", {
+      closetGroupOrders: { "shirt\0black": ["c", "a", "b"] },
+    });
+    expect(out.map((r) => r.id)).toEqual(["c", "a", "b"]);
+  });
+
   it("uses earliest season in calendar order for season_asc", () => {
     const rows = [
       item({

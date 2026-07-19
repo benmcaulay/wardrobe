@@ -35,7 +35,7 @@ export async function saveOutfitLayout(input: {
     data: {
       userId: user.id,
       name,
-      frameHeight: Math.max(520, Math.min(820, Math.round(input.frameHeight))),
+      frameHeight: Math.max(520, Math.min(1200, Math.round(input.frameHeight))),
       pieces: JSON.stringify(input.pieces),
     },
     select: { id: true },

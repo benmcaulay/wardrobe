@@ -25,7 +25,7 @@ export default async function BagsPage() {
     <main className="mx-auto max-w-5xl px-6 py-12">
       <nav className="mb-6 text-xs text-ink-muted">
         <Link href="/closet/smartpakker" className="hover:text-ink">
-          ← SmartPakker
+          ← Trip Packing Assistant
         </Link>
       </nav>
 
@@ -33,7 +33,7 @@ export default async function BagsPage() {
         <h1 className="font-serif text-4xl tracking-tight">Your bags</h1>
         <p className="mt-2 text-ink-muted">
           Add each piece of luggage you own — its volume in litres and an optional weight limit.
-          SmartPakker packs your trips into these.
+          The Trip Packing Assistant packs your trips into these.
         </p>
       </header>
 

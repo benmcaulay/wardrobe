@@ -1,20 +1,24 @@
 "use client";
 
-import { useEffect, useState, useTransition, startTransition } from "react";
+import { useEffect, useRef, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { imageUrl } from "@/lib/image-paths";
 import {
   deleteGhostViewFor,
   addExtraSourceImageFor,
-  generateGhostViewFor,
-  setPrimaryGhostViewFor,
+  enqueueGhostViewFor,
+  getGhostJobStatus,
+  getPendingGhostViewJobForItem,
+  setPrimaryThumbnailFor,
   updateGhostViewStyleFor,
   updateOriginalStyleFor,
   replaceGhostViewImageWithCrop,
+  replaceOriginalImageWithEdit,
   type GhostViewStyle,
 } from "@/lib/actions/ghost-mannequin";
 import { CreditMark } from "@/components/credit-mark";
 import { ImageCropper } from "@/components/image-cropper";
+import { BackgroundWhitener } from "@/components/background-whitener";
 
 type GhostView = { label: string; imagePath: string; mirror?: boolean; thumbZoom?: number };
 type PickImageState = {
@@ -25,6 +29,9 @@ type PickImageState = {
   primaryPath: string | null;
   compositionHint: "default" | "rear";
 };
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 4 * 60 * 1000;
 
 type Props = {
   itemId: string;
@@ -48,31 +55,51 @@ export function ImageCarousel({
   credits,
 }: Props) {
   const [ghostViews, setGhostViews] = useState(initialGhostViews);
+  const [origPath, setOrigPath] = useState(originalPath);
+  const [whitening, setWhitening] = useState(false);
   const [originalStyle, setOriginalStyle] = useState({
     mirror: originalMirror,
     thumbZoom: originalThumbZoom,
   });
-  const [primaryPath, setPrimaryPath] = useState<string | null>(
-    primaryGhostPath ?? initialGhostViews[0]?.imagePath ?? null,
-  );
+  const [primaryPath, setPrimaryPath] = useState<string | null>(primaryGhostPath);
   // null = original, index = ghost view index
   const [activeIndex, setActiveIndex] = useState<"original" | number>(
     initialGhostViews.length > 0 ? 0 : "original",
   );
   const [sourceImagePaths, setSourceImagePaths] = useState(extraImagePaths);
-  const [generating, startGenerate] = useTransition();
+  const [ghostGenerating, setGhostGenerating] = useState(false);
+  const [, startTransition] = useTransition();
+  const pollGenRef = useRef(0);
+  const prevGhostCountRef = useRef(initialGhostViews.length);
   const [error, setError] = useState<string | null>(null);
   const [pickingImages, setPickingImages] = useState<PickImageState | null>(null);
   const [croppingPath, setCroppingPath] = useState<string | null>(null);
+  const [croppingOriginal, setCroppingOriginal] = useState(false);
   const router = useRouter();
   const noCredits = credits < 1;
+
+  useEffect(() => {
+    setGhostViews(initialGhostViews);
+    if (initialGhostViews.length > prevGhostCountRef.current) {
+      setActiveIndex(initialGhostViews.length - 1);
+    }
+    prevGhostCountRef.current = initialGhostViews.length;
+  }, [initialGhostViews]);
+
+  useEffect(() => {
+    setPrimaryPath(primaryGhostPath);
+  }, [primaryGhostPath]);
 
   useEffect(() => {
     setSourceImagePaths(extraImagePaths);
   }, [extraImagePaths]);
 
+  useEffect(() => {
+    setOrigPath(originalPath);
+  }, [originalPath]);
+
   const activeGhost = activeIndex !== "original" ? ghostViews[activeIndex] ?? null : null;
-  const activeSrc = activeGhost ? imageUrl(activeGhost.imagePath) : imageUrl(originalPath);
+  const activeSrc = activeGhost ? imageUrl(activeGhost.imagePath) : imageUrl(origPath);
   const activeAlt = activeGhost ? activeGhost.label : "Original";
   const activeTransform = activeGhost
     ? `scale(${activeGhost.thumbZoom ?? 1}) ${activeGhost.mirror ? "scaleX(-1)" : ""}`
@@ -106,43 +133,75 @@ export function ImageCarousel({
     router.refresh();
   }
 
-  function doGenerate(pick: PickImageState) {
+  function dismissGenerateModal() {
     setPickingImages(null);
-    startGenerate(async () => {
-      const currentViews = ghostViews;
-      const res = await generateGhostViewFor(
-        itemId,
-        pick.selectedExtraPaths,
-        pick.label,
-        pick.instructions,
-        pick.primaryPath,
-        pick.compositionHint,
-      );
-      if (!res.ok) {
-        setError(res.error);
+  }
+
+  async function pollGhostJob(jobId: string, signal: number) {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (pollGenRef.current !== signal) return;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      if (pollGenRef.current !== signal) return;
+      const status = await getGhostJobStatus(jobId);
+      if (pollGenRef.current !== signal) return;
+      if (!status.ok) {
+        setError(status.error);
         return;
       }
-      const defaultLabel =
-        currentViews.length === 0 ? "Ghost" : `View ${currentViews.length + 1}`;
-      const newView: GhostView = {
-        label: pick.label.trim() || defaultLabel,
-        imagePath: res.ghostImagePath,
-        mirror: false,
-        thumbZoom: 1,
-      };
-      setGhostViews((prev) => {
-        const next = [...prev, newView];
-        setActiveIndex(next.length - 1);
-        return next;
-      });
-      setPrimaryPath((prev) => prev ?? res.ghostImagePath);
-      router.refresh();
+      if (status.status === "succeeded") {
+        setPickingImages(null);
+        router.refresh();
+        return;
+      }
+    }
+    setError("This is taking longer than expected. Check back on this item shortly.");
+  }
+
+  function startGhostPoll(jobId: string) {
+    setGhostGenerating(true);
+    const signal = ++pollGenRef.current;
+    void pollGhostJob(jobId, signal).finally(() => {
+      if (pollGenRef.current === signal) setGhostGenerating(false);
     });
   }
 
-  function setPrimary(imagePath: string) {
-    startGenerate(async () => {
-      const res = await setPrimaryGhostViewFor(itemId, imagePath);
+  useEffect(() => {
+    void (async () => {
+      const pending = await getPendingGhostViewJobForItem(itemId);
+      if (pending.ok && pending.jobId) startGhostPoll(pending.jobId);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once per item
+  }, [itemId]);
+
+  function doGenerate(pick: PickImageState) {
+    setError(null);
+    setGhostGenerating(true);
+    void enqueueGhostViewFor(
+      itemId,
+      pick.selectedExtraPaths,
+      pick.label,
+      pick.instructions,
+      pick.primaryPath,
+      pick.compositionHint,
+    )
+      .then((res) => {
+        if (!res.ok) {
+          setError(res.error);
+          setGhostGenerating(false);
+          return;
+        }
+        startGhostPoll(res.jobId);
+      })
+      .catch(() => {
+        setError("Something went wrong starting ghost generation. Please try again.");
+        setGhostGenerating(false);
+      });
+  }
+
+  function setPrimary(imagePath: string | null) {
+    startTransition(async () => {
+      const res = await setPrimaryThumbnailFor(itemId, imagePath);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -164,7 +223,7 @@ export function ImageCarousel({
           : v,
       ),
     );
-    startGenerate(async () => {
+    startTransition(async () => {
       const next = ghostViews.find((v) => v.imagePath === imagePath);
       const res = await updateGhostViewStyleFor(itemId, imagePath, {
         mirror: typeof patch.mirror === "boolean" ? patch.mirror : !!next?.mirror,
@@ -180,7 +239,7 @@ export function ImageCarousel({
       mirror: typeof patch.mirror === "boolean" ? patch.mirror : prev.mirror,
       thumbZoom: typeof patch.thumbZoom === "number" ? patch.thumbZoom : prev.thumbZoom,
     }));
-    startGenerate(async () => {
+    startTransition(async () => {
       const res = await updateOriginalStyleFor(itemId, patch);
       if (!res.ok) setError(res.error);
       else router.refresh();
@@ -188,7 +247,7 @@ export function ImageCarousel({
   }
 
   function removeView(imagePath: string) {
-    startGenerate(async () => {
+    startTransition(async () => {
       const res = await deleteGhostViewFor(itemId, imagePath);
       if (!res.ok) {
         setError(res.error);
@@ -219,11 +278,12 @@ export function ImageCarousel({
       {/* Thumbnail row */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         <ViewThumb
-          src={imageUrl(originalPath)}
+          src={imageUrl(origPath)}
           label="Original"
           mirror={originalStyle.mirror}
           thumbZoom={originalStyle.thumbZoom}
           active={activeIndex === "original"}
+          isPrimary={primaryPath === null}
           onClick={() => setActiveIndex("original")}
         />
         {ghostViews.map((view, i) => (
@@ -247,7 +307,7 @@ export function ImageCarousel({
             </button>
           </div>
         ))}
-        {generating && (
+        {ghostGenerating && (
           <div className="flex-shrink-0 w-16 flex flex-col items-center gap-1 rounded-xl border border-ink/10 p-1 animate-pulse">
             <div className="w-full aspect-square rounded bg-paper-warm" />
             <span className="text-[9px] text-ink-muted">…</span>
@@ -282,13 +342,19 @@ export function ImageCarousel({
               </>
             )}
           </p>
+          {ghostGenerating && (
+            <p className="text-[11px] text-ink-muted">
+              Generating in the background — you can leave this page; refresh later to see the new
+              view.
+            </p>
+          )}
           <button
             type="button"
             onClick={requestGenerate}
-            disabled={generating || noCredits}
+            disabled={ghostGenerating || noCredits}
             className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
           >
-            {generating
+            {ghostGenerating
               ? "Generating…"
               : hasGhosts
                 ? "Generate another view"
@@ -305,14 +371,54 @@ export function ImageCarousel({
       {pickingImages && (
         <GenerateViewModal
           variant={hasGhosts ? "another" : "first"}
-          originalPath={originalPath}
+          originalPath={origPath}
           extraImagePaths={sourceImagePaths}
           pickState={pickingImages}
-          generating={generating}
+          generating={ghostGenerating}
           onChange={setPickingImages}
           onPasteImage={(file) => void addSourceImage(file)}
           onGenerate={() => pickingImages && doGenerate(pickingImages)}
-          onCancel={() => setPickingImages(null)}
+          onCancel={dismissGenerateModal}
+        />
+      )}
+      {whitening && (
+        <OriginalWhitenModal
+          src={imageUrl(origPath)}
+          onClose={() => setWhitening(false)}
+          onSave={async (blob) => {
+            const formData = new FormData();
+            formData.append("image", new File([blob], "cleaned.jpg", { type: "image/jpeg" }));
+            const res = await replaceOriginalImageWithEdit(itemId, formData);
+            if (!res.ok) {
+              setError(res.error);
+              return;
+            }
+            setOrigPath(res.imagePath);
+            setActiveIndex("original");
+            setWhitening(false);
+            router.refresh();
+          }}
+        />
+      )}
+      {croppingOriginal && (
+        <OriginalCropModal
+          src={imageUrl(origPath)}
+          onClose={() => setCroppingOriginal(false)}
+          onConfirm={async (blob) => {
+            const formData = new FormData();
+            formData.append("image", new File([blob], "crop.jpg", { type: "image/jpeg" }));
+            const res = await replaceOriginalImageWithEdit(itemId, formData);
+            if (!res.ok) {
+              setError(res.error);
+              return;
+            }
+            startTransition(() => {
+              setOrigPath(res.imagePath);
+              setActiveIndex("original");
+              router.refresh();
+            });
+            setCroppingOriginal(false);
+          }}
         />
       )}
       {croppingPath && (
@@ -334,10 +440,35 @@ export function ImageCarousel({
         <div className="rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2">
           <p className="text-[10px] uppercase tracking-wide text-ink-muted">Original photo framing</p>
           <p className="text-[11px] text-ink-muted">
-            Zoom in or out to adjust how the original photo is framed in square tiles (closet grid
-            and thumbnail).
+            Zoom adjusts how the original is framed in square tiles. Use Crop to reframe the file
+            itself (same tool as when you add a piece).
           </p>
           <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setPrimary(null)}
+              className={`rounded-full px-3 py-1 text-xs border ${
+                primaryPath === null
+                  ? "border-ink bg-ink text-paper"
+                  : "border-ink/15 hover:border-ink/30"
+              }`}
+            >
+              {primaryPath === null ? "Primary thumbnail" : "Set as thumbnail"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCroppingOriginal(true)}
+              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+            >
+              Crop image…
+            </button>
+            <button
+              type="button"
+              onClick={() => setWhitening(true)}
+              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+            >
+              Whiten background…
+            </button>
             <label className="flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
@@ -426,6 +557,68 @@ export function ImageCarousel({
           </label>
         </div>
       )}
+    </div>
+  );
+}
+
+function OriginalWhitenModal({
+  src,
+  onClose,
+  onSave,
+}: {
+  src: string;
+  onClose: () => void;
+  onSave: (blob: Blob) => Promise<void>;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
+      <div className="w-full max-w-2xl rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+        <div className="flex items-center justify-between">
+          <h3 className="font-serif text-xl tracking-tight">Whiten background</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-7 h-7 rounded-full border border-ink/15 text-sm hover:bg-paper"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <BackgroundWhitener src={src} onCancel={onClose} onSave={onSave} />
+      </div>
+    </div>
+  );
+}
+
+function OriginalCropModal({
+  src,
+  onClose,
+  onConfirm,
+}: {
+  src: string;
+  onClose: () => void;
+  onConfirm: (blob: Blob) => Promise<void>;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
+      <div className="w-full max-w-lg rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+        <div className="flex items-center justify-between">
+          <h3 className="font-serif text-xl tracking-tight">Crop original photo</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-7 h-7 rounded-full border border-ink/15 text-sm hover:bg-paper"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <p className="text-xs text-ink-muted">
+          Same controls as when adding a piece: drag to reposition, zoom slider, optional native
+          aspect. Square crop matches closet tiles.
+        </p>
+        <ImageCropper src={src} aspect={1} onCancel={onClose} onConfirm={onConfirm} />
+      </div>
     </div>
   );
 }
@@ -620,7 +813,7 @@ function GenerateViewModal({
           }}
           className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper focus:outline-none focus:border-ink/40"
         >
-          <option value="__original__">Listing photo (original)</option>
+          <option value="__original__">Original photo</option>
           {extraImagePaths.map((path, i) => (
             <option key={path} value={path}>
               Extra source {i + 1}
@@ -714,6 +907,11 @@ function GenerateViewModal({
           />
         </label>
 
+        {generating && (
+          <p className="text-[11px] text-ink-muted">
+            You can close this dialog or leave the item — generation continues in the background.
+          </p>
+        )}
         <div className="flex gap-2 pt-1">
           <button
             type="button"
@@ -728,7 +926,7 @@ function GenerateViewModal({
             onClick={onCancel}
             className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
           >
-            Cancel
+            {generating ? "Close" : "Cancel"}
           </button>
         </div>
       </div>

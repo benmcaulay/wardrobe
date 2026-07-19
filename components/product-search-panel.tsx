@@ -1,35 +1,37 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 
 type Props = {
   title?: string;
   hint?: string;
-  matches?: ProductMatch[];
+  query: string;
+  onQueryChange: (query: string) => void;
+  results: ProductMatch[];
+  onResultsChange: (results: ProductMatch[]) => void;
   onSearch: (query: string) => Promise<ProductMatch[]>;
   onSelect: (match: ProductMatch) => void;
   selectedUrl?: string | null;
+  onClearSelection?: () => void;
 };
 
 export function ProductSearchPanel({
   title = "Find product online",
   hint,
-  matches: externalMatches,
+  query,
+  onQueryChange,
+  results,
+  onResultsChange,
   onSearch,
   onSelect,
   selectedUrl,
+  onClearSelection,
 }: Props) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ProductMatch[]>(externalMatches ?? []);
   const [error, setError] = useState<string | null>(null);
   const [searching, startSearch] = useTransition();
 
-  useEffect(() => {
-    if (externalMatches?.length) setResults(externalMatches);
-  }, [externalMatches]);
-
-  const displayMatches = results;
+  const selectedMatch = selectedUrl ? results.find((m) => m.url === selectedUrl) : null;
 
   function runSearch() {
     const q = query.trim();
@@ -38,13 +40,13 @@ export function ProductSearchPanel({
     startSearch(async () => {
       try {
         const found = await onSearch(q);
-        setResults(found);
+        onResultsChange(found);
         if (found.length === 0) {
           setError("No products found. Try different keywords.");
         }
       } catch (err) {
         setError((err as Error).message ?? "Search failed");
-        setResults([]);
+        onResultsChange([]);
       }
     });
   }
@@ -60,7 +62,7 @@ export function ProductSearchPanel({
         <input
           type="search"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -87,9 +89,25 @@ export function ProductSearchPanel({
         </p>
       )}
 
-      {displayMatches.length > 0 && (
+      {selectedUrl && onClearSelection && (
+        <div className="flex items-center gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-wide text-ink-muted">Selected listing</p>
+            <p className="text-xs truncate">{selectedMatch?.name ?? "Product"}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClearSelection}
+            className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper-warm transition shrink-0"
+          >
+            Clear · browse results
+          </button>
+        </div>
+      )}
+
+      {results.length > 0 && (
         <ul className="max-h-64 overflow-y-auto space-y-2 pr-1">
-          {displayMatches.map((m) => {
+          {results.map((m) => {
             const selected = selectedUrl === m.url;
             return (
               <li key={m.url}>

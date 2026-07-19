@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { canonicalCategoryChoice, getCategoriesListFromPrefs } from "@/lib/categories";
+import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseColors, parseSeasons, parseStringArray, parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
@@ -25,6 +26,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
+  const colorOptions = getColorsListFromPrefs(prefs);
 
   const initial: ItemFormValue = {
     name: item.name,
@@ -109,7 +111,13 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
         </div>
 
         <div>
-          <EditForm itemId={item.id} initial={initial} categories={categories} styleTagsList={styleTagsList} />
+          <EditForm
+            itemId={item.id}
+            initial={initial}
+            categories={categories}
+            styleTagsList={styleTagsList}
+            colorOptions={colorOptions}
+          />
         </div>
       </div>
     </main>

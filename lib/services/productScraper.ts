@@ -24,8 +24,20 @@ const COLOR_NAMES = ["black", "ivory", "charcoal", "sage", "terracotta", "indigo
  * Given a product URL, pull back structured metadata. Stub derives a
  * deterministic response from the URL — good enough for the add-item
  * pre-fill flow during development.
+ *
+ * Returns null for aggregator URLs (Google Shopping redirects) where the stub
+ * would produce garbage like name "Search" / brand "Google".
  */
-export async function scrapeProduct(url: string): Promise<ProductMetadata> {
+export async function scrapeProduct(url: string): Promise<ProductMetadata | null> {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "google.com" || host.endsWith(".google.com")) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
   let host = "shop.example.com";
   let slug = "product";
   try {
@@ -33,7 +45,7 @@ export async function scrapeProduct(url: string): Promise<ProductMetadata> {
     host = parsed.host.replace(/^www\./, "");
     slug = parsed.pathname.split("/").filter(Boolean).pop() ?? "product";
   } catch {
-    // leave defaults; we still want a stable stub response
+    return null;
   }
 
   const rng = seededRng(`scrapeProduct:${host}:${slug}`);

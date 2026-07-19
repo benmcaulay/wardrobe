@@ -13,6 +13,8 @@ type Props = {
   categories?: string[];
   /** Ordered style-tag chips (from Settings); defaults to built-ins when omitted. */
   styleTags?: string[];
+  /** Ordered color palette (from Settings); defaults to built-ins when omitted. */
+  colorOptions?: readonly { hex: string; name: string }[];
 };
 
 export function ItemFormFields({
@@ -21,6 +23,7 @@ export function ItemFormFields({
   disabled,
   categories = CATEGORIES,
   styleTags = [...COMMON_STYLE_TAGS],
+  colorOptions = FAVORITE_COLOR_OPTIONS,
 }: Props) {
   const selectedNames = new Set(value.colors.map((c) => c.name));
 
@@ -69,6 +72,18 @@ export function ItemFormFields({
     } else {
       onChange({ colors: [...value.colors, { hex, name }] });
     }
+  }
+
+  // The first color drives color sorting, so "primary" == index 0.
+  const primaryName = value.colors[0]?.name ?? null;
+
+  function setPrimaryColor(name: string) {
+    const idx = value.colors.findIndex((c) => c.name === name);
+    if (idx <= 0) return; // already primary or not selected
+    const next = [...value.colors];
+    const [picked] = next.splice(idx, 1);
+    next.unshift(picked);
+    onChange({ colors: next });
   }
 
   return (
@@ -131,28 +146,52 @@ export function ItemFormFields({
         </Field>
       </div>
 
-      <Field label="Colors" hint="Tap to toggle">
+      <Field label="Colors" hint="Tap to toggle · star = sort color">
         <div className="flex flex-wrap gap-2.5">
-          {FAVORITE_COLOR_OPTIONS.map((c) => {
+          {colorOptions.map((c) => {
             const active = selectedNames.has(c.name);
+            const isPrimary = active && primaryName === c.name;
             return (
-              <button
-                key={c.name}
-                type="button"
-                onClick={() => toggleColor(c.hex, c.name)}
-                disabled={disabled}
-                aria-pressed={active}
-                aria-label={c.name}
-                className="flex flex-col items-center gap-1 transition disabled:opacity-50"
-              >
-                <span
-                  className={`block w-9 h-9 rounded-full border transition ${
-                    active ? "ring-2 ring-offset-2 ring-accent border-transparent" : "border-ink/10"
-                  }`}
-                  style={{ backgroundColor: c.hex }}
-                />
-                <span className="text-[10px] uppercase tracking-wide text-ink-muted">{c.name}</span>
-              </button>
+              <div key={c.name} className="group flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => toggleColor(c.hex, c.name)}
+                  disabled={disabled}
+                  aria-pressed={active}
+                  aria-label={c.name}
+                  className="flex flex-col items-center gap-1 transition disabled:opacity-50"
+                >
+                  <span
+                    className={`block w-9 h-9 rounded-full border transition ${
+                      active ? "ring-2 ring-offset-2 ring-accent border-transparent" : "border-ink/10"
+                    }`}
+                    style={{ backgroundColor: c.hex }}
+                  />
+                  <span className="text-[10px] uppercase tracking-wide text-ink-muted">{c.name}</span>
+                </button>
+                {/* Reserve a fixed slot so hovering doesn't shift the row. */}
+                <div className="h-4 flex items-center justify-center">
+                  {active && (
+                    <button
+                      type="button"
+                      onClick={() => setPrimaryColor(c.name)}
+                      disabled={disabled || isPrimary}
+                      aria-label={
+                        isPrimary ? `${c.name} is the primary sort color` : `Make ${c.name} the primary sort color`
+                      }
+                      aria-pressed={isPrimary}
+                      title={isPrimary ? "Primary sort color" : "Make primary sort color"}
+                      className={`transition disabled:cursor-default ${
+                        isPrimary
+                          ? "text-accent opacity-100"
+                          : "text-ink-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-accent"
+                      }`}
+                    >
+                      <StarIcon filled={isPrimary} />
+                    </button>
+                  )}
+                </div>
+              </div>
             );
           })}
         </div>
@@ -295,6 +334,22 @@ export function ItemFormFields({
         Wishlist (I don&apos;t own this yet)
       </label>
     </div>
+  );
+}
+
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-3.5 h-3.5"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 2.75l2.85 5.77 6.37.93-4.61 4.49 1.09 6.34L12 17.77l-5.7 3l1.09-6.34L2.78 9.95l6.37-.93L12 2.75z" />
+    </svg>
   );
 }
 

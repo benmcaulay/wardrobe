@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
+import { saveUpload, saveImageBuffer, deleteUpload, UploadError } from "@/lib/uploads";
 import { encode } from "@/lib/json";
-import { productMatchToFormPatch } from "@/lib/product-match";
+import { NONE_CATEGORY } from "@/lib/categories";
+import { productMatchToFormPatch, productMatchToPrefill, resolveProductMetadata } from "@/lib/product-match";
 import { runPrefill, type PrefillBundle } from "@/lib/prefill";
 import type { ProductMatch } from "@/lib/services/reverseImageSearch";
-import { scrapeProduct } from "@/lib/services/productScraper";
 import { searchWebProducts } from "@/lib/services/webProductSearch";
 import type { ItemFormValue } from "@/lib/types";
 
@@ -41,18 +41,78 @@ export type ApplyProductMatchResponse =
   | { ok: true; patch: Partial<ItemFormValue> }
   | { ok: false; error: string };
 
-/** Scrape listing URL and return form fields to merge on the client. */
+/** Enrich listing via SerpAPI Immersive Product (or merchant scrape) and return form fields. */
 export async function applyProductMatchAction(
   match: ProductMatch,
 ): Promise<ApplyProductMatchResponse> {
   await requireUser();
   try {
-    const scraped = await scrapeProduct(match.url);
-    const patch = productMatchToFormPatch(match, scraped);
+    const enriched = await resolveProductMetadata(match);
+    const patch = productMatchToFormPatch(match, enriched);
     const { retailer: _r, productUrl: _u, ...formPatch } = patch;
     return { ok: true, patch: formPatch };
   } catch (err) {
     return { ok: false, error: (err as Error).message ?? "Could not load product" };
+  }
+}
+
+export type BeginFromWebProductResponse =
+  | {
+      ok: true;
+      originalImagePath: string;
+      thumbnailImagePath: string;
+      bundle: PrefillBundle;
+      patch: Partial<ItemFormValue>;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Import a web listing's thumbnail as the garment photo and pre-fill the form.
+ * Lets users start from search instead of requiring their own photo first.
+ */
+export async function beginFromWebProduct(match: ProductMatch): Promise<BeginFromWebProductResponse> {
+  const user = await requireUser();
+  const thumb = match.thumbnailUrl?.trim();
+  if (!thumb) {
+    return { ok: false, error: "This listing has no product photo to import." };
+  }
+
+  try {
+    const res = await fetch(thumb, {
+      headers: { "User-Agent": "Wardrobe/1.0 (+https://github.com/benmcaulay/wardrobe)" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      return { ok: false, error: "Could not download the product photo." };
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const saved = await saveImageBuffer(buf, user.id);
+
+    let enriched = null;
+    try {
+      enriched = await resolveProductMetadata(match);
+    } catch {
+      /* enrichment is best-effort; shopping title + parsed brand still apply */
+    }
+
+    const prefill = { ...productMatchToPrefill(match, enriched), category: NONE_CATEGORY };
+    const patch = productMatchToFormPatch(match, enriched);
+    const { retailer: _r, productUrl: _u, ...formPatch } = patch;
+
+    return {
+      ok: true,
+      originalImagePath: saved.originalImagePath,
+      thumbnailImagePath: saved.thumbnailImagePath,
+      bundle: {
+        prefill,
+        matches: [match],
+        sourceData: { matches: [match], scraped: enriched },
+      },
+      patch: formPatch,
+    };
+  } catch (err) {
+    if (err instanceof UploadError) return { ok: false, error: err.message };
+    return { ok: false, error: (err as Error).message ?? "Could not import listing" };
   }
 }
 

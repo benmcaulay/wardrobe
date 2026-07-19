@@ -37,3 +37,10 @@ export function imageUrl(relativePath: string): string {
 export function thumbnailUrl(originalPath: string): string {
   return imageUrl(thumbnailPathFor(originalPath));
 }
+
+/** True when the path is a ghost-mannequin render (may have a -cutout.png sibling). */
+export function isGhostImagePath(relativePath: string): boolean {
+  const filename = relativePath.slice(relativePath.lastIndexOf("/") + 1);
+  if (filename.includes("-thumb") || filename.includes("-cutout")) return false;
+  return /^ghost-[^/]+\.(jpe?g|png)$/i.test(filename);
+}

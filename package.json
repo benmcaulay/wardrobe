@@ -14,9 +14,11 @@
     "test:s3": "tsx scripts/verify-s3.ts",
     "test:jobs": "tsx scripts/verify-jobs.ts",
     "db:backup": "tsx scripts/db-backup.ts",
+    "db:migrate-from-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "postinstall": "prisma generate",
+    "mac-photos:scan": "tsx --env-file=.env scripts/mac-photos-scan.ts",
     "test:stripe": "tsx scripts/verify-stripe.ts"
   },
   "prisma": {

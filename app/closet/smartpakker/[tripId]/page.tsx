@@ -109,7 +109,7 @@ export default async function TripPage({ params }: { params: { tripId: string } 
     <main className="mx-auto max-w-5xl px-6 py-12">
       <nav className="mb-6 text-xs text-ink-muted">
         <Link href="/closet/smartpakker" className="hover:text-ink">
-          ← SmartPakker
+          ← Trip Packing Assistant
         </Link>
       </nav>
 

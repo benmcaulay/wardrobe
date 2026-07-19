@@ -7,7 +7,11 @@ import type { GenerationJob } from "@prisma/client";
 import { prisma } from "../db";
 import { encode, decode } from "../json";
 
-export type GenerationJobType = "virtual_tryon";
+export type GenerationJobType =
+  | "virtual_tryon"
+  | "ghost_view"
+  | "ghost_preview"
+  | "camera_roll_scan";
 export type GenerationJobStatus = "queued" | "running" | "succeeded" | "failed";
 
 /** Payload stored on a job, keyed by type. */
@@ -18,6 +22,24 @@ export type VirtualTryOnJobPayload = {
   prompt?: string;
 };
 
+export type GhostViewJobPayload = {
+  itemId: string;
+  selectedExtraPaths: string[];
+  label: string;
+  instructions?: string;
+  primaryGarmentPath?: string | null;
+  compositionHint?: "default" | "rear";
+};
+
+export type GhostPreviewJobPayload = {
+  garmentImagePath: string;
+  extraImagePaths?: string[];
+  primaryGarmentPathOverride?: string | null;
+  category: string;
+  instructions?: string;
+  compositionHint?: "default" | "rear";
+};
+
 /** Result stored on a succeeded job. */
 export type VirtualTryOnJobResult = {
   tryOnId: string;
@@ -26,12 +48,62 @@ export type VirtualTryOnJobResult = {
   creditsUsed: number;
 };
 
+export type GhostViewJobResult = {
+  ghostImagePath: string;
+  creditsRemaining: number;
+  viewLabel: string;
+};
+
+export type GhostPreviewJobResult = {
+  ghostImagePath: string;
+  creditsRemaining: number;
+  creditsUsed: number;
+  viewLabel?: string;
+};
+
+export type CameraRollScanPayload = {
+  photoPaths: string[];
+};
+
+export type CameraRollScanItemResult = {
+  reviewId: string;
+  originalImagePath: string;
+  status: "ready" | "skipped" | "failed" | "imported" | "discarded";
+  ghostImagePath?: string;
+  name?: string;
+  category?: string;
+  creditsUsed?: number;
+  itemId?: string;
+  /** Shared when multiple photos likely show the same garment. */
+  duplicateGroupId?: string;
+  /** When a scan photo was split into multiple garments. */
+  splitGroupId?: string;
+  /** Original camera-roll upload before per-garment crop. */
+  sourcePhotoPath?: string;
+  reason?: string;
+  error?: string;
+};
+
+export type CameraRollScanProgress = {
+  total: number;
+  processed: number;
+  ready: number;
+  skipped: number;
+  failed: number;
+  items: CameraRollScanItemResult[];
+  creditsRemaining?: number;
+  /** Set after the user imports or discards all review items. */
+  committed?: boolean;
+};
+
+export type CameraRollScanResult = CameraRollScanProgress;
+
 const DEFAULT_MAX_ATTEMPTS = 3;
 
 export async function enqueueJob(
   userId: string,
   type: GenerationJobType,
-  payload: VirtualTryOnJobPayload,
+  payload: unknown,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
 ): Promise<string> {
   const job = await prisma.generationJob.create({
@@ -69,13 +141,18 @@ export function willRetry(attempts: number, maxAttempts: number): boolean {
   return attempts < maxAttempts;
 }
 
-export async function markJobSucceeded(
-  id: string,
-  result: VirtualTryOnJobResult,
-): Promise<void> {
+export async function markJobSucceeded(id: string, result: unknown): Promise<void> {
   await prisma.generationJob.update({
     where: { id },
     data: { status: "succeeded", result: encode(result), error: null, finishedAt: new Date() },
+  });
+}
+
+/** Persist partial progress while a long-running job is still executing. */
+export async function updateJobProgress(id: string, result: unknown): Promise<void> {
+  await prisma.generationJob.update({
+    where: { id },
+    data: { result: encode(result), status: "running" },
   });
 }
 
@@ -122,4 +199,26 @@ export async function getJobForUser<T = VirtualTryOnJobResult>(
 
 export function parsePayload<T = VirtualTryOnJobPayload>(job: GenerationJob): T {
   return decode<T>(job.payload, {} as T);
+}
+
+/** Oldest in-flight ghost_view job for an item (for resuming UI polling after navigation). */
+export async function findPendingGhostViewJobForItem(
+  userId: string,
+  itemId: string,
+): Promise<string | null> {
+  const jobs = await prisma.generationJob.findMany({
+    where: {
+      userId,
+      type: "ghost_view",
+      status: { in: ["queued", "running"] },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 20,
+    select: { id: true, payload: true },
+  });
+  for (const job of jobs) {
+    const payload = decode<GhostViewJobPayload>(job.payload, {} as GhostViewJobPayload);
+    if (payload.itemId === itemId) return job.id;
+  }
+  return null;
 }

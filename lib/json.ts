@@ -15,12 +15,18 @@ export type StylePrefs = {
   categoriesList?: string[];
   /** Ordered style-tag chips for item add/edit (defaults when absent). */
   styleTagsList?: string[];
+  /** Ordered wardrobe color palette (swatch + name); defaults to built-ins when absent. */
+  colorsList?: Color[];
   /** @deprecated — read for migration only; omit on save */
   customCategories?: string[];
   /** @deprecated */
   categoryOrder?: string[];
   /** @deprecated */
   hiddenCategories?: string[];
+  /** Manual item order within category + primary-color groups (group key → item ids). */
+  closetGroupOrders?: Record<string, string[]>;
+  /** Default canvas placement per outfit slot category rule (signature → layout). */
+  outfitSlotDefaults?: Record<string, { x: number; y: number; scale: number }>;
 };
 
 export function encode<T>(value: T): string {

@@ -5,6 +5,7 @@ import { fal } from "@fal-ai/client";
 import { log } from "../log";
 import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
 import { bufferToDataUri, bufferToPngDataUri, fashnRunTryOn } from "./fashnTryOn";
+import { fetchFalResultBuffer } from "./fal-result-fetch";
 
 const BASE_WIDTH_THUMB = 400;
 
@@ -139,33 +140,10 @@ function deterministicHash(input: VirtualTryOnInput): string {
     .slice(0, 12);
 }
 
-const PROMPT = (extraPrompt?: string, garmentLabels?: (string | undefined)[]) => {
-  const base = `Generate a photorealistic image of the SAME person from the first reference photo wearing the clothing items shown in the additional reference photos.
-
-Strict requirements:
-- Preserve the person's identity exactly: face, hair, skin tone, body proportions, and pose must be unchanged from the first reference.
-- Preserve the original background, lighting, and camera framing of the first reference photo.
-- Replace ONLY the visible clothing with the new garments. Combine the new pieces into a single coherent outfit if multiple garments are provided.
-- Match the garments' colors, fabric textures, prints, logos, fit, and proportions exactly as shown in the reference photos.
-- Realistic drape and natural shadows; the new clothing should look like it is actually being worn, not pasted in.
-- Do not add text, watermarks, hangers, mannequins, or extra people.`;
-
-  // Tell the model what each reference garment is and where it belongs. This is
-  // the biggest lever against multi-garment composites putting a top on the
-  // legs (or duplicating a piece) — the fal edit model otherwise has to guess.
-  const labels = (garmentLabels ?? [])
-    .map((l) => l?.trim())
-    .filter((l): l is string => !!l && l.length > 0);
-  let prompt = base;
-  if (labels.length > 0) {
-    const list = labels.map((l, i) => `${i + 1}) ${l}`).join(", ");
-    prompt += `\n\nThe additional reference photos are the garments to put on the person, in order: ${list}. Place each garment on its correct body region (tops on the torso, bottoms on the legs/waist, shoes on the feet, accessories where they belong) and combine them into one coherent, layered outfit. If these references only cover part of an outfit, keep the person's other existing garments unchanged.`;
-  }
-  if (extraPrompt && extraPrompt.trim().length > 0) {
-    prompt += `\n\nAdditional direction from the user: ${extraPrompt.trim()}`;
-  }
-  return prompt;
-};
+/** fal.ai edit-model prompt — blank unless the user supplies optional direction. */
+function buildTryOnPrompt(extraPrompt?: string): string {
+  return extraPrompt?.trim() ?? "";
+}
 
 async function uploadKeyToFal(key: string, fallbackName: string): Promise<string> {
   const buf = await getObject(key);
@@ -369,10 +347,7 @@ async function runFalEditComposite(
   ]);
   const response = await fal.subscribe(FAL_VTON_MODEL, {
     input: {
-      prompt: PROMPT(
-        extraPrompt,
-        garments.map((g) => g.category),
-      ),
+      prompt: buildTryOnPrompt(extraPrompt),
       image_urls: [personUrl, ...garmentUrls],
       num_images: 1,
     },
@@ -430,9 +405,7 @@ async function falRealVirtualTryOn(input: VirtualTryOnInput): Promise<VirtualTry
     ms: Date.now() - startedAt,
   });
 
-  const fetched = await fetch(resultUrl);
-  if (!fetched.ok) throw new Error(`Failed to download result: ${fetched.status}`);
-  const buffer = Buffer.from(await fetched.arrayBuffer());
+  const buffer = await fetchFalResultBuffer(resultUrl);
 
   const key = await writeStandardTryOn(input.userId, deterministicHash(input), buffer);
   return { resultImagePath: key, credits: 1 };

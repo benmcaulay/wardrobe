@@ -15,6 +15,17 @@ import {
   type GhostMannequinResult,
 } from "@/lib/services/ghostMannequin";
 import {
+  enqueueJob,
+  findPendingGhostViewJobForItem,
+  getJobForUser,
+  parsePayload,
+  type GhostPreviewJobPayload,
+  type GhostPreviewJobResult,
+  type GhostViewJobPayload,
+  type GhostViewJobResult,
+} from "@/lib/jobs/queue";
+import { kickJobDrain } from "@/lib/jobs/kick-drain";
+import {
   runPreviewGhostMannequin,
   runGenerateGhostViewFor,
   type PreviewGhostInput,
@@ -139,13 +150,24 @@ export async function generateGhostViewFor(
 
 export type GhostViewStyle = { mirror?: boolean; thumbZoom?: number };
 
-export async function setPrimaryGhostViewFor(
+export async function setPrimaryThumbnailFor(
   itemId: string,
-  imagePath: string,
+  imagePath: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
   const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
   if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+
+  if (imagePath === null) {
+    await prisma.wardrobeItem.update({
+      where: { id: itemId },
+      data: { ghostImagePath: null },
+    });
+    revalidatePath("/closet");
+    revalidatePath(`/closet/${itemId}`);
+    return { ok: true };
+  }
+
   let views: Array<{ label: string; imagePath: string; mirror?: boolean; thumbZoom?: number }> = [];
   try {
     if (item.ghostViews) views = JSON.parse(item.ghostViews) as typeof views;
@@ -162,6 +184,14 @@ export async function setPrimaryGhostViewFor(
   revalidatePath("/closet");
   revalidatePath(`/closet/${itemId}`);
   return { ok: true };
+}
+
+/** @deprecated Use setPrimaryThumbnailFor — kept as alias for ghost-only callers */
+export async function setPrimaryGhostViewFor(
+  itemId: string,
+  imagePath: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return setPrimaryThumbnailFor(itemId, imagePath);
 }
 
 export async function updateGhostViewStyleFor(
@@ -221,6 +251,52 @@ export async function updateOriginalStyleFor(
     revalidatePath(`/closet/${itemId}`);
   }
   return { ok: true };
+}
+
+export type ReplaceOriginalImageResponse =
+  | { ok: true; imagePath: string }
+  | { ok: false; error: string };
+
+/**
+ * Replace an item's original photo with a client-edited version (e.g. after
+ * the paint-bucket "whiten background" tool). Saves the new upload, repoints
+ * `originalImagePath`, and best-effort deletes the previous original + thumb.
+ */
+export async function replaceOriginalImageWithEdit(
+  itemId: string,
+  formData: FormData,
+): Promise<ReplaceOriginalImageResponse> {
+  const user = await requireUser();
+  const file = formData.get("image");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "No file provided" };
+  }
+
+  const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
+  if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+
+  const previousPath = item.originalImagePath;
+
+  let saved;
+  try {
+    saved = await saveUpload(file, user.id);
+  } catch (err) {
+    if (err instanceof UploadError) return { ok: false, error: err.message };
+    throw err;
+  }
+
+  await prisma.wardrobeItem.update({
+    where: { id: itemId },
+    data: { originalImagePath: saved.originalImagePath },
+  });
+
+  if (previousPath && previousPath !== saved.originalImagePath) {
+    await deleteUpload(previousPath).catch(() => undefined);
+  }
+
+  revalidatePath("/closet");
+  revalidatePath(`/closet/${itemId}`);
+  return { ok: true, imagePath: saved.originalImagePath };
 }
 
 export type ReplaceGhostViewCropResponse =
@@ -376,4 +452,145 @@ export async function previewGhostMannequin(
 ): Promise<PreviewGhostResponse> {
   const user = await requireUser();
   return runPreviewGhostMannequin(user, input);
+}
+
+export type EnqueueGhostJobResponse = { ok: true; jobId: string } | { ok: false; error: string };
+
+export type GhostJobStatusResponse =
+  | { ok: true; status: "queued" | "running" }
+  | {
+      ok: true;
+      status: "succeeded";
+      ghostImagePath: string;
+      creditsRemaining: number;
+      creditsUsed?: number;
+      viewLabel?: string;
+    }
+  | { ok: false; error: string };
+
+export type PendingGhostViewJobResponse =
+  | { ok: true; jobId: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Enqueue ghost generation for a saved item. Returns immediately; a worker (or
+ * inline drain) runs the fal call so navigation doesn't abort the job.
+ */
+export async function enqueueGhostViewFor(
+  itemId: string,
+  selectedExtraPaths: string[],
+  label: string,
+  instructions?: string,
+  primaryGarmentPath?: string | null,
+  compositionHint?: CompositionHint,
+): Promise<EnqueueGhostJobResponse> {
+  const user = await requireUser();
+  const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
+  if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { credits: true },
+  });
+  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
+    return { ok: false, error: "Out of credits" };
+  }
+  const quota = await checkAiQuota(user.id);
+  if (!quota.ok) return quota;
+
+  const payload: GhostViewJobPayload = {
+    itemId,
+    selectedExtraPaths,
+    label,
+    instructions,
+    primaryGarmentPath,
+    compositionHint,
+  };
+  const jobId = await enqueueJob(user.id, "ghost_view", payload);
+  kickJobDrain();
+  return { ok: true, jobId };
+}
+
+/** Enqueue a pre-save ghost preview (add flow). */
+export async function enqueueGhostPreview(
+  input: PreviewGhostInput,
+): Promise<EnqueueGhostJobResponse> {
+  const user = await requireUser();
+  if (!input.garmentImagePath.startsWith(`${user.id}/`)) {
+    return { ok: false, error: "Image does not belong to this user" };
+  }
+  for (const extra of input.extraImagePaths ?? []) {
+    if (!extra.startsWith(`${user.id}/`)) {
+      return { ok: false, error: "Extra image does not belong to this user" };
+    }
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { credits: true },
+  });
+  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
+    return { ok: false, error: "Out of credits" };
+  }
+  const quota = await checkAiQuota(user.id);
+  if (!quota.ok) return quota;
+
+  const payload: GhostPreviewJobPayload = {
+    garmentImagePath: input.garmentImagePath,
+    extraImagePaths: input.extraImagePaths,
+    primaryGarmentPathOverride: input.primaryGarmentPathOverride,
+    category: input.category,
+    instructions: input.instructions,
+    compositionHint: input.compositionHint,
+  };
+  const jobId = await enqueueJob(user.id, "ghost_preview", payload);
+  kickJobDrain();
+  return { ok: true, jobId };
+}
+
+/** Poll a ghost job (view or preview). */
+export async function getGhostJobStatus(jobId: string): Promise<GhostJobStatusResponse> {
+  const user = await requireUser();
+  const job = await getJobForUser<GhostViewJobResult | GhostPreviewJobResult>(jobId, user.id);
+  if (!job) return { ok: false, error: "Job not found" };
+
+  if (job.status === "failed") {
+    return { ok: false, error: job.error ?? "Generation failed" };
+  }
+  if (job.status === "succeeded" && job.result) {
+    if (job.type === "ghost_view") {
+      const view = job.result as GhostViewJobResult;
+      const full = await prisma.generationJob.findUnique({ where: { id: jobId } });
+      if (full) {
+        const { itemId } = parsePayload<GhostViewJobPayload>(full);
+        revalidatePath("/closet");
+        revalidatePath(`/closet/${itemId}`);
+      }
+      return {
+        ok: true,
+        status: "succeeded",
+        ghostImagePath: view.ghostImagePath,
+        creditsRemaining: view.creditsRemaining,
+        viewLabel: view.viewLabel,
+      };
+    }
+    const preview = job.result as GhostPreviewJobResult;
+    return {
+      ok: true,
+      status: "succeeded",
+      ghostImagePath: preview.ghostImagePath,
+      creditsRemaining: preview.creditsRemaining,
+      creditsUsed: preview.creditsUsed,
+    };
+  }
+  return { ok: true, status: job.status === "running" ? "running" : "queued" };
+}
+
+/** Resume polling after navigating back to an item detail page. */
+export async function getPendingGhostViewJobForItem(
+  itemId: string,
+): Promise<PendingGhostViewJobResponse> {
+  const user = await requireUser();
+  const jobId = await findPendingGhostViewJobForItem(user.id, itemId);
+  return { ok: true, jobId };
 }

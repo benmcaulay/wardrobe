@@ -4,11 +4,9 @@ import {
   useEffect,
   useRef,
   useState,
-  useTransition,
   type ChangeEvent,
   type RefObject,
 } from "react";
-import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
 import { ProductSearchPanel } from "@/components/product-search-panel";
 import { CreditMark } from "@/components/credit-mark";
@@ -16,13 +14,15 @@ import { ImageCropper } from "@/components/image-cropper";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
 import { imageUrl } from "@/lib/image-paths";
 import { canonicalCategoryChoice } from "@/lib/categories";
-import { previewGhostMannequin } from "@/lib/actions/ghost-mannequin";
+import { enqueueGhostPreview, getGhostJobStatus } from "@/lib/actions/ghost-mannequin";
 import { mapCategoryToGhost } from "@/lib/services/ghost-mannequin-shared";
 import type { ItemFormValue } from "@/lib/types";
+import type { Color } from "@/lib/json";
 import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import {
   analyzeUpload,
   applyProductMatchAction,
+  beginFromWebProduct,
   createItem,
   discardUpload,
   discardExtraImage,
@@ -55,6 +55,8 @@ type ReadyState = {
   analyze: AnalyzeOk;
   ghostViews: GhostView[];
   activeViewId: string | null; // null = show original
+  /** null = original photo is the closet grid thumbnail */
+  primaryViewId: string | null;
   generatingGhost: boolean;
   ghostError: string | null;
   extras: ExtraImage[];
@@ -75,6 +77,7 @@ type Props = {
   autoGenerateGhost: boolean;
   categories: string[];
   styleTagsList: string[];
+  colorOptions: Color[];
   webMatchAutofill: boolean;
 };
 
@@ -86,6 +89,9 @@ function getClipboardImageFile(e: ClipboardEvent): File | null {
 
 /** Matches server `ALLOWED_MIME` (lib/uploads). */
 const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 4 * 60 * 1000;
+const GHOST_PREVIEW_JOB_KEY = "wardrobe:ghost-preview-job";
 
 function clearFileInputs(...refs: Array<RefObject<HTMLInputElement>>) {
   for (const r of refs) {
@@ -93,21 +99,68 @@ function clearFileInputs(...refs: Array<RefObject<HTMLInputElement>>) {
   }
 }
 
+function buildReadyState(
+  previewUrl: string,
+  analyze: AnalyzeOk,
+  formPatch: Partial<ItemFormValue>,
+  categories: string[],
+): ReadyState {
+  const merged = { ...analyze.bundle.prefill, ...formPatch };
+  return {
+    kind: "ready",
+    previewUrl,
+    analyze,
+    ghostViews: [],
+    activeViewId: null,
+    primaryViewId: null,
+    generatingGhost: false,
+    ghostError: null,
+    extras: [],
+    value: {
+      name: merged.name ?? "",
+      brand: merged.brand ?? "",
+      category: canonicalCategoryChoice(merged.category, categories),
+      subcategory: merged.subcategory ?? "",
+      colors: merged.colors ?? [],
+      priceCents: merged.priceCents ?? null,
+      currency: merged.currency ?? "USD",
+      material: merged.material ?? "",
+      pattern: merged.pattern ?? "",
+      styleTags: merged.styleTags ?? [],
+      season: merged.season ?? [],
+      notes: "",
+      isWishlist: false,
+    },
+    pickingImages: null,
+  };
+}
+
 export function AddItemFlow({
   credits: initialCredits,
   autoGenerateGhost,
   categories,
   styleTagsList,
+  colorOptions,
   webMatchAutofill,
 }: Props) {
   const [state, setState] = useState<FlowState>({ kind: "idle" });
   const [credits, setCredits] = useState(initialCredits);
-  const [, startTransition] = useTransition();
-  const router = useRouter();
   const [webcam, setWebcam] = useState<null | { facing: "environment" | "user" }>(null);
   const [pendingFormPatch, setPendingFormPatch] = useState<Partial<ItemFormValue> | null>(null);
+  const [webSearchQuery, setWebSearchQuery] = useState("");
+  const [webSearchResults, setWebSearchResults] = useState<ProductMatch[]>([]);
   const [selectedWebProductUrl, setSelectedWebProductUrl] = useState<string | null>(null);
   const webcamHandlerRef = useRef<(file: File) => void>(() => {});
+
+  function clearWebSelection() {
+    setSelectedWebProductUrl(null);
+  }
+
+  function resetWebSearch() {
+    setWebSearchQuery("");
+    setWebSearchResults([]);
+    setSelectedWebProductUrl(null);
+  }
 
   function openWebcamCapture(facing: "environment" | "user", onFile: (file: File) => void) {
     webcamHandlerRef.current = onFile;
@@ -116,6 +169,7 @@ export function AddItemFlow({
 
   const libraryInputRef = useRef<HTMLInputElement>(null);
   const extraInputRef = useRef<HTMLInputElement>(null);
+  const pollGenRef = useRef(0);
 
   // Stable ref to current paste handler so we only register one listener
   const pasteHandlerRef = useRef<((e: ClipboardEvent) => void) | null>(null);
@@ -190,10 +244,49 @@ export function AddItemFlow({
 
   async function onSelectWebProduct(match: ProductMatch) {
     setSelectedWebProductUrl(match.url);
+
+    // From the idle screen: import the listing photo and jump straight to the form.
+    if (state.kind === "idle") {
+      if (!match.thumbnailUrl) {
+        setState({ kind: "idle", error: "This listing has no product photo to import." });
+        return;
+      }
+      setState({ kind: "processing", previewUrl: match.thumbnailUrl });
+
+      const res = await beginFromWebProduct(match);
+      if (!res.ok) {
+        setState({ kind: "error", message: res.error });
+        return;
+      }
+
+      const analyze: AnalyzeOk = {
+        ok: true,
+        originalImagePath: res.originalImagePath,
+        thumbnailImagePath: res.thumbnailImagePath,
+        bundle: res.bundle,
+      };
+      const ready = buildReadyState(imageUrl(res.originalImagePath), analyze, res.patch, categories);
+      setState(ready);
+      setPendingFormPatch(null);
+
+      if (autoGenerateGhost && credits > 0) {
+        void runGhost(
+          {
+            selectedExtraIds: [],
+            label: "",
+            instructions: "",
+            primaryExtraId: null,
+            compositionHint: "default",
+          },
+          ready,
+        );
+      }
+      return;
+    }
+
     const res = await applyProductMatchAction(match);
     if (!res.ok) {
       setState((s) => {
-        if (s.kind === "idle") return { ...s, error: res.error };
         if (s.kind === "ready") return { ...s, ghostError: res.error };
         return s;
       });
@@ -231,39 +324,15 @@ export function AddItemFlow({
       return;
     }
 
-    const prefill = analyzeRes.bundle.prefill;
-    const merged = { ...prefill, ...pendingFormPatch };
-    const ready: ReadyState = {
-      kind: "ready",
-      previewUrl,
-      analyze: analyzeRes,
-      ghostViews: [],
-      activeViewId: null,
-      generatingGhost: false,
-      ghostError: null,
-      extras: [],
-      value: {
-        name: merged.name ?? "",
-        brand: merged.brand ?? "",
-        category: canonicalCategoryChoice(merged.category, categories),
-        subcategory: merged.subcategory ?? "",
-        colors: merged.colors ?? [],
-        priceCents: merged.priceCents ?? null,
-        currency: merged.currency ?? "USD",
-        material: merged.material ?? "",
-        pattern: merged.pattern ?? "",
-        styleTags: merged.styleTags ?? [],
-        season: merged.season ?? [],
-        notes: "",
-        isWishlist: false,
-      },
-      pickingImages: null,
-    };
+    const ready = buildReadyState(previewUrl, analyzeRes, pendingFormPatch ?? {}, categories);
     setState(ready);
     setPendingFormPatch(null);
+    if (webMatchAutofill && analyzeRes.bundle.matches.length > 0 && webSearchResults.length === 0) {
+      setWebSearchResults(analyzeRes.bundle.matches);
+    }
 
     if (autoGenerateGhost && credits > 0) {
-      await runGhost(
+      void runGhost(
         {
           selectedExtraIds: [],
           label: "",
@@ -289,7 +358,7 @@ export function AddItemFlow({
   async function runGhost(pick: PickImageState, snapshot?: ReadyState) {
     setState((s) =>
       s.kind === "ready"
-        ? { ...s, generatingGhost: true, ghostError: null, pickingImages: null }
+        ? { ...s, generatingGhost: true, ghostError: null }
         : s,
     );
     const current = snapshot ?? (state.kind === "ready" ? state : null);
@@ -309,7 +378,7 @@ export function AddItemFlow({
     const viewLabel = pick.label.trim() || defaultLabel;
     const instructionsTrimmed = pick.instructions.trim();
 
-    const res = await previewGhostMannequin({
+    const enq = await enqueueGhostPreview({
       garmentImagePath: current.analyze.originalImagePath,
       extraImagePaths: selectedExtras,
       primaryGarmentPathOverride: primaryOverridePath,
@@ -318,25 +387,124 @@ export function AddItemFlow({
       compositionHint: pick.compositionHint,
     });
 
+    if (!enq.ok) {
+      setState((s) =>
+        s.kind === "ready"
+          ? { ...s, generatingGhost: false, ghostError: enq.error, pickingImages: null }
+          : s,
+      );
+      return;
+    }
+
+    startGhostPreviewPoll(enq.jobId, viewLabel, current.analyze.originalImagePath);
+  }
+
+  function applyGhostPreviewResult(
+    res: { ghostImagePath: string; creditsRemaining: number; creditsUsed?: number },
+    viewLabel: string,
+  ) {
     setState((s) => {
       if (s.kind !== "ready") return s;
-      if (!res.ok) return { ...s, generatingGhost: false, ghostError: res.error };
       const newView: GhostView = {
         id: crypto.randomUUID(),
         label: viewLabel,
         imagePath: res.ghostImagePath,
-        creditsUsed: res.creditsUsed,
+        creditsUsed: res.creditsUsed ?? 1,
       };
       return {
         ...s,
         generatingGhost: false,
         ghostError: null,
+        pickingImages: null,
         ghostViews: [...s.ghostViews, newView],
         activeViewId: newView.id,
       };
     });
-    if (res.ok) setCredits(res.creditsRemaining);
+    setCredits(res.creditsRemaining);
+    sessionStorage.removeItem(GHOST_PREVIEW_JOB_KEY);
   }
+
+  async function pollGhostPreviewJob(
+    jobId: string,
+    viewLabel: string,
+    garmentImagePath: string,
+    signal: number,
+  ) {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (pollGenRef.current !== signal) return;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      if (pollGenRef.current !== signal) return;
+      const status = await getGhostJobStatus(jobId);
+      if (pollGenRef.current !== signal) return;
+      if (!status.ok) {
+        setState((s) =>
+          s.kind === "ready"
+            ? { ...s, generatingGhost: false, ghostError: status.error, pickingImages: null }
+            : s,
+        );
+        sessionStorage.removeItem(GHOST_PREVIEW_JOB_KEY);
+        return;
+      }
+      if (status.status === "succeeded") {
+        applyGhostPreviewResult(status, viewLabel);
+        return;
+      }
+    }
+    setState((s) =>
+      s.kind === "ready"
+        ? {
+            ...s,
+            generatingGhost: false,
+            ghostError: "This is taking longer than expected. Check back shortly.",
+          }
+        : s,
+    );
+  }
+
+  function startGhostPreviewPoll(jobId: string, viewLabel: string, garmentImagePath: string) {
+    sessionStorage.setItem(
+      GHOST_PREVIEW_JOB_KEY,
+      JSON.stringify({ jobId, viewLabel, garmentImagePath }),
+    );
+    setState((s) =>
+      s.kind === "ready" ? { ...s, generatingGhost: true, ghostError: null } : s,
+    );
+    const signal = ++pollGenRef.current;
+    void pollGhostPreviewJob(jobId, viewLabel, garmentImagePath, signal).finally(() => {
+      if (pollGenRef.current === signal) {
+        setState((s) => (s.kind === "ready" ? { ...s, generatingGhost: false } : s));
+      }
+    });
+  }
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem(GHOST_PREVIEW_JOB_KEY);
+    if (!raw) return;
+    let stored: { jobId: string; viewLabel: string; garmentImagePath: string };
+    try {
+      stored = JSON.parse(raw) as typeof stored;
+    } catch {
+      sessionStorage.removeItem(GHOST_PREVIEW_JOB_KEY);
+      return;
+    }
+    void (async () => {
+      const status = await getGhostJobStatus(stored.jobId);
+      if (status.ok && status.status === "succeeded") {
+        applyGhostPreviewResult(status, stored.viewLabel);
+        return;
+      }
+      if (!status.ok && status.error !== "Job not found") {
+        setState((s) =>
+          s.kind === "ready" ? { ...s, ghostError: status.error } : s,
+        );
+        sessionStorage.removeItem(GHOST_PREVIEW_JOB_KEY);
+        return;
+      }
+      startGhostPreviewPoll(stored.jobId, stored.viewLabel, stored.garmentImagePath);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once on mount
+  }, []);
 
   function requestGhost() {
     if (state.kind !== "ready") return;
@@ -394,21 +562,25 @@ export function AddItemFlow({
             ? remaining[remaining.length - 1]!.id
             : null
           : s.activeViewId;
-      return { ...s, ghostViews: remaining, activeViewId: nextActive };
+      const nextPrimary = s.primaryViewId === id ? null : s.primaryViewId;
+      return { ...s, ghostViews: remaining, activeViewId: nextActive, primaryViewId: nextPrimary };
     });
     await discardExtraImage(target.imagePath);
   }
 
-  function onSave() {
+  async function onSave() {
     if (state.kind !== "ready") return;
     const snapshot = state;
     setState({ kind: "saving", previewUrl: snapshot.previewUrl });
-    startTransition(async () => {
-      const primaryGhost = snapshot.ghostViews[0] ?? null;
+    try {
+      const primaryGhostPath =
+        snapshot.primaryViewId === null
+          ? null
+          : snapshot.ghostViews.find((v) => v.id === snapshot.primaryViewId)?.imagePath ?? null;
       const result = await createItem({
         ...snapshot.value,
         originalImagePath: snapshot.analyze.originalImagePath,
-        ghostImagePath: primaryGhost?.imagePath ?? null,
+        ghostImagePath: primaryGhostPath,
         ghostViews: snapshot.ghostViews.map((v) => ({
           label: v.label,
           imagePath: v.imagePath,
@@ -421,8 +593,12 @@ export function AddItemFlow({
         setState({ kind: "error", message: result.error });
         return;
       }
-      router.push(`/closet/${result.itemId}`);
-    });
+      // Full navigation — client-side router.push can leave "Saving…" up indefinitely
+      // while Next.js compiles the destination route on first visit in dev.
+      window.location.assign(`/closet/${result.itemId}`);
+    } catch (err) {
+      setState({ kind: "error", message: (err as Error).message ?? "Could not save item" });
+    }
   }
 
   async function onDiscard() {
@@ -439,7 +615,7 @@ export function AddItemFlow({
     }
     setState({ kind: "idle" });
     setPendingFormPatch(null);
-    setSelectedWebProductUrl(null);
+    resetWebSearch();
     clearFileInputs(libraryInputRef, extraInputRef);
   }
 
@@ -452,11 +628,16 @@ export function AddItemFlow({
             hint={
               webMatchAutofill
                 ? "Find a listing first, then add your garment photo. Fields pre-fill when you pick a result."
-                : "Optional: search for a listing and pick one to copy details into the form after you add a photo."
+                : "Pick a result to import its photo and pre-fill the form — or add your own photo below."
             }
+            query={webSearchQuery}
+            onQueryChange={setWebSearchQuery}
+            results={webSearchResults}
+            onResultsChange={setWebSearchResults}
             onSearch={runWebSearch}
             onSelect={(m) => void onSelectWebProduct(m)}
             selectedUrl={selectedWebProductUrl}
+            onClearSelection={clearWebSelection}
           />
           <IdleView
             onFile={handleFile}
@@ -478,13 +659,19 @@ export function AddItemFlow({
           state={state}
           categories={categories}
           styleTagsList={styleTagsList}
+          colorOptions={colorOptions}
           credits={credits}
           extraInputRef={extraInputRef}
           onTakePhotoExtra={() => openWebcamCapture("environment", addExtra)}
           webMatchAutofill={webMatchAutofill}
+          webSearchQuery={webSearchQuery}
+          onWebSearchQueryChange={setWebSearchQuery}
+          webSearchResults={webSearchResults}
+          onWebSearchResultsChange={setWebSearchResults}
           onSearchWeb={runWebSearch}
           onSelectWebProduct={(m) => void onSelectWebProduct(m)}
           selectedWebProductUrl={selectedWebProductUrl}
+          onClearWebSelection={clearWebSelection}
           onChange={patchValue}
           onRequestGhost={requestGhost}
           onConfirmPick={(pick) => void runGhost(pick)}
@@ -552,6 +739,9 @@ export function AddItemFlow({
           }
           onActivateView={(id) =>
             setState((s) => (s.kind === "ready" ? { ...s, activeViewId: id } : s))
+          }
+          onSetPrimaryView={(id) =>
+            setState((s) => (s.kind === "ready" ? { ...s, primaryViewId: id } : s))
           }
           onRemoveGhostView={(id) => void removeGhostView(id)}
           onAddExtra={addExtra}
@@ -710,15 +900,19 @@ function VariantPanel({
   previewUrl,
   ghostViews,
   activeViewId,
+  primaryViewId,
   generating,
   onActivate,
+  onSetPrimary,
   onRemoveGhost,
 }: {
   previewUrl: string;
   ghostViews: GhostView[];
   activeViewId: string | null;
+  primaryViewId: string | null;
   generating: boolean;
   onActivate: (id: string | null) => void;
+  onSetPrimary: (id: string | null) => void;
   onRemoveGhost: (id: string) => void;
 }) {
   const activeGhost = ghostViews.find((v) => v.id === activeViewId);
@@ -744,35 +938,23 @@ function VariantPanel({
           src={previewUrl}
           label="Original"
           active={activeViewId === null}
+          isPrimary={primaryViewId === null}
           onClick={() => onActivate(null)}
+          onSetPrimary={() => onSetPrimary(null)}
         />
         {ghostViews.map((view) => (
           <div
             key={view.id}
             className="relative flex-shrink-0 w-16 flex flex-col items-center gap-1 group"
           >
-            <button
-              type="button"
+            <ViewThumb
+              src={imageUrl(view.imagePath)}
+              label={view.label}
+              active={activeViewId === view.id}
+              isPrimary={primaryViewId === view.id}
               onClick={() => onActivate(view.id)}
-              disabled={generating}
-              className={`w-full flex flex-col items-center gap-1 rounded-xl border p-1 transition disabled:opacity-50 ${
-                activeViewId === view.id
-                  ? "border-ink bg-paper-warm"
-                  : "border-ink/10 hover:border-ink/30"
-              }`}
-            >
-              <div className="w-full aspect-square rounded overflow-hidden bg-paper-warm">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imageUrl(view.imagePath)}
-                  alt={view.label}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <span className="text-[9px] uppercase tracking-wide text-ink-muted truncate w-full text-center px-0.5">
-                {view.label}
-              </span>
-            </button>
+              onSetPrimary={() => onSetPrimary(view.id)}
+            />
             <button
               type="button"
               onClick={(e) => {
@@ -802,29 +984,50 @@ function ViewThumb({
   src,
   label,
   active,
+  isPrimary,
   onClick,
+  onSetPrimary,
 }: {
   src: string;
   label: string;
   active: boolean;
+  isPrimary?: boolean;
   onClick: () => void;
+  onSetPrimary?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-shrink-0 w-16 flex flex-col items-center gap-1 rounded-xl border p-1 transition ${
-        active ? "border-ink bg-paper-warm" : "border-ink/10 hover:border-ink/30"
-      }`}
-    >
-      <div className="w-full aspect-square rounded overflow-hidden bg-paper-warm">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={label} className="w-full h-full object-cover" />
-      </div>
-      <span className="text-[9px] uppercase tracking-wide text-ink-muted truncate w-full text-center px-0.5">
-        {label}
-      </span>
-    </button>
+    <div className="relative flex-shrink-0 w-16 flex flex-col items-center gap-1 group">
+      <button
+        type="button"
+        onClick={onClick}
+        className={`w-full flex flex-col items-center gap-1 rounded-xl border p-1 transition ${
+          active ? "border-ink bg-paper-warm" : "border-ink/10 hover:border-ink/30"
+        }`}
+      >
+        <div className="w-full aspect-square rounded overflow-hidden bg-paper-warm">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt={label} className="w-full h-full object-cover" />
+        </div>
+        <span className="text-[9px] uppercase tracking-wide text-ink-muted truncate w-full text-center px-0.5">
+          {label}
+        </span>
+        {isPrimary && (
+          <span className="text-[8px] uppercase tracking-wide text-ink-muted">Primary</span>
+        )}
+      </button>
+      {onSetPrimary && !isPrimary && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSetPrimary();
+          }}
+          className="text-[8px] text-ink-muted hover:text-ink underline underline-offset-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+        >
+          Set primary
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -879,7 +1082,7 @@ function ImagePickerPanel({
         }}
         className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper focus:outline-none focus:border-ink/40"
       >
-        <option value="__listing__">Listing photo (cropped main)</option>
+        <option value="__listing__">Original photo</option>
         {extras.map((extra, i) => (
           <option key={extra.id} value={extra.id}>
             Extra source {i + 1}
@@ -984,9 +1187,14 @@ function ImagePickerPanel({
           onClick={onCancel}
           className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
         >
-          Cancel
+          {generating ? "Close" : "Cancel"}
         </button>
       </div>
+      {generating && (
+        <p className="text-[11px] text-ink-muted">
+          You can close this panel or save the item — generation continues in the background.
+        </p>
+      )}
     </div>
   );
 }
@@ -995,13 +1203,19 @@ function ReadyView({
   state,
   categories,
   styleTagsList,
+  colorOptions,
   credits,
   extraInputRef,
   webMatchAutofill,
   onTakePhotoExtra,
+  webSearchQuery,
+  onWebSearchQueryChange,
+  webSearchResults,
+  onWebSearchResultsChange,
   onSearchWeb,
   onSelectWebProduct,
   selectedWebProductUrl,
+  onClearWebSelection,
   onChange,
   onRequestGhost,
   onConfirmPick,
@@ -1012,6 +1226,7 @@ function ReadyView({
   onPickPrimaryChange,
   onPickCompositionChange,
   onActivateView,
+  onSetPrimaryView,
   onRemoveGhostView,
   onAddExtra,
   onRemoveExtra,
@@ -1021,13 +1236,19 @@ function ReadyView({
   state: ReadyState;
   categories: string[];
   styleTagsList: string[];
+  colorOptions: Color[];
   credits: number;
   extraInputRef: RefObject<HTMLInputElement>;
   webMatchAutofill: boolean;
   onTakePhotoExtra: () => void;
+  webSearchQuery: string;
+  onWebSearchQueryChange: (query: string) => void;
+  webSearchResults: ProductMatch[];
+  onWebSearchResultsChange: (results: ProductMatch[]) => void;
   onSearchWeb: (query: string) => Promise<ProductMatch[]>;
   onSelectWebProduct: (match: ProductMatch) => void;
   selectedWebProductUrl: string | null;
+  onClearWebSelection: () => void;
   onChange: (patch: Partial<ItemFormValue>) => void;
   onRequestGhost: () => void;
   onConfirmPick: (pick: PickImageState) => void;
@@ -1038,6 +1259,7 @@ function ReadyView({
   onPickPrimaryChange: (primaryExtraId: string | null) => void;
   onPickCompositionChange: (hint: "default" | "rear") => void;
   onActivateView: (id: string | null) => void;
+  onSetPrimaryView: (id: string | null) => void;
   onRemoveGhostView: (id: string) => void;
   onAddExtra: (file: File) => void;
   onRemoveExtra: (id: string) => void;
@@ -1059,8 +1281,10 @@ function ReadyView({
           previewUrl={state.previewUrl}
           ghostViews={state.ghostViews}
           activeViewId={state.activeViewId}
+          primaryViewId={state.primaryViewId}
           generating={state.generatingGhost}
           onActivate={onActivateView}
+          onSetPrimary={onSetPrimaryView}
           onRemoveGhost={onRemoveGhostView}
         />
 
@@ -1093,6 +1317,11 @@ function ReadyView({
             />
           ) : (
             <>
+              {state.generatingGhost && (
+                <p className="text-[11px] text-ink-muted">
+                  Generating in the background — you can keep editing or save without waiting.
+                </p>
+              )}
               <button
                 type="button"
                 onClick={onRequestGhost}
@@ -1195,13 +1424,17 @@ function ReadyView({
           title={webMatchAutofill ? "Web matches" : "Find product online"}
           hint={
             webMatchAutofill
-              ? "From your photo (when SerpAPI is on) or search again by keyword."
-              : "Optional: search by keyword and pick a listing to copy details into the form."
+              ? "From your photo (when SerpAPI is on) or search again by keyword. Clear a selection to browse results."
+              : "Search by keyword and pick a listing to copy details into the form. Clear a selection to try another."
           }
-          matches={webMatchAutofill ? state.analyze.bundle.matches : undefined}
+          query={webSearchQuery}
+          onQueryChange={onWebSearchQueryChange}
+          results={webSearchResults}
+          onResultsChange={onWebSearchResultsChange}
           onSearch={onSearchWeb}
           onSelect={onSelectWebProduct}
           selectedUrl={selectedWebProductUrl}
+          onClearSelection={onClearWebSelection}
         />
 
         <ItemFormFields
@@ -1209,12 +1442,13 @@ function ReadyView({
           onChange={onChange}
           categories={categories}
           styleTags={styleTagsList}
+          colorOptions={colorOptions}
         />
 
         <div className="flex items-center gap-3 pt-2">
           <button
             type="submit"
-            disabled={!state.value.name.trim() || state.generatingGhost}
+            disabled={!state.value.name.trim()}
             className="rounded-full bg-ink text-paper px-6 py-2.5 text-sm tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
           >
             Save to closet

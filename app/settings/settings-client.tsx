@@ -4,11 +4,13 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CreditMark } from "@/components/credit-mark";
 import { ReorderableStringList } from "@/components/reorderable-string-list";
+import { ReorderableColorList } from "@/components/reorderable-color-list";
 import { StylePrefsEditor } from "@/components/style-prefs-editor";
 import { updateStylePrefs, setAutoGenerateGhost } from "@/lib/actions/preferences";
 import {
   addWardrobeCategory,
   removeWardrobeCategory,
+  renameWardrobeCategory,
   reorderWardrobeCategories,
 } from "@/lib/actions/wardrobeCategories";
 import {
@@ -16,24 +18,38 @@ import {
   removeWardrobeStyleTag,
   reorderWardrobeStyleTags,
 } from "@/lib/actions/wardrobeStyleTags";
+import {
+  addWardrobeColor,
+  removeWardrobeColor,
+  reorderWardrobeColors,
+} from "@/lib/actions/wardrobeColors";
 import { clearAllData } from "@/lib/actions/account";
 import { createCreditCheckout } from "@/lib/actions/billing";
 import { CREDIT_PACKS, formatPackPrice } from "@/lib/credit-packs";
-import type { StylePrefs } from "@/lib/json";
+import { normalizeCategoryName } from "@/lib/categories";
+import type { Color, StylePrefs } from "@/lib/json";
+
+type EyeDropperResult = { sRGBHex: string };
+type EyeDropperConstructor = new () => { open: () => Promise<EyeDropperResult> };
 
 type Props = {
   initialPrefs: StylePrefs;
   categoryList: string[];
   styleTagsList: string[];
+  colorList: Color[];
   credits: number;
   autoGenerateGhost: boolean;
   purchasesEnabled: boolean;
 };
 
+/** Typed to arm the irreversible "Clear all data" action. */
+const DELETE_CONFIRM_PHRASE = "delete my wardrobe";
+
 export function SettingsClient({
   initialPrefs,
   categoryList,
   styleTagsList,
+  colorList,
   credits,
   autoGenerateGhost,
   purchasesEnabled,
@@ -41,15 +57,21 @@ export function SettingsClient({
   const [prefs, setPrefs] = useState<StylePrefs>(initialPrefs);
   const [newCategory, setNewCategory] = useState("");
   const [newTag, setNewTag] = useState("");
+  const [newColorHex, setNewColorHex] = useState("#4a6fb0");
+  const [newColorName, setNewColorName] = useState("");
   const [autoGen, setAutoGen] = useState(autoGenerateGhost);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [catError, setCatError] = useState<string | null>(null);
   const [tagError, setTagError] = useState<string | null>(null);
+  const [colorError, setColorError] = useState<string | null>(null);
   const [localCategories, setLocalCategories] = useState(categoryList);
   const [localTags, setLocalTags] = useState(styleTagsList);
+  const [localColors, setLocalColors] = useState(colorList);
+  const colorInputRef = useRef<HTMLInputElement>(null);
   const [, startCat] = useTransition();
   const [clearing, startClear] = useTransition();
+  const [deleteConfirm, setDeleteConfirm] = useState("");
   const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
   const [restore, setRestore] = useState<{
@@ -106,6 +128,10 @@ export function SettingsClient({
     setLocalTags(styleTagsList);
   }, [styleTagsList]);
 
+  useEffect(() => {
+    setLocalColors(colorList);
+  }, [colorList]);
+
   const dirty = JSON.stringify(prefs) !== JSON.stringify(initialPrefs);
 
   async function onSave() {
@@ -122,11 +148,13 @@ export function SettingsClient({
     router.refresh();
   }
 
+  const deleteConfirmed =
+    deleteConfirm.trim().toLowerCase() === DELETE_CONFIRM_PHRASE;
+
   function onClear() {
-    if (
-      !confirm("Delete every item, photo, and preference for this account? This can't be undone.")
-    )
-      return;
+    // Guard against accidental submits (e.g. Enter key) when the typed
+    // confirmation phrase doesn't match exactly.
+    if (!deleteConfirmed) return;
     startClear(async () => {
       await clearAllData();
     });
@@ -177,6 +205,22 @@ export function SettingsClient({
     });
   }
 
+  function handleRenameCategory(oldName: string, newName: string) {
+    setCatError(null);
+    startCat(async () => {
+      const res = await renameWardrobeCategory(oldName, newName);
+      if (!res.ok) {
+        setCatError(res.error);
+        router.refresh();
+        return;
+      }
+      setLocalCategories((prev) =>
+        prev.map((c) => (c === oldName ? normalizeCategoryName(newName) : c)),
+      );
+      router.refresh();
+    });
+  }
+
   function handleReorderTags(next: string[]) {
     setLocalTags(next);
     setTagError(null);
@@ -212,6 +256,61 @@ export function SettingsClient({
       const res = await removeWardrobeStyleTag(name);
       if (!res.ok) {
         setTagError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  async function pickColorWithDropper() {
+    const Ctor = (window as unknown as { EyeDropper?: EyeDropperConstructor }).EyeDropper;
+    if (!Ctor) {
+      colorInputRef.current?.click();
+      return;
+    }
+    try {
+      const { sRGBHex } = await new Ctor().open();
+      setNewColorHex(sRGBHex);
+    } catch {
+      // user cancelled the dropper
+    }
+  }
+
+  function handleAddColor() {
+    setColorError(null);
+    startCat(async () => {
+      const res = await addWardrobeColor(newColorHex, newColorName);
+      if (!res.ok) {
+        setColorError(res.error);
+        return;
+      }
+      setNewColorName("");
+      router.refresh();
+    });
+  }
+
+  function handleDeleteColor(color: Color) {
+    if (!confirm(`Remove “${color.name}” from your color palette?\nItems already tagged with it keep the color until you edit them.`))
+      return;
+    setColorError(null);
+    startCat(async () => {
+      const res = await removeWardrobeColor(color.name);
+      if (!res.ok) {
+        setColorError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function handleReorderColors(next: Color[]) {
+    setLocalColors(next);
+    setColorError(null);
+    startCat(async () => {
+      const res = await reorderWardrobeColors(next);
+      if (!res.ok) {
+        setColorError(res.error);
+        router.refresh();
         return;
       }
       router.refresh();
@@ -289,8 +388,9 @@ export function SettingsClient({
       <section className="space-y-4">
         <h3 className="text-xs uppercase tracking-wide text-ink-muted">Wardrobe categories</h3>
         <p className="text-sm text-ink-muted">
-          Categories are saved when you add, remove, or reorder (drag the ⋮⋮ handle). Removing a
-          category sets affected items to <span className="text-ink">None</span>.
+          Categories are saved when you add, remove, rename (click a name), or reorder (drag the ⋮⋮
+          handle). Removing a category sets affected items to <span className="text-ink">None</span>.
+          Renaming updates all items in that category.
         </p>
         <div className="flex items-center gap-2">
           <input
@@ -322,6 +422,7 @@ export function SettingsClient({
         <ReorderableStringList
           items={localCategories}
           onReorder={handleReorderCategories}
+          onRename={handleRenameCategory}
           onRemove={handleDeleteCategory}
         />
       </section>
@@ -365,6 +466,68 @@ export function SettingsClient({
           onRemove={handleDeleteTag}
           removeDisabled={() => localTags.length <= 1}
           labelClassName="capitalize"
+        />
+      </section>
+
+      <section className="space-y-4">
+        <h3 className="text-xs uppercase tracking-wide text-ink-muted">Wardrobe colors</h3>
+        <p className="text-sm text-ink-muted">
+          The palette shown when tagging pieces. Drag the ⋮⋮ handle to set the order used for the{" "}
+          <span className="text-ink">Color</span> sort in your closet. Pick a swatch or use the
+          eyedropper to sample any color on screen, name it, then add it.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={colorInputRef}
+            type="color"
+            value={newColorHex}
+            onChange={(e) => setNewColorHex(e.target.value)}
+            aria-label="Pick a color"
+            className="h-9 w-12 shrink-0 rounded-lg border border-ink/10 bg-white p-0.5 cursor-pointer"
+          />
+          <button
+            type="button"
+            onClick={pickColorWithDropper}
+            title="Sample a color from anywhere on screen"
+            className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 px-3 py-2 text-xs hover:bg-paper-warm transition"
+          >
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M19 5.5a2.1 2.1 0 0 0-3-3l-2.6 2.6-1-1-1.6 1.6 6 6 1.6-1.6-1-1L19 5.5z" />
+              <path d="M12.5 7.4 4.7 15.2a2 2 0 0 0-.55 1.06L3.5 19.5a.6.6 0 0 0 .7.7l3.24-.65a2 2 0 0 0 1.06-.55l7.8-7.8" />
+            </svg>
+            Eyedropper
+          </button>
+          <input
+            type="text"
+            value={newColorName}
+            onChange={(e) => setNewColorName(e.target.value)}
+            placeholder="name (e.g. sage)"
+            className="flex-1 min-w-[8rem] rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleAddColor();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleAddColor}
+            className="rounded-full border border-ink/15 px-4 py-2 text-xs hover:bg-paper-warm transition"
+          >
+            Add
+          </button>
+        </div>
+        {colorError && (
+          <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            {colorError}
+          </p>
+        )}
+        <ReorderableColorList
+          items={localColors}
+          onReorder={handleReorderColors}
+          onRemove={handleDeleteColor}
+          removeDisabled={() => localColors.length <= 1}
         />
       </section>
 
@@ -422,16 +585,35 @@ export function SettingsClient({
         <h2 className="font-serif text-xl tracking-tight">Danger zone</h2>
         <p className="text-ink-muted text-sm max-w-xl">
           Clears the local database and deletes every uploaded photo for this account. Useful for
-          restarting the demo with a blank slate.
+          restarting the demo with a blank slate. This cannot be undone.
         </p>
-        <button
-          type="button"
-          onClick={onClear}
-          disabled={clearing}
-          className="rounded-full border border-red-200 text-red-700 px-5 py-2 text-sm tracking-wide hover:bg-red-50 transition disabled:opacity-50"
-        >
-          {clearing ? "Clearing…" : "Clear all data"}
-        </button>
+        <div className="max-w-md space-y-2 rounded-2xl border border-red-200 bg-red-50/40 p-4">
+          <label htmlFor="delete-confirm" className="block text-sm text-red-800">
+            To confirm, type{" "}
+            <span className="font-semibold select-none">{DELETE_CONFIRM_PHRASE}</span>{" "}
+            below.
+          </label>
+          <input
+            id="delete-confirm"
+            type="text"
+            value={deleteConfirm}
+            onChange={(e) => setDeleteConfirm(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            placeholder={DELETE_CONFIRM_PHRASE}
+            aria-label={`Type "${DELETE_CONFIRM_PHRASE}" to confirm deletion`}
+            className="w-full rounded-full border border-red-200 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+          />
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={clearing || !deleteConfirmed}
+            className="rounded-full border border-red-300 bg-red-600 text-white px-5 py-2 text-sm tracking-wide hover:bg-red-700 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-red-600"
+          >
+            {clearing ? "Clearing…" : "Delete everything"}
+          </button>
+        </div>
       </section>
     </div>
   );

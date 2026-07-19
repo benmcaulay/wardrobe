@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs } from "@/lib/categories";
+import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
@@ -15,6 +16,7 @@ export default async function AddItemPage() {
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
+  const colorOptions = getColorsListFromPrefs(prefs);
   const webMatchAutofill = webMatchAutofillEnabled();
   return (
     <main className="max-w-5xl mx-auto px-6 py-12">
@@ -23,7 +25,7 @@ export default async function AddItemPage() {
         <p className="text-ink-muted mt-2">
           {webMatchAutofill
             ? "Take a photo or upload one — we\u2019ll remove the background, analyze the garment, and pre-fill the details for you."
-            : "Take a photo or upload one — we\u2019ll remove the background. Fill in the details yourself, or search the web for a listing."}
+            : "Search the web for a listing to import, or take your own photo — we\u2019ll remove the background and fill in the details."}
         </p>
       </header>
       <AddItemFlow
@@ -31,6 +33,7 @@ export default async function AddItemPage() {
         autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
         categories={categories}
         styleTagsList={styleTagsList}
+        colorOptions={colorOptions}
         webMatchAutofill={webMatchAutofill}
       />
     </main>

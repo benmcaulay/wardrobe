@@ -3,17 +3,17 @@ import path from "node:path";
 import sharp from "sharp";
 import { thumbnailPathFor } from "./image-paths";
 import { putObject, deleteObject } from "./storage";
+import { isAllowedImageUpload } from "./image-upload-accept";
 
 // Re-export the pure helpers so existing imports keep working. Client code
 // should import from "@/lib/image-paths" directly to avoid pulling sharp in.
 export { thumbnailPathFor, imageUrl, thumbnailUrl } from "./image-paths";
+export { isAllowedImageUpload } from "./image-upload-accept";
 // Re-export storage helpers some callers still import from here.
 export { UPLOADS_ROOT, resolveUploadPath } from "./storage";
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const MAX_EDGE_PX = 1536;
 export const THUMB_EDGE_PX = 400;
-
-export const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export class UploadError extends Error {
   constructor(public code: "too_large" | "bad_type" | "empty" | "decode_failed", message: string) {
@@ -39,11 +39,21 @@ export async function saveUpload(file: File, userId: string): Promise<SavedUploa
   if (file.size > MAX_UPLOAD_BYTES) {
     throw new UploadError("too_large", `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`);
   }
-  if (!ALLOWED_MIME.has(file.type)) {
-    throw new UploadError("bad_type", `Unsupported file type: ${file.type || "unknown"}`);
+  if (!isAllowedImageUpload(file)) {
+    throw new UploadError("bad_type", `Unsupported file type: ${file.type || file.name || "unknown"}`);
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  return saveImageBuffer(buffer, userId);
+}
+
+/** Process raw image bytes the same way as {@link saveUpload}. */
+export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<SavedUpload> {
+  if (buffer.length === 0) throw new UploadError("empty", "File is empty");
+  if (buffer.length > MAX_UPLOAD_BYTES) {
+    throw new UploadError("too_large", `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`);
+  }
+
   const id = crypto.randomUUID();
   const originalKey = path.posix.join(userId, `${id}.jpg`);
   const thumbKey = path.posix.join(userId, `${id}-thumb.jpg`);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs } from "@/lib/categories";
+import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
@@ -16,6 +17,7 @@ export default async function SettingsPage() {
   const initialPrefs = parseStylePrefs(dbUser?.stylePrefs);
   const categoryList = getCategoriesListFromPrefs(initialPrefs);
   const styleTagsList = getStyleTagsListFromPrefs(initialPrefs);
+  const colorList = getColorsListFromPrefs(initialPrefs);
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-12">
@@ -49,6 +51,7 @@ export default async function SettingsPage() {
           initialPrefs={initialPrefs}
           categoryList={categoryList}
           styleTagsList={styleTagsList}
+          colorList={colorList}
           credits={dbUser?.credits ?? 0}
           autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
           purchasesEnabled={stripeEnabled()}

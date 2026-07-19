@@ -53,7 +53,7 @@ export default async function SmartPakkerPage() {
       </nav>
 
       <header className="mb-10">
-        <h1 className="font-serif text-5xl tracking-tight">SmartPakker</h1>
+        <h1 className="font-serif text-5xl tracking-tight">Trip Packing Assistant</h1>
         <p className="mt-2 max-w-xl text-ink-muted">
           Tell us where you&apos;re going and which bags you&apos;ve got. We&apos;ll estimate the
           weight and volume of everything in your closet and pack you for the climate.

@@ -5,6 +5,10 @@ import { fal } from "@fal-ai/client";
 import { log } from "../log";
 import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
 import { whitenBackground } from "./whiten-background";
+import { centerCatalogImage } from "./center-catalog-image";
+import { softenCatalogShadows } from "./flatten-catalog-lighting";
+import { removeNeckPost } from "./remove-neck-post";
+import { fetchFalResultBuffer } from "./fal-result-fetch";
 
 // Real provider: fal.ai image-edit model (default: SeedDream v4 Edit). Takes a
 // primary garment image plus optional context references and returns a single
@@ -42,6 +46,14 @@ export type GhostMannequinResult = {
 
 const BASE_WIDTH = 1024;
 const BASE_HEIGHT = 1366; // 3:4 portrait
+/** Bump when prompt/post-process changes so new runs don't reuse stale cache keys. */
+const PROMPT_VERSION = "2026-04-six-tenets";
+const NECK_REPAIR_ENABLED = process.env.GHOST_NECK_FAL_REPAIR !== "false";
+
+/** Repair pass — never say "mannequin"; that word triggers plastic neck inserts. */
+const NECK_REPAIR_PROMPT = `Edit this e-commerce garment photo: remove any white plastic neck tube, head, bust, stump, or filler inside the collar or hood opening.
+Through the neck opening, show the garment's own back lining / interior fabric only.
+Keep the garment color, shape, logos, and pure white (#ffffff) background exactly unchanged. No shadows.`;
 
 const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
   upperbody: "TOP",
@@ -55,7 +67,7 @@ const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
 // Default to Seedream v4 edit: top-tier prompt adherence (it actually obeys the
 // camera-angle requirements below, where the gemini editor tended to ignore
 // them) at the same ~$0.04/call. Override with FAL_GHOST_MODEL to switch.
-const FAL_GHOST_MODEL = process.env.FAL_GHOST_MODEL ?? "fal-ai/seedream/v4/edit";
+const FAL_GHOST_MODEL = process.env.FAL_GHOST_MODEL ?? "fal-ai/bytedance/seedream/v4/edit";
 const REAL_MODE = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
 
 let falConfigured = false;
@@ -81,6 +93,7 @@ function deterministicHash(input: GhostMannequinInput): string {
         input.category,
         input.instructions?.trim() ?? "",
         input.compositionHint ?? "default",
+        PROMPT_VERSION,
         ...sortedExtras,
         REAL_MODE ? "real" : "stub",
       ].join("|"),
@@ -102,107 +115,229 @@ export async function createGhostMannequin(
 }
 
 // -----------------------------------------------------------------------------
-// Real implementation
+// Real implementation — fal prompt (six tenets; never say "mannequin")
 // -----------------------------------------------------------------------------
 
-/**
- * Shared constraints — models often “complete the outfit” unless told aggressively not to.
- */
-const SINGLE_ITEM_FIDELITY = `Single-item fidelity (required):
-- Output must depict ONLY the merchandise visible in the supplied reference image(s). Treat this as one SKU / one listing — not a styled outfit.
-- Do NOT add, imply, or invent any clothing or accessories that are not clearly shown in those references: no extra tops, bottoms, dresses, socks, shoes, layers, jewelry, or props unless they appear in the same reference frame(s).
-- Do NOT “complete the look,” coordinate separates, or produce a head-to-toe outfit when the reference shows a single piece (e.g. only a hat, bag, belt, or shirt).
-- Context/reference images (if any) are for detail only — still render the same item(s) shown, not an expanded wardrobe.`;
+const TENET_LINING = `1) Neck / collar / hood opening — visible back lining:
+- Through the neckline, collar, or hood opening, show the garment's own interior fabric and back lining only.
+- No white plastic tube, neck stump, bust, head, foam insert, or filler of any kind inside the opening.
+- No person, skin, face, or body parts.`;
 
-/** Keeps pale fabric from washing into #ffffff when backgrounds are normalized bright. */
-const WHITE_ITEM_BACKGROUND_SEPARATION =
-  "For white, off-white, or very pale items: add very light, natural shading on folds, seams, collars, cuffs, and silhouette edges (still soft even studio light, not heavy shadows) so every part of the garment or shoe reads clearly against the pure white background and no section visually merges into the backdrop.";
+const TENET_VOLUME = `2) Fully inflated:
+- Garment is fully inflated to retail product-photo volume — filled sleeves, shaped shoulders, natural body volume.
+- Not flat, deflated, collapsed, crumpled, or empty-looking.
+- Smooth fabric; do not invent harsh wrinkles. Preserve exact colors, prints, logos, and texture from the reference.`;
 
-/**
- * Camera angle is the requirement image models most often ignore, so we state
- * it as a STRICT lead requirement in directive language and never offer an
- * "or" that lets the model choose. Both angles are env-overridable so the
- * catalog look can change without a code edit.
- */
-const APPAREL_ANGLE =
-  process.env.GHOST_APPAREL_ANGLE?.trim() ||
-  "facing straight forward, squared to the camera — the front of the piece flat to the lens, with no rotation, tilt, or three-quarter turn";
+const TENET_ARMS = `3) Arms straight (tops / dresses with sleeves):
+- Shoulders level and square. Sleeves hang straight down at the sides.
+- Do not bend arms inward, cross sleeves, or pinch elbows toward the center.`;
+
+const TENET_BG = `4) Pure white background only:
+- Seamless #ffffff filling the entire frame edge-to-edge.
+- No gray, cream, gradient, floor line, or vignette.`;
+
+const TENET_SHADOWS = `5) No shadows:
+- No cast shadow under the garment, no contact shadow, no side shadow, no rim light, no vignette on fabric.
+- Flat, even, shadowless lighting across the whole piece.`;
+
+const TENET_CAMERA = `6) Straight-on camera only:
+- Garment facing the lens head-on (0° yaw), centered, symmetric, fully in frame.
+- Not three-quarter, not angled, not tilted.`;
+
+const TENET_CAMERA_REAR = `6) Straight-on camera — back view:
+- Show the back of the garment head-on (0° yaw), centered, symmetric, fully in frame.
+- Not three-quarter, not angled, not tilted.`;
+
+const LOWERBODY_POSE = `Bottoms (pants, shorts, skirts):
+- Waistband level; legs fully inflated and straight — not pinched, twisted, or crumpled.`;
+
+const SINGLE_ITEM = `Single item only from the reference. No extra clothes, props, hangers, stands, poles, or text.`;
+
 const FOOTWEAR_ANGLE =
-  process.env.GHOST_FOOTWEAR_ANGLE?.trim() ||
-  "both shoes angled ~45° to the viewer's left (toes pointing left), shown together as a matched pair seen from the same outer side, at an identical angle and height";
+  "Camera: both shoes as a matched pair, angled ~45° to the viewer's left, same height and orientation — not toe-on, not heel-to-heel V, not splayed apart.";
 
-const APPAREL_VIEW_DEFAULT = `- Camera angle (STRICT — do not deviate): the garment is ${APPAREL_ANGLE}. Centred composition, the entire item visible with comfortable margin. For a non-apparel accessory, use its natural front-facing catalog angle.`;
+function apparelLabel(category: Exclude<GhostMannequinCategory, "footwear">): string {
+  return {
+    upperbody: "top garment (shirt, sweater, jacket, hoodie, or upper-body piece)",
+    lowerbody: "bottom garment (pants, shorts, skirt — not shoes)",
+    dress: "dress",
+    full: "single garment or accessory exactly as shown (hat, bag, scarf, etc.)",
+  }[category];
+}
 
-const APPAREL_VIEW_REAR =
-  "- Rear-facing ghost-mannequin composition: the PRIMARY (first) reference image defines which side of the garment to show — if it shows the back, output a professional back view with that side centred; show yoke, shoulder blades, back neckline, and hem clearly. Do not substitute the front/chest unless the primary reference does not show the back of the piece.";
-
-const APPAREL_PROMPT = (
+function baseApparelPrompt(
   category: Exclude<GhostMannequinCategory, "footwear">,
   compositionHint: "default" | "rear",
-) => {
-  const label = {
-    upperbody: "top garment (shirt, sweater, jacket, or other upper-body piece)",
-    lowerbody:
-      "bottom garment (pants, shorts, skirt, or similar — not shoes or sneakers)",
-    dress: "dress",
-    // "full" is the fallback garment class — NOT instruction to build a full outfit.
-    full: "single garment or accessory exactly as shown in the reference (unknown type or general category — e.g. hat, bag, scarf — still one item only, not an ensemble)",
-  }[category];
-  const viewLine = compositionHint === "rear" ? APPAREL_VIEW_REAR : APPAREL_VIEW_DEFAULT;
-  return `Generate a clean ghost-mannequin product photograph of this ${label}.
+): string {
+  const camera = compositionHint === "rear" ? TENET_CAMERA_REAR : TENET_CAMERA;
+  const arms =
+    category === "lowerbody"
+      ? LOWERBODY_POSE
+      : TENET_ARMS;
 
-${SINGLE_ITEM_FIDELITY}
+  return `Floating e-commerce product photo of this ${apparelLabel(category)}. Exact item from the reference, suspended in empty space with no wearer and no stand.
 
-Requirements:
-${viewLine}
-- Pure white seamless studio background (#ffffff).
-- Garment shown in a 3D form as if worn by an invisible mannequin (when the piece is apparel): sleeves filled out, shoulders shaped, collar / neckline natural, garment hanging with realistic drape and silhouette. For small accessories (hats, bags, etc.), present them as a crisp catalog product shot — correct scale and proportion — without attaching them to a body or adding other garments.
-- Soft even studio lighting, no harsh cast shadows.
-- ${WHITE_ITEM_BACKGROUND_SEPARATION}
-- E-commerce catalog quality.
-- Preserve the garment's exact colour, fabric texture, prints, logos, and proportions.
-- Do not show any person, skin, mannequin body, hands, hangers, or overlaid text.`;
-};
+${TENET_LINING}
 
-/** Footwear uses different geometry than torso/legs apparel; kept separate from lowerbody prompts. */
-const FOOTWEAR_PROMPT = `Generate a clean e-commerce product photograph of this footwear (the exact shoes or sneakers shown in the reference).
+${TENET_VOLUME}
 
-${SINGLE_ITEM_FIDELITY}
+${arms}
 
-Requirements:
-- Camera angle (STRICT — do not deviate): ${FOOTWEAR_ANGLE}. Do not face them toe-on to the camera, splay them apart, or mirror them into a heel-to-heel "V".
-- Pure white seamless studio background (#ffffff).
-- Reproduce only the footwear from the reference — same silhouette, colours, materials, soles, logos, and laces. Do not substitute shirts, jackets, pants, or any other apparel.
-- Balanced catalog composition, the entire pair visible with comfortable margin.
-- Soft even studio lighting, no harsh cast shadows.
-- ${WHITE_ITEM_BACKGROUND_SEPARATION}
-- Preserve fine detail: mesh, suede, stitching, sole tread, branding.
-- Do not show legs, mannequin bodies above the ankle, hangers, or text.`;
+${TENET_BG}
 
-const PROMPT = (category: GhostMannequinCategory, compositionHint: "default" | "rear"): string =>
-  category === "footwear" ? FOOTWEAR_PROMPT : APPAREL_PROMPT(category, compositionHint);
+${TENET_SHADOWS}
 
+${camera}
+
+${SINGLE_ITEM}`;
+}
+
+const FOOTWEAR_PROMPT = `Floating e-commerce product photo of this footwear (exact shoes from the reference).
+
+${TENET_BG}
+
+${TENET_SHADOWS}
+
+${FOOTWEAR_ANGLE}
+
+${SINGLE_ITEM}
+No legs, ankles, feet, hangers, or text.`;
+
+/** fal.ai prompt for catalog garment generation. */
 export function buildPrompt(
   category: GhostMannequinCategory,
   instructions: string | undefined,
   compositionHint: "default" | "rear",
 ): string {
-  const base = PROMPT(category, category === "footwear" ? "default" : compositionHint);
+  const base =
+    category === "footwear"
+      ? FOOTWEAR_PROMPT
+      : baseApparelPrompt(category, compositionHint);
   const extra = instructions?.trim();
   if (!extra) return base;
   return `${base}
 
-Additional view instruction:
-- ${extra}`;
+Additional direction:
+${extra}`;
+}
+
+async function uploadBufferToFal(buf: Buffer, name: string, mime: string): Promise<string> {
+  const file = new File([new Uint8Array(buf)], name, { type: mime });
+  return fal.storage.upload(file);
+}
+
+async function fetchFalImageUrl(model: string, prompt: string, imageUrls: string[]): Promise<string> {
+  const response = await fal.subscribe(model, {
+    input: {
+      prompt,
+      image_urls: imageUrls,
+      num_images: 1,
+      enhance_prompt_mode: "fast",
+    },
+    logs: false,
+  });
+  const data = response?.data as
+    | { images?: Array<{ url?: string }>; image?: { url?: string } }
+    | undefined;
+  const url = data?.images?.[0]?.url ?? data?.image?.url ?? "";
+  if (!url) throw new Error("fal.ai returned no image url");
+  return url;
+}
+
+type PostProcessedGhost = {
+  outJpeg: Buffer;
+  thumbJpeg: Buffer;
+  cutout: Buffer;
+  neckRemovedPixels: number;
+  neckRepairUsed: boolean;
+};
+
+async function postProcessGhostRaw(
+  rawBuffer: Buffer,
+  category: GhostMannequinCategory,
+): Promise<PostProcessedGhost> {
+  const skipNeck = category === "footwear";
+
+  async function runPipeline(source: Buffer): Promise<{
+    evenLight: Buffer;
+    cutout: Buffer;
+    neckRemovedPixels: number;
+    suspectedRemaining: boolean;
+  }> {
+    const normalised = await sharp(source)
+      .rotate()
+      .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
+      .png()
+      .toBuffer();
+
+    const { flattened, cutout: whitenCutout } = await whitenBackground(normalised);
+    const firstPass = await removeNeckPost(flattened, whitenCutout, { skip: skipNeck });
+    const centered = await centerCatalogImage(firstPass.cutout, {
+      width: BASE_WIDTH,
+      height: BASE_HEIGHT,
+    });
+    let evenLight = await softenCatalogShadows(centered.flattened, centered.cutout);
+    let cutout = centered.cutout;
+    let neckRemovedPixels = firstPass.removedPixels;
+    let suspectedRemaining = firstPass.suspectedRemaining;
+
+    if (!skipNeck) {
+      const secondPass = await removeNeckPost(evenLight, cutout, { skip: false });
+      neckRemovedPixels += secondPass.removedPixels;
+      if (secondPass.removedPixels > 0) {
+        const recentered = await centerCatalogImage(secondPass.cutout, {
+          width: BASE_WIDTH,
+          height: BASE_HEIGHT,
+        });
+        evenLight = await softenCatalogShadows(recentered.flattened, recentered.cutout);
+        cutout = recentered.cutout;
+      }
+      suspectedRemaining = secondPass.suspectedRemaining;
+    }
+
+    return { evenLight, cutout, neckRemovedPixels, suspectedRemaining };
+  }
+
+  let processed = await runPipeline(rawBuffer);
+  let neckRepairUsed = false;
+
+  if (!skipNeck && processed.suspectedRemaining && NECK_REPAIR_ENABLED) {
+    try {
+      const repairUrl = await uploadBufferToFal(processed.evenLight, "ghost-repair.jpg", "image/jpeg");
+      const repairedUrl = await fetchFalImageUrl(FAL_GHOST_MODEL, NECK_REPAIR_PROMPT, [repairUrl]);
+      const repairedBuffer = await fetchFalResultBuffer(repairedUrl);
+      processed = await runPipeline(repairedBuffer);
+      neckRepairUsed = true;
+      log.info("ghost.neck.repair", { model: FAL_GHOST_MODEL });
+    } catch (err) {
+      log.error("ghost.neck.repair.failed", err, { model: FAL_GHOST_MODEL });
+    }
+  }
+
+  log.info("ghost.neck.cleanup", {
+    removedPixels: processed.neckRemovedPixels,
+    suspectedRemaining: processed.suspectedRemaining,
+    repairUsed: neckRepairUsed,
+  });
+
+  const thumbJpeg = await sharp(processed.evenLight)
+    .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+
+  return {
+    outJpeg: processed.evenLight,
+    thumbJpeg,
+    cutout: processed.cutout,
+    neckRemovedPixels: processed.neckRemovedPixels,
+    neckRepairUsed,
+  };
 }
 
 async function uploadKeyToFal(key: string, fallbackName: string): Promise<string> {
   const buf = await getObject(key);
   if (!buf) throw new Error(`Missing image: ${key}`);
-  const file = new File([new Uint8Array(buf)], path.basename(key) || fallbackName, {
-    type: contentTypeFor(key),
-  });
-  return fal.storage.upload(file);
+  return uploadBufferToFal(buf, path.basename(key) || fallbackName, contentTypeFor(key));
 }
 
 async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMannequinResult> {
@@ -228,27 +363,11 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   const startedAt = Date.now();
   let resultUrl: string;
   try {
-    const response = await fal.subscribe(FAL_GHOST_MODEL, {
-      input: {
-        prompt: buildPrompt(
-          input.category,
-          input.instructions,
-          input.compositionHint ?? "default",
-        ),
-        image_urls: [garmentUrl, ...extraUrls],
-        num_images: 1,
-      },
-      logs: false,
-    });
-    // Different fal models put the image at slightly different shapes; cover
-    // the two common ones (data.images[0].url and data.image.url).
-    const data = response?.data as
-      | { images?: Array<{ url?: string }>; image?: { url?: string } }
-      | undefined;
-    resultUrl = data?.images?.[0]?.url ?? data?.image?.url ?? "";
-    if (!resultUrl) {
-      throw new Error("fal.ai returned no image url");
-    }
+    resultUrl = await fetchFalImageUrl(
+      FAL_GHOST_MODEL,
+      buildPrompt(input.category, input.instructions, input.compositionHint ?? "default"),
+      [garmentUrl, ...extraUrls],
+    );
   } catch (err) {
     log.error("ghost.fal.failed", err, { model: FAL_GHOST_MODEL, ms: Date.now() - startedAt });
     throw new Error(`Ghost-mannequin generation failed: ${(err as Error).message}`);
@@ -264,37 +383,22 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   // pure white and produces a transparent cutout the try-on/outfit features
   // can composite directly. We resize first so the segmentation runs over
   // the canonical 1024x1366 canvas.
-  const fetched = await fetch(resultUrl);
-  if (!fetched.ok) throw new Error(`Failed to download result: ${fetched.status}`);
-  const rawBuffer = Buffer.from(await fetched.arrayBuffer());
+  const rawBuffer = await fetchFalResultBuffer(resultUrl);
 
   const hash = deterministicHash(input);
   const key = path.posix.join(input.userId, `ghost-${hash}.jpg`);
   const thumbKey = path.posix.join(input.userId, `ghost-${hash}-thumb.jpg`);
   const cutoutKey = path.posix.join(input.userId, `ghost-${hash}-cutout.png`);
 
-  const normalised = await sharp(rawBuffer)
-    .rotate()
-    .resize({ width: BASE_WIDTH, height: BASE_HEIGHT, fit: "inside", withoutEnlargement: false })
-    .png()
-    .toBuffer();
+  const processed = await postProcessGhostRaw(rawBuffer, input.category);
 
-  const { flattened, cutout } = await whitenBackground(normalised);
-
-  const [outJpeg, thumbJpeg] = await Promise.all([
-    sharp(flattened).jpeg({ quality: 88 }).toBuffer(),
-    sharp(flattened)
-      .resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toBuffer(),
-  ]);
   await Promise.all([
-    putObject(key, outJpeg, "image/jpeg"),
-    putObject(thumbKey, thumbJpeg, "image/jpeg"),
-    putObject(cutoutKey, cutout, "image/png"),
+    putObject(key, processed.outJpeg, "image/jpeg"),
+    putObject(thumbKey, processed.thumbJpeg, "image/jpeg"),
+    putObject(cutoutKey, processed.cutout, "image/png"),
   ]);
 
-  return { resultImagePath: key, credits: 1 };
+  return { resultImagePath: key, credits: processed.neckRepairUsed ? 2 : 1 };
 }
 
 // -----------------------------------------------------------------------------

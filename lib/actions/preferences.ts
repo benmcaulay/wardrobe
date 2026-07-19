@@ -30,9 +30,15 @@ export async function updateStylePrefs(prefs: StylePrefs): Promise<void> {
     select: { stylePrefs: true },
   });
   const existing = decode<StylePrefs>(row?.stylePrefs, {});
-  // Category list is edited via wardrobe category actions; the style editor state
-  // often omits this key, so merging avoids wiping custom categories on "Save preferences".
-  const { categoriesList: _drop, styleTagsList: _dropTags, ...fromClient } = prefs;
+  // Category/tag/color lists are edited via dedicated wardrobe actions; the style
+  // editor state often omits these keys, so we drop them here (keeping the existing
+  // saved lists) to avoid wiping them on "Save preferences".
+  const {
+    categoriesList: _drop,
+    styleTagsList: _dropTags,
+    colorsList: _dropColors,
+    ...fromClient
+  } = prefs;
   const merged: StylePrefs = { ...existing, ...fromClient };
   await prisma.user.update({
     where: { id: user.id },

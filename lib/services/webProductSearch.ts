@@ -1,4 +1,5 @@
 import { log } from "../log";
+import { parseBrandFromTitle } from "../shopping-parse";
 import { serpApiEnabled, serpApiGet } from "./serpapi-client";
 import type { ProductMatch } from "./reverseImageSearch";
 import { pick, range, seededRng } from "./_rng";
@@ -15,9 +16,13 @@ type ShoppingResult = {
   title?: string;
   source?: string;
   link?: string;
+  /** Current Google Shopping API shape (replaces `link` on many responses). */
+  product_link?: string;
   thumbnail?: string;
+  serpapi_thumbnail?: string;
   extracted_price?: number;
   price?: string;
+  immersive_product_page_token?: string;
 };
 
 type ShoppingResponse = {
@@ -43,22 +48,24 @@ function hostFromUrl(url: string): string {
 }
 
 function mapShoppingResult(item: ShoppingResult, confidence: number): ProductMatch | null {
-  const url = item.link?.trim();
+  const url = (item.link ?? item.product_link)?.trim();
   const name = item.title?.trim();
   if (!url || !name) return null;
 
   const host = hostFromUrl(url);
   const retailer = item.source?.trim() || host.split(".")[0] || "Shop";
   const priceCents = parsePriceCents(item);
+  const brand = parseBrandFromTitle(name) || retailer;
 
   return {
     name,
-    brand: retailer,
+    brand,
     priceCents: priceCents > 0 ? priceCents : 0,
     currency: "USD",
     retailer,
     url,
-    thumbnailUrl: item.thumbnail ?? null,
+    thumbnailUrl: item.thumbnail ?? item.serpapi_thumbnail ?? null,
+    immersiveProductPageToken: item.immersive_product_page_token,
     confidence,
   };
 }

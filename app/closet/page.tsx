@@ -1,19 +1,17 @@
 import Link from "next/link";
-import type { Prisma } from "@prisma/client";
 import { requireUser } from "@/lib/auth";
-import {
-  getCategoriesListFromPrefs,
-  isNoneCategoryStored,
-  NONE_CATEGORY,
-  normalizeCategoryName,
-} from "@/lib/categories";
+import { getCategoriesListFromPrefs, isNoneCategoryStored, NONE_CATEGORY, normalizeCategoryName } from "@/lib/categories";
+import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseColors, parseStringArray, parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs, normalizeStyleTagName } from "@/lib/preferences";
-import { thumbnailUrl } from "@/lib/uploads";
 import { CreditMark } from "@/components/credit-mark";
-import { ClosetFilters, type ActiveFilters, type FilterOptions } from "@/components/closet-filters";
-import { readClosetSort, sortWardrobeItems } from "@/lib/closet-sort";
+import { ClosetFilteredView, type ClosetPageItem } from "@/components/closet-filtered-view";
+import type { FilterOptions } from "@/components/closet-filters";
+import {
+  FILTER_CATEGORY_NONE,
+  readFiltersFromSearchParams,
+} from "@/lib/closet-item-filter";
 
 type SearchParams = {
   q?: string;
@@ -25,60 +23,6 @@ type SearchParams = {
   wishlist?: string;
   sort?: string;
 };
-
-function readFilters(params: SearchParams): ActiveFilters {
-  return {
-    q: (params.q ?? "").trim(),
-    category: params.category ?? "",
-    brand: params.brand ?? "",
-    color: params.color ?? "",
-    season: params.season ?? "",
-    tag: params.tag ?? "",
-    wishlist: params.wishlist === "1",
-    sort: readClosetSort(params.sort),
-  };
-}
-
-// Escape the dynamic portion so a brand called `foo"bar` doesn't break the
-// JSON-fragment match. JSON strings never contain an unescaped double quote.
-const escapeForJsonFragment = (s: string) => s.replace(/"/g, "");
-
-/** URL param for “uncategorized” filter (empty string in DB). */
-const FILTER_CATEGORY_NONE = "__none__";
-
-function buildWhere(userId: string, f: ActiveFilters): Prisma.WardrobeItemWhereInput {
-  const where: Prisma.WardrobeItemWhereInput = { userId };
-  if (f.category === FILTER_CATEGORY_NONE) {
-    where.category = { in: ["", NONE_CATEGORY] };
-  } else if (f.category) {
-    where.category = f.category;
-  }
-  if (f.brand) where.brand = f.brand;
-  if (f.wishlist) where.isWishlist = true;
-  if (f.q) {
-    where.OR = [
-      { name: { contains: f.q } },
-      { brand: { contains: f.q } },
-      { styleTags: { contains: f.q } },
-      { notes: { contains: f.q } },
-    ];
-  }
-  if (f.color) {
-    // colors is JSON: [{"hex":"#...","name":"sage"}, ...]
-    where.colors = { contains: `"name":"${escapeForJsonFragment(f.color)}"` };
-  }
-  if (f.season) {
-    // season is JSON: ["spring","summer",...]
-    where.season = { contains: `"${escapeForJsonFragment(f.season)}"` };
-  }
-  return where;
-}
-
-function itemHasStyleTag(styleTagsJson: string, tag: string): boolean {
-  const want = normalizeStyleTagName(tag);
-  if (!want) return true;
-  return parseStringArray(styleTagsJson).some((t) => normalizeStyleTagName(t) === want);
-}
 
 function readPrimaryGhostMeta(
   ghostViewsRaw: string | null,
@@ -104,43 +48,35 @@ function readPrimaryGhostMeta(
 
 export default async function ClosetPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser();
-  const filters = readFilters(searchParams);
-  const closetFiltersKey = [
-    filters.q,
-    filters.category,
-    filters.brand,
-    filters.color,
-    filters.season,
-    filters.tag,
-    filters.wishlist ? "1" : "",
-    filters.sort,
-  ].join("|");
+  const filters = readFiltersFromSearchParams(searchParams);
 
-  const filteredWhere = buildWhere(user.id, filters);
-  const tagFilter = filters.tag.trim();
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { credits: true, stylePrefs: true },
+  });
+  const credits = dbUser?.credits ?? 0;
+  const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  const preferredCategories = getCategoriesListFromPrefs(prefs);
+  const preferredColors = getColorsListFromPrefs(prefs);
+  const preferredTags = getStyleTagsListFromPrefs(prefs);
+  const sortOrders = {
+    categoryOrder: preferredCategories,
+    colorOrder: preferredColors.map((c) => c.name),
+    closetGroupOrders: prefs.closetGroupOrders,
+  };
 
-  const [items, allForFacets, totalCount, dbUser] = await Promise.all([
+  const [allItems, allForFacets, totalCount] = await Promise.all([
     prisma.wardrobeItem.findMany({
-      where: filteredWhere,
+      where: { userId: user.id },
       orderBy: { createdAt: "desc" },
-    }).then((rows) => {
-      const matched = tagFilter
-        ? rows.filter((r) => itemHasStyleTag(r.styleTags, tagFilter))
-        : rows;
-      return sortWardrobeItems(matched, filters.sort);
     }),
     prisma.wardrobeItem.findMany({
       where: { userId: user.id },
       select: { category: true, brand: true, colors: true, styleTags: true },
     }),
     prisma.wardrobeItem.count({ where: { userId: user.id } }),
-    prisma.user.findUnique({ where: { id: user.id }, select: { credits: true, stylePrefs: true } }),
   ]);
-  const credits = dbUser?.credits ?? 0;
 
-  const prefs = parseStylePrefs(dbUser?.stylePrefs);
-  const preferredCategories = getCategoriesListFromPrefs(prefs);
-  const preferredTags = getStyleTagsListFromPrefs(prefs);
   const hasUncategorized = allForFacets.some((i) => isNoneCategoryStored(i.category));
   const usedNonEmpty = [
     ...new Set(
@@ -190,45 +126,85 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
   }
   tagFilterOptions.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
+  const usedColorNames = [
+    ...new Set(allForFacets.flatMap((i) => parseColors(i.colors).map((c) => c.name))),
+  ];
+  const colorFilterOptions: string[] = [];
+  const seenColors = new Set<string>();
+  function pushColorFilter(name: string) {
+    const key = name.trim().toLowerCase();
+    if (!key || seenColors.has(key)) return;
+    seenColors.add(key);
+    colorFilterOptions.push(name.trim());
+  }
+  for (const c of preferredColors) {
+    if (usedColorNames.some((u) => u.trim().toLowerCase() === c.name.trim().toLowerCase())) {
+      pushColorFilter(c.name);
+    }
+  }
+  for (const u of usedColorNames) {
+    if (!preferredColors.some((p) => p.name.trim().toLowerCase() === u.trim().toLowerCase())) {
+      pushColorFilter(u);
+    }
+  }
+
   const tagParamNorm = normalizeStyleTagName(filters.tag);
   const resolvedTag =
     filters.tag && tagParamNorm
       ? (tagFilterOptions.find((t) => normalizeStyleTagName(t) === tagParamNorm) ?? filters.tag)
       : "";
 
-  const filtersForUi: ActiveFilters = { ...filters, tag: resolvedTag };
-  const totalValueCents = items.reduce((sum, i) => sum + (i.priceCents ?? 0), 0);
-  const totalValueFormatted = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(totalValueCents / 100);
+  const filtersForUi = { ...filters, tag: resolvedTag };
 
   const options: FilterOptions = {
     categories: categoryFilterOptions,
     brands: [...new Set(allForFacets.map((i) => i.brand).filter((b): b is string => !!b))].sort(
       (a, b) => a.localeCompare(b),
     ),
-    colors: [
-      ...new Set(allForFacets.flatMap((i) => parseColors(i.colors).map((c) => c.name))),
-    ].sort((a, b) => a.localeCompare(b)),
+    colors: colorFilterOptions,
     tags: tagFilterOptions,
   };
 
+  const pageItems: ClosetPageItem[] = allItems.map((item) => {
+    const bestImage = item.ghostImagePath ?? item.originalImagePath;
+    const isGhost = !!item.ghostImagePath;
+    const primaryMeta = readPrimaryGhostMeta(item.ghostViews, item.ghostImagePath);
+    const tileMeta = isGhost
+      ? primaryMeta
+      : { mirror: item.originalMirror ?? false, thumbZoom: item.originalThumbZoom ?? 1 };
+    return {
+      id: item.id,
+      name: item.name,
+      brand: item.brand,
+      category: item.category,
+      subcategory: item.subcategory,
+      pattern: item.pattern,
+      material: item.material,
+      styleTags: item.styleTags,
+      notes: item.notes,
+      season: item.season,
+      colors: item.colors,
+      isWishlist: item.isWishlist,
+      createdAt: item.createdAt,
+      imagePath: bestImage,
+      thumbZoom: tileMeta.thumbZoom,
+      mirror: tileMeta.mirror,
+      priceCents: item.priceCents,
+    };
+  });
+
   return (
     <main className="max-w-[1800px] mx-auto px-6 py-12">
-      <header className="mb-10 flex items-start justify-between gap-6 flex-wrap">
-        <div>
-          <p className="font-serif text-5xl md:text-6xl tracking-tight leading-none">
-            {totalValueFormatted}
-          </p>
-          <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-ink-muted">
-            Wardrobe value
-          </p>
-          <h1 className="sr-only">Closet</h1>
-        </div>
-        <div className="flex flex-col items-end gap-2 pt-2">
+      <header className="mb-2 flex items-start justify-end gap-6 flex-wrap">
+        <div className="flex flex-col items-end gap-2 pt-2 ml-auto">
           <nav className="flex items-center gap-3 text-sm">
+            <Link
+              href="/closet/scan"
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
+              title="Scan camera roll for garments"
+            >
+              Scan roll
+            </Link>
             <Link
               href="/closet/try-on"
               className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
@@ -262,7 +238,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
               className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
               title="Pack for a trip"
             >
-              SmartPakker
+              Trip Packing Assistant
             </Link>
             <Link
               href="/closet/sell"
@@ -289,69 +265,20 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
               Settings
             </Link>
           </nav>
-          <span className="text-xs text-ink-muted">
-            {items.length === totalCount
-              ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"} in closet`
-              : `${items.length} of ${totalCount} shown`}
-          </span>
         </div>
+        <h1 className="sr-only">Closet</h1>
       </header>
-
-      {totalCount > 0 && (
-        <ClosetFilters key={closetFiltersKey} options={options} initial={filtersForUi} />
-      )}
 
       {totalCount === 0 ? (
         <EmptyCloset />
-      ) : items.length === 0 ? (
-        <NoResults />
       ) : (
-        <ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4">
-          {items.map((item) => {
-            // Best available variant: ghost > original.
-            const bestImage = item.ghostImagePath ?? item.originalImagePath;
-            const isGhost = !!item.ghostImagePath;
-            const primaryMeta = readPrimaryGhostMeta(item.ghostViews, item.ghostImagePath);
-            const tileMeta = isGhost
-              ? primaryMeta
-              : { mirror: item.originalMirror ?? false, thumbZoom: item.originalThumbZoom ?? 1 };
-            return (
-              <li key={item.id}>
-                <Link
-                  href={`/closet/${item.id}`}
-                  className="block rounded-2xl bg-white shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={thumbnailUrl(bestImage)}
-                    alt={item.name}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                    style={{
-                      transform: `scale(${tileMeta.thumbZoom}) ${
-                        tileMeta.mirror ? "scaleX(-1)" : ""
-                      }`,
-                    }}
-                  />
-                  {item.isWishlist && (
-                    <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-1">
-                      <span className="bg-white/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
-                        Wishlist
-                      </span>
-                    </div>
-                  )}
-                  <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-ink/70 to-transparent text-white opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition">
-                    <div className="text-xs font-medium truncate">{item.name}</div>
-                    <div className="text-[10px] text-white/80 truncate">{item.brand ?? "—"}</div>
-                    <div className="text-[10px] text-white/70 truncate">
-                      {isNoneCategoryStored(item.category) ? NONE_CATEGORY : item.category}
-                    </div>
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <ClosetFilteredView
+          allItems={pageItems}
+          options={options}
+          initialFilters={filtersForUi}
+          sortOrders={sortOrders}
+          totalCount={totalCount}
+        />
       )}
 
       <Link
@@ -376,15 +303,6 @@ function EmptyCloset() {
       >
         Upload your first piece
       </Link>
-    </div>
-  );
-}
-
-function NoResults() {
-  return (
-    <div className="rounded-2xl border border-ink/10 bg-paper-warm p-10 text-center">
-      <p className="font-serif text-xl">Nothing matches those filters.</p>
-      <p className="text-ink-muted text-sm mt-1">Try loosening a few.</p>
     </div>
   );
 }

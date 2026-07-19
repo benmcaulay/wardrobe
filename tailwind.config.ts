@@ -1,6 +1,7 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  darkMode: "class",
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     extend: {
@@ -10,17 +11,17 @@ const config: Config = {
       },
       colors: {
         ink: {
-          DEFAULT: "#1a1613",
-          soft: "#2b2521",
-          muted: "#6b625c",
+          DEFAULT: "var(--ink)",
+          soft: "var(--ink-soft)",
+          muted: "var(--ink-muted)",
         },
         paper: {
-          DEFAULT: "#faf8f5",
-          warm: "#f3ede4",
+          DEFAULT: "var(--paper)",
+          warm: "var(--paper-warm)",
         },
         accent: {
-          DEFAULT: "#7a8c6f",
-          soft: "#c5cfbc",
+          DEFAULT: "var(--accent)",
+          soft: "var(--accent-soft)",
         },
       },
       boxShadow: {

@@ -4,17 +4,60 @@
 
 :root {
   color-scheme: light;
+
+  --ink: #1a1613;
+  --ink-soft: #2b2521;
+  --ink-muted: #6b625c;
+  --paper: #faf8f5;
+  --paper-warm: #f3ede4;
+  --accent: #7a8c6f;
+  --accent-soft: #c5cfbc;
+
+  /* Landing hero fallback before the canvas paints (landing toggles locally). */
+  --hero-bg: #eef1f8;
+}
+
+/* Unused — app stays in day mode. Kept so landing CSS vars stay documented. */
+.dark {
+  color-scheme: dark;
+
+  --ink: #e9e7e3;
+  --ink-soft: #cdcac4;
+  --ink-muted: #8c877f;
+  --paper: #101219;
+  --paper-warm: #191c26;
+  --accent: #93a487;
+  --accent-soft: #33402f;
+
+  --hero-bg: #080b18;
 }
 
 html,
 body {
-  background-color: theme("colors.paper.DEFAULT");
-  color: theme("colors.ink.DEFAULT");
+  background-color: var(--paper);
+  color: var(--ink);
 }
 
 body {
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
+}
+
+@keyframes tile-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+.closet-tile-shake {
+  animation: tile-shake 0.35s ease-in-out;
 }
 
 @keyframes shimmer {

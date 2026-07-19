@@ -12,6 +12,7 @@ import {
   UPLOADS_ROOT,
   MAX_UPLOAD_BYTES,
 } from "../lib/uploads";
+import { isGhostImagePath } from "../lib/image-paths";
 
 const TEST_USER = "__test_user__";
 
@@ -46,6 +47,18 @@ describe("imageUrl / thumbnailUrl", () => {
 
   it("encodes path segments", () => {
     expect(imageUrl("user id/has space.jpg")).toBe("/api/images/user%20id/has%20space.jpg");
+  });
+});
+
+describe("isGhostImagePath", () => {
+  it("matches ghost mannequin filenames", () => {
+    expect(isGhostImagePath("user/ghost-abc123.jpg")).toBe(true);
+    expect(isGhostImagePath("ghost-abc123.jpeg")).toBe(true);
+  });
+
+  it("rejects originals and thumbnails", () => {
+    expect(isGhostImagePath("user/seed-1.jpg")).toBe(false);
+    expect(isGhostImagePath("user/ghost-abc123-thumb.jpg")).toBe(false);
   });
 });
 

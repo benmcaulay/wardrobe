@@ -1,9 +1,9 @@
 import type { Color } from "./json";
 import type { Season } from "./types";
 import { NONE_CATEGORY } from "./categories";
-import { productMatchToPrefill } from "./product-match";
+import { productMatchToPrefill, resolveProductMetadata } from "./product-match";
 import { reverseImageSearch, type ProductMatch } from "./services/reverseImageSearch";
-import { scrapeProduct, type ProductMetadata } from "./services/productScraper";
+import type { ProductMetadata } from "./services/productScraper";
 import { webMatchAutofillEnabled } from "./web-match-autofill";
 
 export type PrefillResult = {
@@ -65,7 +65,7 @@ export async function runPrefill(originalImagePath: string): Promise<PrefillBund
 
   const matches = await reverseImageSearch(originalImagePath);
   const topMatch = matches[0] ?? null;
-  const scraped = topMatch ? await scrapeProduct(topMatch.url) : null;
+  const scraped: ProductMetadata | null = topMatch ? await resolveProductMetadata(topMatch) : null;
 
   const prefill: PrefillResult = topMatch
     ? { ...productMatchToPrefill(topMatch, scraped), category: NONE_CATEGORY }

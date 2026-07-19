@@ -2,15 +2,25 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { isNoneCategoryStored, NONE_CATEGORY } from "@/lib/categories";
+import {
+  MultiSelectFilter,
+  type ActiveFilters,
+} from "@/components/closet-filters";
+import {
+  FILTER_CATEGORY_NONE,
+  filterClosetItems,
+  type ClosetFilterableItem,
+} from "@/lib/closet-item-filter";
+import { encode, type Color } from "@/lib/json";
 import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
+import { itemTileImageTransform } from "@/lib/item-tile-meta";
+import { OUTFIT_PIECE_IMG_CLASS, resolveOutfitPieceDisplayUrl } from "@/lib/outfit-piece-image";
+import { swapLayerOrder } from "@/lib/outfit-layer";
+import { SEASONS } from "@/lib/types";
 import { deleteOutfitLayout, saveOutfitLayout } from "./actions";
+import type { RandomOutfitItem } from "./random-outfit-builder";
 
-export type OutfitClosetItem = {
-  id: string;
-  name: string;
-  category: string;
-  imagePath: string;
-};
+export type OutfitClosetItem = RandomOutfitItem;
 
 type PlacedPiece = {
   id: string;
@@ -30,21 +40,49 @@ type SavedOutfit = {
 
 type Props = {
   items: OutfitClosetItem[];
+  colorOptions: Color[];
   initialOutfits: SavedOutfit[];
 };
 export type { SavedOutfit };
 const BASE_PIECE_SIZE = 180;
 const FRAME_WIDTH = 560;
-/** Filter items in the None / uncategorized bucket (legacy empty string allowed). */
-const FILTER_CATEGORY_NONE = "__none__";
 const FRAME_MIN_HEIGHT = 520;
-const FRAME_MAX_HEIGHT = 820;
+const FRAME_MAX_HEIGHT = 1200;
 
-export function OutfitBuilder({ items, initialOutfits }: Props) {
+const EMPTY_FILTERS: ActiveFilters = {
+  q: "",
+  categories: [],
+  brand: "",
+  colors: [],
+  season: "",
+  tag: "",
+  wishlist: false,
+  sort: "newest",
+};
+
+function toFilterable(item: OutfitClosetItem): ClosetFilterableItem {
+  return {
+    id: item.id,
+    name: item.name,
+    brand: item.brand,
+    category: item.category,
+    subcategory: item.subcategory,
+    pattern: item.pattern,
+    material: item.material,
+    styleTags: item.styleTags,
+    notes: item.notes,
+    season: item.season,
+    colors: encode(item.colors),
+    isWishlist: false,
+    createdAt: new Date(0),
+  };
+}
+
+export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
   const [pieces, setPieces] = useState<PlacedPiece[]>([]);
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
-  const [frameHeight, setFrameHeight] = useState(640);
-  const [category, setCategory] = useState("");
+  const [frameHeight, setFrameHeight] = useState(1000);
+  const [filters, setFilters] = useState<ActiveFilters>(EMPTY_FILTERS);
   const [outfitName, setOutfitName] = useState("");
   const [savedOutfits, setSavedOutfits] = useState<SavedOutfit[]>(initialOutfits);
   const [dragState, setDragState] = useState<{ pieceId: string; dx: number; dy: number } | null>(null);
@@ -65,15 +103,14 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
     return map;
   }, [items]);
 
-  const filteredItems = useMemo(() => {
-    if (!category) return items;
-    if (category === FILTER_CATEGORY_NONE) {
-      return items.filter((item) => isNoneCategoryStored(item.category));
-    }
-    return items.filter((item) => item.category === category);
-  }, [items, category]);
+  const filterableItems = useMemo(() => items.map(toFilterable), [items]);
 
-  const { hasUncategorized, namedCategories } = useMemo(() => {
+  const filteredItems = useMemo(() => {
+    const ids = new Set(filterClosetItems(filterableItems, filters).map((i) => i.id));
+    return items.filter((item) => ids.has(item.id));
+  }, [items, filterableItems, filters]);
+
+  const { hasUncategorized, namedCategories, colorNames, brands, tags } = useMemo(() => {
     const hasUncategorized = items.some((item) => isNoneCategoryStored(item.category));
     const namedCategories = [
       ...new Set(
@@ -83,8 +120,48 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
           .filter((c) => !isNoneCategoryStored(c)),
       ),
     ].sort((a, b) => a.localeCompare(b));
-    return { hasUncategorized, namedCategories };
-  }, [items]);
+    const fromItems = [
+      ...new Set(items.flatMap((i) => i.colors.map((c) => c.name.trim()).filter(Boolean))),
+    ];
+    const fromPrefs = colorOptions.map((c) => c.name.trim()).filter(Boolean);
+    const colorNames = [...new Set([...fromPrefs, ...fromItems])].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    const brands = [
+      ...new Set(items.map((i) => i.brand?.trim()).filter((b): b is string => !!b)),
+    ].sort((a, b) => a.localeCompare(b));
+    const tags = [
+      ...new Set(
+        items.flatMap((i) => {
+          try {
+            const parsed = JSON.parse(i.styleTags) as unknown;
+            return Array.isArray(parsed)
+              ? parsed.map((t) => String(t).trim()).filter(Boolean)
+              : [];
+          } catch {
+            return [];
+          }
+        }),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+    return { hasUncategorized, namedCategories, colorNames, brands, tags };
+  }, [items, colorOptions]);
+
+  const categoryOptions = useMemo(() => {
+    const opts = namedCategories.map((c) => ({ value: c, label: c }));
+    if (hasUncategorized) {
+      opts.unshift({ value: FILTER_CATEGORY_NONE, label: NONE_CATEGORY });
+    }
+    return opts;
+  }, [namedCategories, hasUncategorized]);
+
+  const activeFilterCount =
+    (filters.q.trim() ? 1 : 0) +
+    (filters.categories.length > 0 ? 1 : 0) +
+    (filters.brand ? 1 : 0) +
+    (filters.colors.length > 0 ? 1 : 0) +
+    (filters.season ? 1 : 0) +
+    (filters.tag ? 1 : 0);
 
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? null;
 
@@ -94,9 +171,8 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
 
   async function getProcessedUrl(item: OutfitClosetItem): Promise<string> {
     if (processedImageUrls[item.id]) return processedImageUrls[item.id]!;
-    const src = imageUrl(item.imagePath);
-    const out = await removeWhiteBackground(src);
-    urlRegistryRef.current.push(out);
+    const out = await resolveOutfitPieceDisplayUrl(item.imagePath);
+    if (out.startsWith("blob:")) urlRegistryRef.current.push(out);
     setProcessedImageUrls((prev) => ({ ...prev, [item.id]: out }));
     return out;
   }
@@ -123,19 +199,7 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
 
   function moveLayer(dir: -1 | 1) {
     if (!selected) return;
-    setPieces((prev) => {
-      const sorted = [...prev].sort((a, b) => a.z - b.z);
-      const idx = sorted.findIndex((p) => p.id === selected.id);
-      const nextIdx = idx + dir;
-      if (idx < 0 || nextIdx < 0 || nextIdx >= sorted.length) return prev;
-      const a = sorted[idx]!;
-      const b = sorted[nextIdx]!;
-      return prev.map((p) => {
-        if (p.id === a.id) return { ...p, z: b.z };
-        if (p.id === b.id) return { ...p, z: a.z };
-        return p;
-      });
-    });
+    setPieces((prev) => swapLayerOrder(prev, selected.id, dir) ?? prev);
   }
 
   function removeSelected() {
@@ -231,9 +295,15 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
     setDragState(null);
   }
 
+  function handleCanvasBackgroundPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest("[data-outfit-piece]")) return;
+    setSelectedPieceId(null);
+    (document.activeElement as HTMLElement | null)?.blur();
+  }
+
   return (
-    <div className="grid lg:grid-cols-[minmax(0,1fr)_280px] gap-8 items-start">
-      <section>
+    <div className="flex flex-col lg:flex-row flex-wrap gap-8 items-start">
+      <section className="w-[560px] max-w-full shrink-0">
         {savedOutfits.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {savedOutfits.map((outfit) => (
@@ -274,6 +344,7 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
         <div
           className="relative surface-canvas rounded-2xl border border-ink/10 overflow-hidden shadow-tile"
           style={{ width: FRAME_WIDTH, height: frameHeight }}
+          onPointerDown={handleCanvasBackgroundPointerDown}
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
           onPointerLeave={handleCanvasPointerUp}
@@ -296,14 +367,27 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
                 <button
                   key={piece.id}
                   type="button"
+                  data-outfit-piece
                   onPointerDown={(e) => handlePiecePointerDown(e, piece)}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 ${
-                    isSelected ? "ring-1 ring-ink/30 rounded-xl" : ""
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl outline-none focus:outline-none ${
+                    isSelected ? "ring-1 ring-ink/30" : ""
                   }`}
                   style={{ left: piece.x, top: piece.y, zIndex: piece.z, width: size, height: size }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt={item.name} className="w-full h-full object-contain select-none" draggable={false} />
+                  <img
+                    key={item.id}
+                    src={src}
+                    alt={item.name}
+                    className={OUTFIT_PIECE_IMG_CLASS}
+                    style={{
+                      transform: itemTileImageTransform({
+                        thumbZoom: item.thumbZoom,
+                        mirror: item.mirror,
+                      }),
+                    }}
+                    draggable={false}
+                  />
                 </button>
               );
             })}
@@ -313,7 +397,7 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
         </p>
       </section>
 
-      <aside className="space-y-3">
+      <aside className="w-full max-w-[280px] space-y-3 shrink-0">
         <div className="rounded-2xl border border-ink/10 bg-white p-3 space-y-2">
           <div className="text-[10px] uppercase tracking-wide text-ink-muted">Outfit</div>
           <div className="flex gap-2">
@@ -348,6 +432,9 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
                 onChange={(e) => updateSelectedScale(Number(e.target.value))}
                 className="w-full accent-ink"
               />
+              <label className="block text-[10px] uppercase tracking-wide text-ink-muted pt-1">
+                Layer
+              </label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -391,44 +478,174 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
               Clear canvas
             </button>
           </div>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full rounded-full border border-ink/10 px-3 py-1.5 text-xs bg-white"
-          >
-            <option value="">All categories</option>
-            {hasUncategorized && (
-              <option value={FILTER_CATEGORY_NONE}>{NONE_CATEGORY}</option>
+
+          <div className="relative">
+            <input
+              type="text"
+              inputMode="search"
+              enterKeyHint="search"
+              value={filters.q}
+              onChange={(e) => setFilters((prev) => ({ ...prev, q: e.target.value }))}
+              placeholder="Search name, brand, color, tags…"
+              aria-label="Search closet for outfit pieces"
+              className="w-full rounded-full border border-ink/10 bg-white px-3 py-1.5 pr-8 text-xs focus:outline-none focus:border-ink/40"
+            />
+            {filters.q && (
+              <button
+                type="button"
+                onClick={() => setFilters((prev) => ({ ...prev, q: "" }))}
+                aria-label="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-muted hover:text-ink text-sm leading-none"
+              >
+                ×
+              </button>
             )}
-            {namedCategories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            <MultiSelectFilter
+              label="Category"
+              selected={filters.categories}
+              options={categoryOptions}
+              onChange={(categories) => setFilters((prev) => ({ ...prev, categories }))}
+              disabled={categoryOptions.length === 0}
+            />
+            <MultiSelectFilter
+              label="Color"
+              selected={filters.colors}
+              options={colorNames.map((c) => ({ value: c, label: c }))}
+              onChange={(colors) => setFilters((prev) => ({ ...prev, colors }))}
+              disabled={colorNames.length === 0}
+              formatLabel={(s) => s.charAt(0).toUpperCase() + s.slice(1)}
+            />
+            <label className="relative">
+              <span className="sr-only">Brand</span>
+              <select
+                value={filters.brand}
+                onChange={(e) => setFilters((prev) => ({ ...prev, brand: e.target.value }))}
+                disabled={brands.length === 0}
+                className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
+                  filters.brand
+                    ? "bg-ink text-paper border-ink"
+                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                <option value="">Brand</option>
+                {brands.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+              <span
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
+                aria-hidden
+              >
+                ▾
+              </span>
+            </label>
+            <label className="relative">
+              <span className="sr-only">Season</span>
+              <select
+                value={filters.season}
+                onChange={(e) => setFilters((prev) => ({ ...prev, season: e.target.value }))}
+                className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
+                  filters.season
+                    ? "bg-ink text-paper border-ink"
+                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                }`}
+              >
+                <option value="">Season</option>
+                {SEASONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
+                aria-hidden
+              >
+                ▾
+              </span>
+            </label>
+            <label className="relative">
+              <span className="sr-only">Tag</span>
+              <select
+                value={filters.tag}
+                onChange={(e) => setFilters((prev) => ({ ...prev, tag: e.target.value }))}
+                disabled={tags.length === 0}
+                className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
+                  filters.tag
+                    ? "bg-ink text-paper border-ink"
+                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                <option value="">Tag</option>
+                {tags.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <span
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
+                aria-hidden
+              >
+                ▾
+              </span>
+            </label>
+            {activeFilterCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilters(EMPTY_FILTERS)}
+                className="text-[10px] text-ink-muted hover:text-ink underline underline-offset-2 px-1"
+              >
+                Clear ({activeFilterCount})
+              </button>
+            )}
+          </div>
+
+          <p className="text-[10px] text-ink-muted">
+            {filteredItems.length} of {items.length} pieces
+          </p>
+
           <ul className="space-y-2 max-h-[480px] overflow-auto pr-1">
-            {filteredItems.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => void addPiece(item)}
-                  className="w-full rounded-xl bg-white border border-ink/10 hover:border-ink/25 p-2 flex items-center gap-2 text-left"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={thumbnailUrl(item.imagePath)}
-                    alt=""
-                    className="w-10 h-10 rounded object-cover bg-paper-warm flex-shrink-0"
-                  />
-                  <span className="min-w-0">
-                    <span className="text-xs block truncate">{item.name}</span>
-                    <span className="text-[10px] text-ink-muted">
-                      {isNoneCategoryStored(item.category) ? NONE_CATEGORY : item.category}
+            {filteredItems.length === 0 ? (
+              <li className="text-xs text-ink-muted px-1 py-2">No pieces match these filters.</li>
+            ) : (
+              filteredItems.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => void addPiece(item)}
+                    className="w-full rounded-xl bg-white border border-ink/10 hover:border-ink/25 p-2 flex items-center gap-2 text-left"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={thumbnailUrl(item.imagePath)}
+                      alt=""
+                      className="w-10 h-10 rounded object-cover bg-paper-warm flex-shrink-0 pointer-events-none"
+                      style={{
+                        transform: itemTileImageTransform({
+                          thumbZoom: item.thumbZoom,
+                          mirror: item.mirror,
+                        }),
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="text-xs block truncate">{item.name}</span>
+                      <span className="text-[10px] text-ink-muted">
+                        {isNoneCategoryStored(item.category) ? NONE_CATEGORY : item.category}
+                        {item.colors.length > 0
+                          ? ` · ${item.colors.map((c) => c.name).join(", ")}`
+                          : ""}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              ))
+            )}
           </ul>
         </div>
       </aside>
@@ -438,33 +655,4 @@ export function OutfitBuilder({ items, initialOutfits }: Props) {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
-}
-
-async function removeWhiteBackground(src: string): Promise<string> {
-  const img = await loadImage(src);
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth || img.width;
-  canvas.height = img.naturalHeight || img.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return src;
-  ctx.drawImage(img, 0, 0);
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const px = data.data;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i]! >= 240 && px[i + 1]! >= 240 && px[i + 2]! >= 240) px[i + 3] = 0;
-  }
-  ctx.putImageData(data, 0, 0);
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) return src;
-  return URL.createObjectURL(blob);
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
 }

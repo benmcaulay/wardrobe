@@ -1,0 +1,134 @@
+import { isNoneCategoryStored, NONE_CATEGORY } from "@/lib/categories";
+import type { ActiveFilters } from "@/components/closet-filters";
+import { parseMultiFilterParam } from "@/lib/closet-filter-params";
+import { parseColors, parseStringArray } from "@/lib/json";
+import { normalizeStyleTagName } from "@/lib/preferences";
+import { readClosetSort, sortWardrobeItems, type SortOrders } from "@/lib/closet-sort";
+
+/** URL param for “uncategorized” filter (empty string in DB). */
+export const FILTER_CATEGORY_NONE = "__none__";
+
+export type ClosetFilterableItem = {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: string;
+  subcategory: string | null;
+  pattern: string | null;
+  material: string | null;
+  styleTags: string;
+  notes: string | null;
+  season: string;
+  colors: string;
+  isWishlist: boolean;
+  createdAt: Date;
+};
+
+export function readFiltersFromSearchParams(params: {
+  q?: string;
+  category?: string;
+  brand?: string;
+  color?: string;
+  season?: string;
+  tag?: string;
+  wishlist?: string;
+  sort?: string;
+}): ActiveFilters {
+  return {
+    q: (params.q ?? "").trim(),
+    categories: parseMultiFilterParam(params.category),
+    brand: params.brand ?? "",
+    colors: parseMultiFilterParam(params.color),
+    season: params.season ?? "",
+    tag: params.tag ?? "",
+    wishlist: params.wishlist === "1",
+    sort: readClosetSort(params.sort),
+  };
+}
+
+export function readFiltersFromQueryString(qs: string): ActiveFilters {
+  const p = new URLSearchParams(qs);
+  return readFiltersFromSearchParams({
+    q: p.get("q") ?? undefined,
+    category: p.get("category") ?? undefined,
+    brand: p.get("brand") ?? undefined,
+    color: p.get("color") ?? undefined,
+    season: p.get("season") ?? undefined,
+    tag: p.get("tag") ?? undefined,
+    wishlist: p.get("wishlist") ?? undefined,
+    sort: p.get("sort") ?? undefined,
+  });
+}
+
+function itemHasStyleTag(styleTagsJson: string, tag: string): boolean {
+  const want = normalizeStyleTagName(tag);
+  if (!want) return true;
+  return parseStringArray(styleTagsJson).some((t) => normalizeStyleTagName(t) === want);
+}
+
+function itemMatchesTextQuery(item: ClosetFilterableItem, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [
+    item.name,
+    item.brand ?? "",
+    item.category,
+    item.subcategory ?? "",
+    item.pattern ?? "",
+    item.material ?? "",
+    item.notes ?? "",
+    ...parseStringArray(item.styleTags),
+    ...parseStringArray(item.season),
+    ...parseColors(item.colors).map((c) => c.name),
+  ]
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+function itemMatchesCategoryFilter(item: ClosetFilterableItem, categories: string[]): boolean {
+  if (categories.length === 0) return true;
+  const cat = item.category.trim();
+  return categories.some((c) => {
+    if (c === FILTER_CATEGORY_NONE) return isNoneCategoryStored(cat);
+    return c === cat;
+  });
+}
+
+function itemMatchesColorFilter(item: ClosetFilterableItem, colors: string[]): boolean {
+  if (colors.length === 0) return true;
+  const names = parseColors(item.colors).map((c) => c.name.trim().toLowerCase());
+  return colors.some((c) => names.includes(c.trim().toLowerCase()));
+}
+
+function itemMatchesSeasonFilter(item: ClosetFilterableItem, season: string): boolean {
+  if (!season) return true;
+  const want = season.trim().toLowerCase();
+  return parseStringArray(item.season).some((s) => s.trim().toLowerCase() === want);
+}
+
+/** Client-side mirror of server closet filters (instant, no navigation). */
+export function filterClosetItems(
+  items: ClosetFilterableItem[],
+  filters: ActiveFilters,
+): ClosetFilterableItem[] {
+  return items.filter((item) => {
+    if (filters.wishlist && !item.isWishlist) return false;
+    if (filters.brand && item.brand !== filters.brand) return false;
+    if (!itemMatchesCategoryFilter(item, filters.categories)) return false;
+    if (!itemMatchesColorFilter(item, filters.colors)) return false;
+    if (!itemMatchesSeasonFilter(item, filters.season)) return false;
+    if (filters.tag && !itemHasStyleTag(item.styleTags, filters.tag)) return false;
+    if (!itemMatchesTextQuery(item, filters.q)) return false;
+    return true;
+  });
+}
+
+export function filterSortClosetItems(
+  items: ClosetFilterableItem[],
+  filters: ActiveFilters,
+  sortOrders: SortOrders,
+): ClosetFilterableItem[] {
+  const filtered = filterClosetItems(items, filters);
+  return sortWardrobeItems(filtered, filters.sort, sortOrders);
+}
