@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ClosetFilters,
   type ActiveFilters,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/closet-item-filter";
 import { NONE_CATEGORY } from "@/lib/categories";
 import type { SortOrders } from "@/lib/closet-sort";
+import { fadeUp, springSoft } from "@/lib/ui-motion";
 
 export type ClosetPageItem = ClosetFilterableItem &
   Omit<ClosetGridItem, "createdAt" | "name" | "brand" | "category" | "colors" | "season" | "isWishlist">;
@@ -83,13 +85,26 @@ export function ClosetFilteredView({
     }).format(cents / 100);
   }, [filteredGridItems]);
 
+  const reduce = useReducedMotion();
+
   return (
     <>
-      <div className="mb-10 flex items-start justify-between gap-6 flex-wrap">
+      <motion.div
+        className="mb-10 flex items-start justify-between gap-6 flex-wrap"
+        variants={fadeUp}
+        initial={reduce ? false : "hidden"}
+        animate="show"
+      >
         <div>
-          <p className="font-serif text-5xl md:text-6xl tracking-tight leading-none">
+          <motion.p
+            key={filteredValueFormatted}
+            className="font-serif text-5xl md:text-6xl tracking-tight leading-none"
+            initial={reduce ? false : { opacity: 0.55, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={springSoft}
+          >
             {filteredValueFormatted}
-          </p>
+          </motion.p>
           <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-ink-muted">
             Wardrobe value
           </p>
@@ -99,25 +114,41 @@ export function ClosetFilteredView({
             ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"} in closet`
             : `${filteredGridItems.length} of ${totalCount} shown`}
         </p>
-      </div>
+      </motion.div>
 
       {totalCount > 0 && (
         <ClosetFilters options={options} filters={filters} onFiltersChange={setFilters} />
       )}
 
-      {filteredGridItems.length === 0 ? (
-        <div className="rounded-2xl border border-ink/10 bg-paper-warm p-10 text-center">
-          <p className="font-serif text-xl">Nothing matches those filters.</p>
-          <p className="text-ink-muted text-sm mt-1">Try loosening a few.</p>
-        </div>
-      ) : (
-        <ClosetGrid
-          items={filteredGridItems}
-          sort={filters.sort}
-          sortOrders={sortOrders}
-          noneCategoryLabel={NONE_CATEGORY}
-        />
-      )}
+      <AnimatePresence mode="wait">
+        {filteredGridItems.length === 0 ? (
+          <motion.div
+            key="empty"
+            initial={reduce ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="rounded-2xl border border-ink/10 bg-paper-warm p-10 text-center"
+          >
+            <p className="font-serif text-xl">Nothing matches those filters.</p>
+            <p className="text-ink-muted text-sm mt-1">Try loosening a few.</p>
+          </motion.div>
+        ) : (
+          <motion.div
+            key={`${filters.sort}-${filteredGridItems.length}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.brand}-${filters.season}-${filters.wishlist}`}
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <ClosetGrid
+              items={filteredGridItems}
+              sort={filters.sort}
+              sortOrders={sortOrders}
+              noneCategoryLabel={NONE_CATEGORY}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

@@ -91,8 +91,9 @@ export default async function ListingsPage() {
       <header className="mb-8">
         <h1 className="font-serif text-4xl tracking-tight">For sale</h1>
         <p className="text-ink-muted mt-2">
-          Tweak each draft, set your price, then open the marketplace and paste it in. No public
-          API lets us post for you — but everything here is copy-ready.
+          Tweak each draft, set your price, then copy or download a bundle (listing.txt + photos)
+          and paste into the marketplace. No public API lets us post for you — but everything here
+          is hand-off ready.
         </p>
       </header>
 

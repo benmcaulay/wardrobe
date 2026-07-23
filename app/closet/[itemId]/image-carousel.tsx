@@ -6,6 +6,7 @@ import { imageUrl } from "@/lib/image-paths";
 import {
   deleteGhostViewFor,
   addExtraSourceImageFor,
+  addManualGhostViewFor,
   enqueueGhostViewFor,
   getGhostJobStatus,
   getPendingGhostViewJobForItem,
@@ -16,7 +17,6 @@ import {
   replaceOriginalImageWithEdit,
   type GhostViewStyle,
 } from "@/lib/actions/ghost-mannequin";
-import { CreditMark } from "@/components/credit-mark";
 import { ImageCropper } from "@/components/image-cropper";
 import { BackgroundWhitener } from "@/components/background-whitener";
 
@@ -68,6 +68,7 @@ export function ImageCarousel({
   );
   const [sourceImagePaths, setSourceImagePaths] = useState(extraImagePaths);
   const [ghostGenerating, setGhostGenerating] = useState(false);
+  const [manualAdding, setManualAdding] = useState(false);
   const [, startTransition] = useTransition();
   const pollGenRef = useRef(0);
   const prevGhostCountRef = useRef(initialGhostViews.length);
@@ -109,7 +110,7 @@ export function ImageCarousel({
     setError(null);
     setPickingImages({
       selectedExtraPaths: [...sourceImagePaths],
-      label: "Front",
+      label: ghostViews.length > 0 ? `View ${ghostViews.length + 1}` : "Front",
       instructions: "",
       primaryPath: null,
       compositionHint: "default",
@@ -131,6 +132,34 @@ export function ImageCarousel({
         : prev,
     );
     router.refresh();
+  }
+
+  async function addManualView(file: File) {
+    setError(null);
+    setManualAdding(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const label = pickingImages?.label.trim() ?? "";
+      if (label) formData.append("label", label);
+      const res = await addManualGhostViewFor(itemId, formData);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setGhostViews((prev) => {
+        const next = [
+          ...prev,
+          { label: res.label, imagePath: res.imagePath, mirror: false, thumbZoom: 1 },
+        ];
+        setActiveIndex(next.length - 1);
+        return next;
+      });
+      setPickingImages(null);
+      router.refresh();
+    } finally {
+      setManualAdding(false);
+    }
   }
 
   function dismissGenerateModal() {
@@ -315,32 +344,16 @@ export function ImageCarousel({
         )}
       </div>
 
-      {/* Generate button */}
+      {/* Add / generate view */}
       {!pickingImages && (
         <div className="rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2">
           <p className="text-xs">
-            <span className="font-medium">
-              {hasGhosts ? "Ghost-mannequin views" : "Ghost-mannequin photo"}
-            </span>{" "}
-            {hasGhosts
-              ? `· ${ghostViews.length} generated`
-              : "not generated yet."}
+            <span className="font-medium">Catalog views</span>{" "}
+            {hasGhosts ? `· ${ghostViews.length}` : "— none yet."}
           </p>
           <p className="text-[11px] text-ink-muted">
-            {noCredits ? (
-              "Out of credits — buy more in Settings."
-            ) : (
-              <>
-                <span className="inline-flex items-center gap-1">
-                  Costs 1 credit (you have
-                  <CreditMark className="h-3 w-3 shrink-0" title="Credits" />
-                  {credits}).
-                </span>
-                {sourceImagePaths.length > 0
-                  ? " You can select which source images to use."
-                  : ""}
-              </>
-            )}
+            Paste or upload a photo to add a view for free, or generate one with AI
+            {noCredits ? " (out of credits — buy more in Settings)." : " (1 credit)."}
           </p>
           {ghostGenerating && (
             <p className="text-[11px] text-ink-muted">
@@ -351,14 +364,14 @@ export function ImageCarousel({
           <button
             type="button"
             onClick={requestGenerate}
-            disabled={ghostGenerating || noCredits}
+            disabled={ghostGenerating || manualAdding}
             className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
           >
             {ghostGenerating
               ? "Generating…"
               : hasGhosts
-                ? "Generate another view"
-                : "Generate ghost mannequin"}
+                ? "Add another view"
+                : "Add catalog view"}
           </button>
           {error && (
             <p role="alert" className="text-[11px] text-red-700">
@@ -367,7 +380,7 @@ export function ImageCarousel({
           )}
         </div>
       )}
-      {/* Modal popup for generating a new view */}
+      {/* Modal popup for adding a new view */}
       {pickingImages && (
         <GenerateViewModal
           variant={hasGhosts ? "another" : "first"}
@@ -375,8 +388,12 @@ export function ImageCarousel({
           extraImagePaths={sourceImagePaths}
           pickState={pickingImages}
           generating={ghostGenerating}
+          manualAdding={manualAdding}
+          canGenerate={!noCredits}
           onChange={setPickingImages}
-          onPasteImage={(file) => void addSourceImage(file)}
+          onPasteAsView={(file) => void addManualView(file)}
+          onPasteAsSource={(file) => void addSourceImage(file)}
+          onUploadAsView={(file) => void addManualView(file)}
           onGenerate={() => pickingImages && doGenerate(pickingImages)}
           onCancel={dismissGenerateModal}
         />
@@ -731,8 +748,12 @@ function GenerateViewModal({
   extraImagePaths,
   pickState,
   generating,
+  manualAdding,
+  canGenerate,
   onChange,
-  onPasteImage,
+  onPasteAsView,
+  onPasteAsSource,
+  onUploadAsView,
   onGenerate,
   onCancel,
 }: {
@@ -741,14 +762,19 @@ function GenerateViewModal({
   extraImagePaths: string[];
   pickState: PickImageState;
   generating: boolean;
+  manualAdding: boolean;
+  canGenerate: boolean;
   onChange: (s: PickImageState) => void;
-  onPasteImage: (file: File) => void;
+  onPasteAsView: (file: File) => void;
+  onPasteAsSource: (file: File) => void;
+  onUploadAsView: (file: File) => void;
   onGenerate: () => void;
   onCancel: () => void;
 }) {
-  const title =
-    variant === "another" ? "Generate another view" : "Generate ghost mannequin";
-  const canGenerate = pickState.label.trim().length > 0;
+  const title = variant === "another" ? "Add another view" : "Add catalog view";
+  const busy = generating || manualAdding;
+  const canAiGenerate = canGenerate && pickState.label.trim().length > 0;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExtra = (path: string) => {
     const sel = pickState.selectedExtraPaths;
@@ -764,17 +790,22 @@ function GenerateViewModal({
   };
 
   useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
+    const onPaste = (e: globalThis.ClipboardEvent) => {
+      if (busy) return;
       const items = Array.from(e.clipboardData?.items ?? []);
       const imageItem = items.find((i) => i.type.startsWith("image/"));
       const file = imageItem?.getAsFile();
       if (!file) return;
       e.preventDefault();
-      onPasteImage(file);
+      // Default: paste becomes a catalog view directly (no AI).
+      // Shift+paste still adds as an AI context source.
+      const shiftHeld = Boolean((e as unknown as { shiftKey?: boolean }).shiftKey);
+      if (shiftHeld) onPasteAsSource(file);
+      else onPasteAsView(file);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [onPasteImage]);
+  }, [busy, onPasteAsView, onPasteAsSource]);
 
   return (
     <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4">
@@ -790,145 +821,187 @@ function GenerateViewModal({
             ×
           </button>
         </div>
-        <p className="text-xs text-ink-muted">
-          Name this view (required). The <span className="font-medium">first image</span> the model
-          sees drives pose — upload a separate back photo, select it below, choose &quot;Back / rear
-          catalog&quot;, then generate.
-        </p>
-        <p className="text-[11px] text-ink-muted">Paste an image to add it as an extra source.</p>
 
-        <p className="text-[10px] uppercase tracking-wide text-ink-muted">Main photo for this render</p>
-        <select
-          value={pickState.primaryPath ?? "__original__"}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__original__") {
-              onChange({ ...pickState, primaryPath: null });
-              return;
-            }
-            const nextSel = pickState.selectedExtraPaths.includes(v)
-              ? pickState.selectedExtraPaths
-              : [...pickState.selectedExtraPaths, v];
-            onChange({ ...pickState, primaryPath: v, selectedExtraPaths: nextSel });
-          }}
-          className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper focus:outline-none focus:border-ink/40"
-        >
-          <option value="__original__">Original photo</option>
-          {extraImagePaths.map((path, i) => (
-            <option key={path} value={path}>
-              Extra source {i + 1}
-            </option>
-          ))}
-        </select>
-
-        <fieldset className="space-y-1.5 border-0 p-0 m-0">
-          <legend className="text-[10px] uppercase tracking-wide text-ink-muted">Catalog angle</legend>
-          <label className="flex items-center gap-2 text-xs cursor-pointer">
-            <input
-              type="radio"
-              name="composition"
-              checked={pickState.compositionHint === "default"}
-              onChange={() => onChange({ ...pickState, compositionHint: "default" })}
-              className="accent-ink"
-            />
-            Front (default)
-          </label>
-          <label className="flex items-center gap-2 text-xs cursor-pointer">
-            <input
-              type="radio"
-              name="composition"
-              checked={pickState.compositionHint === "rear"}
-              onChange={() => onChange({ ...pickState, compositionHint: "rear" })}
-              className="accent-ink"
-            />
-            Back / rear catalog
-          </label>
-        </fieldset>
-
-        {/* Original — context when another image is primary */}
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded flex items-center justify-center bg-ink/10 border border-ink/20 flex-shrink-0">
-            <svg className="w-3 h-3 text-ink" viewBox="0 0 12 12" fill="currentColor">
-              <path d="M10 3L5 8.5 2 5.5l-1 1 4 4 6-7z" />
-            </svg>
-          </div>
-          <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl(originalPath)}
-              alt="Garment"
-              className="w-full h-full object-cover"
-            />
-          </div>
-          <span className="text-xs text-ink-muted">
-            Listing photo{pickState.primaryPath ? " (included as context)" : " (main input)"}
-          </span>
-        </div>
-
-        {extraImagePaths.map((path) => {
-          const selected = pickState.selectedExtraPaths.includes(path);
-          return (
-            <label key={path} className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selected}
-                onChange={() => toggleExtra(path)}
-                className="w-4 h-4 rounded accent-ink flex-shrink-0"
-              />
-              <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageUrl(path)} alt="" className="w-full h-full object-cover" />
-              </div>
-              <span className="text-xs text-ink-muted">Source image</span>
-            </label>
-          );
-        })}
-
-        <label className="block space-y-1">
-          <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
-          <input
-            type="text"
-            placeholder="e.g. Front flat lay, Back with collar…"
-            value={pickState.label}
-            onChange={(e) => onChange({ ...pickState, label: e.target.value })}
-            className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40"
-          />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-[10px] uppercase tracking-wide text-ink-muted">
-            Instructions for the model (optional)
-          </span>
-          <textarea
-            placeholder="Context or directions for this render…"
-            value={pickState.instructions}
-            onChange={(e) => onChange({ ...pickState, instructions: e.target.value })}
-            rows={3}
-            className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40 resize-none min-h-[4rem]"
-          />
-        </label>
-
-        {generating && (
+        <div className="rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2">
+          <p className="text-xs font-medium">Paste or upload a photo</p>
           <p className="text-[11px] text-ink-muted">
-            You can close this dialog or leave the item — generation continues in the background.
+            Adds the image as a catalog view immediately — no AI, no credit. Optional: name it
+            below first. Shift+paste adds it as an AI context source instead.
           </p>
-        )}
-        <div className="flex gap-2 pt-1">
+          <label className="block space-y-1">
+            <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
+            <input
+              type="text"
+              placeholder="e.g. Back, Detail, Flat lay…"
+              value={pickState.label}
+              onChange={(e) => onChange({ ...pickState, label: e.target.value })}
+              disabled={busy}
+              className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-white placeholder:text-ink-muted focus:outline-none focus:border-ink/40 disabled:opacity-50"
+            />
+          </label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) onUploadAsView(file);
+            }}
+          />
           <button
             type="button"
-            onClick={onGenerate}
-            disabled={generating || !canGenerate}
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
             className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
           >
-            {generating ? "Generating…" : "Generate"}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
-          >
-            {generating ? "Close" : "Cancel"}
+            {manualAdding ? "Adding…" : "Upload photo as view"}
           </button>
         </div>
+
+        <details className="rounded-xl border border-ink/10 p-3 group">
+          <summary className="text-xs font-medium cursor-pointer list-none flex items-center justify-between">
+            <span>Or generate with AI</span>
+            <span className="text-[10px] text-ink-muted group-open:hidden">1 credit</span>
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-[11px] text-ink-muted">
+              The <span className="font-medium">first image</span> the model sees drives pose —
+              upload a separate back photo (Shift+paste), select it below, choose &quot;Back / rear
+              catalog&quot;, then generate.
+            </p>
+
+            <p className="text-[10px] uppercase tracking-wide text-ink-muted">
+              Main photo for this render
+            </p>
+            <select
+              value={pickState.primaryPath ?? "__original__"}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__original__") {
+                  onChange({ ...pickState, primaryPath: null });
+                  return;
+                }
+                const nextSel = pickState.selectedExtraPaths.includes(v)
+                  ? pickState.selectedExtraPaths
+                  : [...pickState.selectedExtraPaths, v];
+                onChange({ ...pickState, primaryPath: v, selectedExtraPaths: nextSel });
+              }}
+              className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper focus:outline-none focus:border-ink/40"
+            >
+              <option value="__original__">Original photo</option>
+              {extraImagePaths.map((path, i) => (
+                <option key={path} value={path}>
+                  Extra source {i + 1}
+                </option>
+              ))}
+            </select>
+
+            <fieldset className="space-y-1.5 border-0 p-0 m-0">
+              <legend className="text-[10px] uppercase tracking-wide text-ink-muted">
+                Catalog angle
+              </legend>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="radio"
+                  name="composition"
+                  checked={pickState.compositionHint === "default"}
+                  onChange={() => onChange({ ...pickState, compositionHint: "default" })}
+                  className="accent-ink"
+                />
+                Front (default)
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="radio"
+                  name="composition"
+                  checked={pickState.compositionHint === "rear"}
+                  onChange={() => onChange({ ...pickState, compositionHint: "rear" })}
+                  className="accent-ink"
+                />
+                Back / rear catalog
+              </label>
+            </fieldset>
+
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded flex items-center justify-center bg-ink/10 border border-ink/20 flex-shrink-0">
+                <svg className="w-3 h-3 text-ink" viewBox="0 0 12 12" fill="currentColor">
+                  <path d="M10 3L5 8.5 2 5.5l-1 1 4 4 6-7z" />
+                </svg>
+              </div>
+              <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imageUrl(originalPath)}
+                  alt="Garment"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <span className="text-xs text-ink-muted">
+                Listing photo{pickState.primaryPath ? " (included as context)" : " (main input)"}
+              </span>
+            </div>
+
+            {extraImagePaths.map((path) => {
+              const selected = pickState.selectedExtraPaths.includes(path);
+              return (
+                <label key={path} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleExtra(path)}
+                    className="w-4 h-4 rounded accent-ink flex-shrink-0"
+                  />
+                  <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={imageUrl(path)} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="text-xs text-ink-muted">Source image</span>
+                </label>
+              );
+            })}
+
+            <label className="block space-y-1">
+              <span className="text-[10px] uppercase tracking-wide text-ink-muted">
+                Instructions for the model (optional)
+              </span>
+              <textarea
+                placeholder="Context or directions for this render…"
+                value={pickState.instructions}
+                onChange={(e) => onChange({ ...pickState, instructions: e.target.value })}
+                rows={3}
+                className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40 resize-none min-h-[4rem]"
+              />
+            </label>
+
+            {generating && (
+              <p className="text-[11px] text-ink-muted">
+                You can close this dialog or leave the item — generation continues in the
+                background.
+              </p>
+            )}
+            {!canGenerate && (
+              <p className="text-[11px] text-ink-muted">Out of credits for AI generation.</p>
+            )}
+            <button
+              type="button"
+              onClick={onGenerate}
+              disabled={busy || !canAiGenerate}
+              className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
+            >
+              {generating ? "Generating…" : "Generate with AI"}
+            </button>
+          </div>
+        </details>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
+        >
+          {busy ? "Close" : "Cancel"}
+        </button>
       </div>
     </div>
   );

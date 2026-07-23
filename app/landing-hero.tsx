@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { FabricWarp, type FabricTheme } from "@/components/fabric-warp";
 import { GoogleSignInButton } from "@/components/google-signin-button";
+import { easeOutExpo, fadeUp, springSnappy, staggerContainer } from "@/lib/ui-motion";
 
 type Props = {
   demo: boolean;
@@ -18,6 +20,7 @@ export function LandingHero({ demo, googleConfigured }: Props) {
   /** Landing-only backdrop — does not affect app chrome (always day). */
   const [fabricTheme, setFabricTheme] = useState<FabricTheme>("light");
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
+  const reduce = useReducedMotion();
 
   const toggleAt = useCallback((clientX: number, clientY: number) => {
     setOrigin({ x: clientX, y: clientY });
@@ -58,18 +61,38 @@ export function LandingHero({ demo, googleConfigured }: Props) {
         {/* Spacer matches the canvas wordmark resting near ~40% height */}
         <div className="h-[min(38vh,20rem)] w-full shrink-0" aria-hidden />
 
-        <div className="max-w-md text-center space-y-8 pointer-events-auto">
-          <p
+        <motion.div
+          className="max-w-md text-center space-y-8 pointer-events-auto"
+          variants={staggerContainer}
+          initial={reduce ? false : "hidden"}
+          animate="show"
+        >
+          <motion.p
+            variants={fadeUp}
             className="font-sans font-medium uppercase tracking-[0.14em] text-xs leading-loose transition-colors duration-700"
             style={{ color: fabricTheme === "dark" ? "#ffffff" : "var(--ink-muted)" }}
           >
             Personal digital closet. Upload what you own, see it organized, and
             turn flat photos into clean ghost-mannequin product shots.
-          </p>
-          <div className="flex flex-col items-center gap-3">
-            {googleConfigured && <GoogleSignInButton />}
+          </motion.p>
+          <motion.div
+            variants={fadeUp}
+            className="flex flex-col items-center gap-3"
+            transition={{ duration: 0.5, ease: easeOutExpo, delay: 0.08 }}
+          >
+            {googleConfigured && (
+              <motion.div whileHover={reduce ? undefined : { scale: 1.03 }} whileTap={reduce ? undefined : { scale: 0.97 }} transition={springSnappy}>
+                <GoogleSignInButton />
+              </motion.div>
+            )}
             {demo && (
-              <form action="/api/demo/enter" method="post">
+              <motion.form
+                action="/api/demo/enter"
+                method="post"
+                whileHover={reduce ? undefined : { scale: 1.03 }}
+                whileTap={reduce ? undefined : { scale: 0.97 }}
+                transition={springSnappy}
+              >
                 <button
                   type="submit"
                   className={
@@ -80,7 +103,7 @@ export function LandingHero({ demo, googleConfigured }: Props) {
                 >
                   Enter demo
                 </button>
-              </form>
+              </motion.form>
             )}
             {!googleConfigured && !demo && (
               <p className="text-sm text-ink-muted">
@@ -89,8 +112,8 @@ export function LandingHero({ demo, googleConfigured }: Props) {
                 local demo.
               </p>
             )}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       </div>
     </div>
   );

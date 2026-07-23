@@ -19,6 +19,11 @@ backups/
 # uploads (user data)
 uploads/
 
+# ghost prompt bakeoff outputs + local fixture photos
+tmp/
+fixtures/ghost/*
+!fixtures/ghost/README.md
+
 # logs
 *.log
 npm-debug.log*

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { isNoneCategoryStored } from "@/lib/categories";
 import { reorderClosetGroupItems } from "@/lib/actions/closetGroupOrder";
 import { itemTileImageTransform } from "@/lib/item-tile-meta";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/closet-group-order";
 import { sortWardrobeItems, type ClosetSortKey, type SortOrders } from "@/lib/closet-sort";
 import { thumbnailUrl } from "@/lib/image-paths";
+import { springSoft, staggerFast, staggerItem } from "@/lib/ui-motion";
 
 export type ClosetGridItem = {
   id: string;
@@ -51,6 +53,8 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
     setItems(initialItems);
     itemsById.current = new Map(initialItems.map((i) => [i.id, i]));
   }, [initialItems]);
+
+  const reduce = useReducedMotion();
 
   function toSortable(list: ClosetGridItem[]) {
     return list.map((i) => ({
@@ -138,7 +142,12 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
   }
 
   return (
-    <ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4">
+    <motion.ul
+      className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4"
+      variants={staggerFast}
+      initial={reduce ? false : "hidden"}
+      animate="show"
+    >
       {items.map((item) => {
         const isDragging = draggedId === item.id;
         const isDropTarget = dropTargetId === item.id && draggedId !== item.id;
@@ -148,64 +157,70 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
           : item.category;
 
         return (
-          <li
+          <motion.li
             key={item.id}
-            draggable
-            onDragStart={(e) => {
-              handleDragStart(item.id);
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", item.id);
-            }}
-            onDragEnd={() => handleDragEnd(item.id)}
-            onDragOver={(e) => handleDragOver(e, item.id)}
-            onDragLeave={() => {
-              if (dropTargetId === item.id) setDropTargetId(null);
-            }}
-            onDrop={(e) => handleDrop(e, item.id)}
+            layout={!reduce}
+            variants={staggerItem}
+            whileHover={reduce || isDragging ? undefined : { y: -3, transition: springSoft }}
             className={`rounded-2xl transition ${
               isDragging ? "opacity-45 scale-[0.98]" : ""
             } ${isDropTarget ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""} ${
               isShaking ? "closet-tile-shake" : ""
             }`}
           >
-            <Link
-              href={`/closet/${item.id}`}
-              draggable={false}
-              onClick={(e) => {
-                if (suppressNavRef.current) e.preventDefault();
+            <div
+              draggable
+              onDragStart={(e) => {
+                handleDragStart(item.id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", item.id);
               }}
-              className="block rounded-2xl bg-white shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent cursor-grab active:cursor-grabbing"
+              onDragEnd={() => handleDragEnd(item.id)}
+              onDragOver={(e) => handleDragOver(e, item.id)}
+              onDragLeave={() => {
+                if (dropTargetId === item.id) setDropTargetId(null);
+              }}
+              onDrop={(e) => handleDrop(e, item.id)}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={thumbnailUrl(item.imagePath)}
-                alt={item.name}
-                loading="lazy"
-                className="w-full h-full object-cover pointer-events-none"
-                style={{
-                  transform: itemTileImageTransform({
-                    thumbZoom: item.thumbZoom,
-                    mirror: item.mirror,
-                  }),
-                }}
+              <Link
+                href={`/closet/${item.id}`}
                 draggable={false}
-              />
-              {item.isWishlist && (
-                <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-1 pointer-events-none">
-                  <span className="bg-white/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
-                    Wishlist
-                  </span>
+                onClick={(e) => {
+                  if (suppressNavRef.current) e.preventDefault();
+                }}
+                className="block rounded-2xl bg-white shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent cursor-grab active:cursor-grabbing"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={thumbnailUrl(item.imagePath)}
+                  alt={item.name}
+                  loading="lazy"
+                  className="w-full h-full object-cover pointer-events-none"
+                  style={{
+                    transform: itemTileImageTransform({
+                      thumbZoom: item.thumbZoom,
+                      mirror: item.mirror,
+                    }),
+                  }}
+                  draggable={false}
+                />
+                {item.isWishlist && (
+                  <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-1 pointer-events-none">
+                    <span className="bg-white/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
+                      Wishlist
+                    </span>
+                  </div>
+                )}
+                <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-ink/70 to-transparent text-white opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition pointer-events-none">
+                  <div className="text-xs font-medium truncate">{item.name}</div>
+                  <div className="text-[10px] text-white/80 truncate">{item.brand ?? "—"}</div>
+                  <div className="text-[10px] text-white/70 truncate">{categoryLabel}</div>
                 </div>
-              )}
-              <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-ink/70 to-transparent text-white opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition pointer-events-none">
-                <div className="text-xs font-medium truncate">{item.name}</div>
-                <div className="text-[10px] text-white/80 truncate">{item.brand ?? "—"}</div>
-                <div className="text-[10px] text-white/70 truncate">{categoryLabel}</div>
-              </div>
-            </Link>
-          </li>
+              </Link>
+            </div>
+          </motion.li>
         );
       })}
-    </ul>
+    </motion.ul>
   );
 }

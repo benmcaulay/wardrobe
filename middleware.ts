@@ -9,6 +9,8 @@ const PUBLIC_PREFIXES = [
   "/api/auth",
   // Stripe calls this server-to-server; it's authenticated by signature, not session.
   "/api/stripe/webhook",
+  // Interactive UI direction prototypes (no auth; mock data only).
+  "/design-lab",
 ];
 
 /**

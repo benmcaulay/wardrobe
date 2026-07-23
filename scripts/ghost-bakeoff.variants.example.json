@@ -1,0 +1,40 @@
+{
+  "defaults": {
+    "model": "fal-ai/bytedance/seedream/v4/edit",
+    "enhancePromptMode": "fast",
+    "postProcess": "none",
+    "runs": 1,
+    "compositionHint": "default"
+  },
+  "variants": [
+    {
+      "id": "prod-raw",
+      "label": "Production prompt, no post-process (winner)",
+      "promptSource": "production",
+      "postProcess": "none"
+    },
+    {
+      "id": "prod-six-tenets",
+      "label": "Production six-tenets prompt + full post",
+      "promptSource": "production",
+      "postProcess": "full"
+    },
+    {
+      "id": "prod-enhance-standard",
+      "label": "Production prompt with enhance=standard",
+      "promptSource": "production",
+      "enhancePromptMode": "standard"
+    },
+    {
+      "id": "short-floating",
+      "label": "Short floating prompt (custom)",
+      "prompt": "Floating e-commerce product photo of this garment. Exact item from the reference, suspended in empty space with no wearer and no stand.\n\n1) Through the neckline/hood opening show the garment's own back lining only — no white plastic tube, stump, head, or filler.\n2) Natural three-dimensional retail shape; soft fabric hang; not flat or crumpled; do not puff or balloon the silhouette.\n3) Arms hang straight down at the sides.\n4) Pure white #ffffff background edge-to-edge.\n5) No shadows of any kind.\n6) Straight-on camera (0° yaw), centered, fully in frame.\n\nSingle item only. No props, hangers, or text."
+    },
+    {
+      "id": "prod-kontext",
+      "label": "Production prompt on Flux Kontext",
+      "promptSource": "production",
+      "model": "fal-ai/flux-pro/kontext"
+    }
+  ]
+}

@@ -2,8 +2,10 @@
 
 import { useCallback, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { imageUrl } from "@/lib/image-paths";
 import { formatCents, suggestedAskingCents } from "@/lib/sale-listing";
+import { fadeUp, scaleIn, springSnappy, springSoft } from "@/lib/ui-motion";
 import { setSaleDecision, removeSaleListing } from "./actions";
 
 export type SwipeItem = {
@@ -30,6 +32,7 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
   const [dragging, setDragging] = useState(false);
   const [leaving, setLeaving] = useState<{ id: string; decision: Decision } | null>(null);
   const [, startTransition] = useTransition();
+  const reduce = useReducedMotion();
 
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const decidedCount = history.length;
@@ -46,12 +49,20 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
         setCards((prev) => prev.filter((c) => c.id !== item.id));
         setHistory((prev) => [...prev, { item, decision }]);
         setLeaving(null);
-      }, 280);
+      }, reduce ? 0 : 280);
+    },
+    [startTransition, reduce],
+  );
+
+  // Keep server sync in commit without stale deps warning
+  const commitWithServer = useCallback(
+    (item: SwipeItem, decision: Decision) => {
+      commit(item, decision);
       startTransition(async () => {
         await setSaleDecision({ itemId: item.id, decision });
       });
     },
-    [startTransition],
+    [commit, startTransition],
   );
 
   const undo = useCallback(() => {
@@ -83,9 +94,9 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
     if (!top || !pointerStart.current) return;
     const dx = drag?.dx ?? 0;
     if (dx > COMMIT_THRESHOLD) {
-      commit(top, "sell");
+      commitWithServer(top, "sell");
     } else if (dx < -COMMIT_THRESHOLD) {
-      commit(top, "keep");
+      commitWithServer(top, "keep");
     } else {
       setDrag(null);
       setDragging(false);
@@ -105,46 +116,73 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
 
   const dx = drag?.dx ?? 0;
   const dy = drag?.dy ?? 0;
-  const intent: Decision | null =
-    dx > 40 ? "sell" : dx < -40 ? "keep" : null;
+  const intent: Decision | null = dx > 40 ? "sell" : dx < -40 ? "keep" : null;
 
   return (
-    <div className="select-none">
+    <motion.div
+      className="select-none"
+      initial={reduce ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="relative mx-auto h-[28rem] w-full max-w-sm">
         {cards.slice(0, STACK_DEPTH).map((item, i) => {
           const isTop = i === 0;
           const isLeaving = leaving?.id === item.id;
-          let transform: string;
-          let transition: string;
+          const dir = leaving?.decision === "sell" ? 1 : -1;
+          const scale = 1 - i * 0.04;
+          const offset = i * 12;
+
+          let animate: {
+            x: number;
+            y: number;
+            rotate: number;
+            scale: number;
+            opacity: number;
+          };
           if (isLeaving) {
-            const dir = leaving!.decision === "sell" ? 1 : -1;
-            transform = `translateX(${dir * 140}%) translateY(${dy}px) rotate(${dir * 18}deg)`;
-            transition = "transform 280ms ease-out, opacity 280ms ease-out";
+            animate = {
+              x: dir * (typeof window !== "undefined" ? window.innerWidth * 0.55 : 420),
+              y: dy,
+              rotate: dir * 18,
+              scale: 1,
+              opacity: 0,
+            };
           } else if (isTop) {
-            transform = drag
-              ? `translate(${dx}px, ${dy}px) rotate(${dx / 22}deg)`
-              : "translate(0px, 0px) rotate(0deg)";
-            transition = dragging ? "none" : "transform 200ms ease-out";
+            animate = {
+              x: drag ? dx : 0,
+              y: drag ? dy : 0,
+              rotate: drag ? dx / 22 : 0,
+              scale: 1,
+              opacity: 1,
+            };
           } else {
-            // Cards behind: slightly scaled down and nudged up for depth.
-            const scale = 1 - i * 0.04;
-            const offset = i * 12;
-            transform = `translateY(${offset}px) scale(${scale})`;
-            transition = "transform 200ms ease-out";
+            animate = {
+              x: 0,
+              y: offset,
+              rotate: 0,
+              scale,
+              opacity: 1,
+            };
           }
 
           return (
-            <article
+            <motion.article
               key={item.id}
               className="absolute inset-0 rounded-3xl bg-white shadow-tile overflow-hidden border border-ink/10"
               style={{
-                transform,
-                transition,
                 zIndex: STACK_DEPTH - i,
-                opacity: isLeaving ? 0 : 1,
                 cursor: isTop ? (dragging ? "grabbing" : "grab") : "default",
                 touchAction: "none",
               }}
+              animate={animate}
+              transition={
+                isLeaving
+                  ? { duration: 0.28, ease: "easeOut" }
+                  : isTop && dragging
+                    ? { duration: 0 }
+                    : springSoft
+              }
               onPointerDown={isTop ? onPointerDown : undefined}
               onPointerMove={isTop ? onPointerMove : undefined}
               onPointerUp={isTop ? onPointerUp : undefined}
@@ -170,50 +208,72 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
                 </div>
               </div>
 
-              {isTop && intent && (
-                <span
-                  className={`absolute top-5 rounded-xl border-2 px-3 py-1 text-sm font-bold uppercase tracking-widest ${
-                    intent === "sell"
-                      ? "right-5 rotate-12 border-emerald-400 text-emerald-300"
-                      : "left-5 -rotate-12 border-rose-400 text-rose-300"
-                  }`}
-                  style={{ opacity: Math.min(1, Math.abs(dx) / COMMIT_THRESHOLD) }}
-                >
-                  {intent === "sell" ? "Sell" : "Keep"}
-                </span>
-              )}
-            </article>
+              <AnimatePresence>
+                {isTop && intent && (
+                  <motion.span
+                    key={intent}
+                    initial={reduce ? false : { opacity: 0, scale: 0.85 }}
+                    animate={{
+                      opacity: Math.min(1, Math.abs(dx) / COMMIT_THRESHOLD),
+                      scale: 1,
+                    }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className={`absolute top-5 rounded-xl border-2 px-3 py-1 text-sm font-bold uppercase tracking-widest ${
+                      intent === "sell"
+                        ? "right-5 rotate-12 border-emerald-400 text-emerald-300"
+                        : "left-5 -rotate-12 border-rose-400 text-rose-300"
+                    }`}
+                  >
+                    {intent === "sell" ? "Sell" : "Keep"}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </motion.article>
           );
         })}
       </div>
 
-      <div className="mt-8 flex items-center justify-center gap-5">
-        <button
+      <motion.div
+        className="mt-8 flex items-center justify-center gap-5"
+        variants={fadeUp}
+        initial={reduce ? false : "hidden"}
+        animate="show"
+      >
+        <motion.button
           type="button"
-          onClick={() => top && commit(top, "keep")}
+          onClick={() => top && commitWithServer(top, "keep")}
           aria-label="Keep"
+          whileHover={reduce ? undefined : { scale: 1.08 }}
+          whileTap={reduce ? undefined : { scale: 0.92 }}
+          transition={springSnappy}
           className="grid h-16 w-16 place-items-center rounded-full border border-ink/15 bg-white text-2xl shadow-tile transition hover:bg-paper-warm"
         >
           ✕
-        </button>
-        <button
+        </motion.button>
+        <motion.button
           type="button"
           onClick={undo}
           disabled={history.length === 0}
           aria-label="Undo last"
+          whileHover={reduce || history.length === 0 ? undefined : { scale: 1.08 }}
+          whileTap={reduce || history.length === 0 ? undefined : { scale: 0.92 }}
+          transition={springSnappy}
           className="grid h-12 w-12 place-items-center rounded-full border border-ink/15 bg-white text-base shadow-tile transition hover:bg-paper-warm disabled:opacity-40"
         >
           ↶
-        </button>
-        <button
+        </motion.button>
+        <motion.button
           type="button"
-          onClick={() => top && commit(top, "sell")}
+          onClick={() => top && commitWithServer(top, "sell")}
           aria-label="Sell"
+          whileHover={reduce ? undefined : { scale: 1.08 }}
+          whileTap={reduce ? undefined : { scale: 0.92 }}
+          transition={springSnappy}
           className="grid h-16 w-16 place-items-center rounded-full bg-ink text-2xl text-paper shadow-tile transition hover:bg-ink-soft"
         >
           $
-        </button>
-      </div>
+        </motion.button>
+      </motion.div>
 
       <p className="mt-5 text-center text-xs text-ink-muted">
         {cards.length} {cards.length === 1 ? "piece" : "pieces"} left
@@ -226,7 +286,7 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
           </>
         ) : null}
       </p>
-    </div>
+    </motion.div>
   );
 }
 
@@ -240,8 +300,14 @@ function DoneState({
   onUndo?: () => void;
 }) {
   const total = readyCount;
+  const reduce = useReducedMotion();
   return (
-    <div className="rounded-3xl border border-ink/10 bg-paper-warm p-12 text-center">
+    <motion.div
+      className="rounded-3xl border border-ink/10 bg-paper-warm p-12 text-center"
+      variants={scaleIn}
+      initial={reduce ? false : "hidden"}
+      animate="show"
+    >
       <p className="font-serif text-3xl">All caught up.</p>
       <p className="mt-2 text-ink-muted">
         {decidedCount > 0
@@ -271,6 +337,6 @@ function DoneState({
           Back to closet
         </Link>
       </div>
-    </div>
+    </motion.div>
   );
 }

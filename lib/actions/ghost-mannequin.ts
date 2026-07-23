@@ -441,6 +441,72 @@ export async function addExtraSourceImageFor(
   return { ok: true, imagePath: saved.originalImagePath };
 }
 
+export type AddManualGhostViewResponse =
+  | { ok: true; imagePath: string; label: string }
+  | { ok: false; error: string };
+
+/**
+ * Upload a photo and append it as a catalog view without AI generation.
+ * Used when the user pastes/uploads an additional view directly.
+ */
+export async function addManualGhostViewFor(
+  itemId: string,
+  formData: FormData,
+): Promise<AddManualGhostViewResponse> {
+  const user = await requireUser();
+  const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
+  if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+
+  const file = formData.get("image");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "No file provided" };
+  }
+
+  let saved;
+  try {
+    saved = await saveUpload(file, user.id);
+  } catch (err) {
+    if (err instanceof UploadError) return { ok: false, error: err.message };
+    throw err;
+  }
+
+  let existingViews: Array<{
+    label: string;
+    imagePath: string;
+    mirror?: boolean;
+    thumbZoom?: number;
+  }> = [];
+  try {
+    if (item.ghostViews) existingViews = JSON.parse(item.ghostViews) as typeof existingViews;
+  } catch {
+    existingViews = [];
+  }
+
+  const rawLabel = String(formData.get("label") ?? "").trim();
+  const label =
+    rawLabel ||
+    (existingViews.length === 0 ? "View" : `View ${existingViews.length + 1}`);
+  const newView = {
+    label,
+    imagePath: saved.originalImagePath,
+    mirror: false,
+    thumbZoom: 1,
+  };
+  const updatedViews = [...existingViews, newView];
+
+  await prisma.wardrobeItem.update({
+    where: { id: itemId },
+    data: {
+      ghostViews: encode(updatedViews),
+      ghostImagePath: item.ghostImagePath ?? saved.originalImagePath,
+    },
+  });
+
+  revalidatePath("/closet");
+  revalidatePath(`/closet/${itemId}`);
+  return { ok: true, imagePath: saved.originalImagePath, label };
+}
+
 /**
  * Generate a ghost-mannequin preview during the /closet/add flow — before any
  * WardrobeItem exists. Decrements credits in real mode (the API call already

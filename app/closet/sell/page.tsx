@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { isNoneCategoryStored, NONE_CATEGORY } from "@/lib/categories";
+import { SellPageIntro } from "./sell-page-intro";
 import { SellSwiper, type SwipeItem } from "./sell-swiper";
 
 export const dynamic = "force-dynamic";
@@ -52,13 +53,7 @@ export default async function SellPage() {
         </Link>
       </nav>
 
-      <header className="mb-8 text-center">
-        <h1 className="font-serif text-4xl tracking-tight">Sell or keep</h1>
-        <p className="text-ink-muted mt-2">
-          Swipe right to list a piece for sale, left to keep it. We&apos;ll draft the listing for
-          you — you copy it into Depop, Poshmark, and the rest.
-        </p>
-      </header>
+      <SellPageIntro />
 
       <SellSwiper items={items} readyCount={readyCount} />
     </main>

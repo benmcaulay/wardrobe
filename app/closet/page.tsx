@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { parseColors, parseStringArray, parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs, normalizeStyleTagName } from "@/lib/preferences";
 import { CreditMark } from "@/components/credit-mark";
+import { AddItemFab } from "@/components/add-item-fab";
 import { ClosetFilteredView, type ClosetPageItem } from "@/components/closet-filtered-view";
 import type { FilterOptions } from "@/components/closet-filters";
 import {
@@ -281,13 +282,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
         />
       )}
 
-      <Link
-        href="/closet/add"
-        aria-label="Add item"
-        className="fixed bottom-8 right-8 rounded-full bg-ink text-paper w-14 h-14 flex items-center justify-center text-2xl shadow-tile hover:bg-ink-soft transition"
-      >
-        +
-      </Link>
+      <AddItemFab />
     </main>
   );
 }

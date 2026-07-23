@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { imageUrl } from "@/lib/image-paths";
 import { MARKETPLACES } from "@/lib/marketplaces";
 import {
@@ -20,6 +21,7 @@ import {
   type ListingItemInput,
   type SaleStatus,
 } from "@/lib/sale-listing";
+import { fadeUp, listItem, springSoft, staggerContainer } from "@/lib/ui-motion";
 import {
   bulkRemoveSaleListings,
   bulkSetSaleStatus,
@@ -49,11 +51,45 @@ const STATUS_ORDER: SaleStatus[] = ["for_sale", "listed", "sold"];
 
 type Filter = "all" | "for_sale" | "listed" | "sold";
 
+/** Download a zip of listing.txt + photos for the selected item ids. */
+async function downloadExportBundle(itemIds: string[]): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (itemIds.length === 0) return { ok: false, error: "Nothing selected" };
+  try {
+    const res = await fetch("/api/sell/export-bundle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: text || `Export failed (${res.status})` };
+    }
+    const blob = await res.blob();
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const filename =
+      itemIds.length === 1
+        ? `listing-export-${stamp}.zip`
+        : `listings-export-${itemIds.length}-${stamp}.zip`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Export failed" };
+  }
+}
+
 export function ListingsClient({ initial }: { initial: Listing[] }) {
   const [listings, setListings] = useState<Listing[]>(initial);
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   // Stable "now" for staleness; one read per mount avoids hydration drift.
   const [nowMs] = useState(() => Date.now());
 
@@ -118,6 +154,16 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
     setBusy(false);
   }
 
+  async function bulkExport() {
+    const ids = [...selected];
+    if (ids.length === 0 || busy) return;
+    setBusy(true);
+    setExportError(null);
+    const res = await downloadExportBundle(ids);
+    if (!res.ok) setExportError(res.error);
+    setBusy(false);
+  }
+
   const ordered = [...listings].sort(
     (a, b) =>
       STATUS_ORDER.indexOf(a.status as SaleStatus) - STATUS_ORDER.indexOf(b.status as SaleStatus),
@@ -131,9 +177,16 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
     { id: "sold", label: "Sold", count: summary.soldCount },
   ];
 
+  const reduce = useReducedMotion();
+
   return (
-    <div className="space-y-6">
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <motion.div
+      className="space-y-6"
+      variants={staggerContainer}
+      initial={reduce ? false : "hidden"}
+      animate="show"
+    >
+      <motion.dl variants={fadeUp} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat
           label="Active"
           value={String(summary.activeCount)}
@@ -149,10 +202,13 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
           value={formatCents(summary.activeAskingCents + summary.soldValueCents, summary.currency) || "$0"}
           sub="asking + sold"
         />
-      </dl>
+      </motion.dl>
 
       {insight.realizedCount > 0 && (
-        <div className="rounded-2xl border border-ink/10 bg-paper-warm px-4 py-3">
+        <motion.div
+          variants={fadeUp}
+          className="rounded-2xl border border-ink/10 bg-paper-warm px-4 py-3"
+        >
           <p className="text-[11px] uppercase tracking-wide text-ink-muted">
             Sell-through insight · {insight.realizedCount}{" "}
             {insight.realizedCount === 1 ? "sale" : "sales"}
@@ -183,10 +239,10 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
               </span>
             )}
           </div>
-        </div>
+        </motion.div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <motion.div variants={fadeUp} className="flex flex-wrap gap-2">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -202,7 +258,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
             {t.label} ({t.count})
           </button>
         ))}
-      </div>
+      </motion.div>
 
       {staleCount > 0 && (
         <p className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
@@ -257,6 +313,14 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
                 <button
                   type="button"
                   disabled={busy}
+                  onClick={bulkExport}
+                  className="rounded-full border border-ink/15 px-3 py-1 transition hover:bg-paper-warm disabled:opacity-50"
+                >
+                  Export bundle
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
                   onClick={bulkRemove}
                   className="rounded-full px-3 py-1 text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                 >
@@ -275,37 +339,48 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
         );
       })()}
 
+      {exportError && (
+        <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
+          {exportError}
+        </p>
+      )}
+
       {visible.length === 0 ? (
         <p className="rounded-2xl border border-ink/10 bg-paper-warm p-8 text-center text-sm text-ink-muted">
           Nothing in this view.
         </p>
       ) : (
-        <ul className="space-y-5">
-          {visible.map((listing) => (
-            <ListingCard
-              key={listing.itemId}
-              listing={listing}
-              realizedRate={insight.realizedRate}
-              nowMs={nowMs}
-              selected={selected.has(listing.itemId)}
-              onToggleSelect={toggleSelect}
-              onRemoved={(id) => setListings((prev) => prev.filter((l) => l.itemId !== id))}
-              onPatch={patch}
-            />
-          ))}
-        </ul>
+        <motion.ul className="space-y-5" layout={!reduce} key={filter}>
+          <AnimatePresence mode="popLayout">
+            {visible.map((listing) => (
+              <ListingCard
+                key={listing.itemId}
+                listing={listing}
+                realizedRate={insight.realizedRate}
+                nowMs={nowMs}
+                selected={selected.has(listing.itemId)}
+                onToggleSelect={toggleSelect}
+                onRemoved={(id) => setListings((prev) => prev.filter((l) => l.itemId !== id))}
+                onPatch={patch}
+              />
+            ))}
+          </AnimatePresence>
+        </motion.ul>
       )}
-    </div>
+    </motion.div>
   );
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-4">
+    <motion.div
+      className="rounded-2xl border border-ink/10 bg-white p-4"
+      whileHover={{ y: -2, transition: springSoft }}
+    >
       <dt className="text-[11px] uppercase tracking-wide text-ink-muted">{label}</dt>
       <dd className="mt-1 font-serif text-2xl tracking-tight">{value}</dd>
       <dd className="text-[11px] text-ink-muted">{sub}</dd>
-    </div>
+    </motion.div>
   );
 }
 
@@ -347,6 +422,8 @@ function ListingCard({
   const [status, setStatus] = useState<SaleStatus>(listing.status as SaleStatus);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
   const [markingSold, setMarkingSold] = useState(false);
 
   // Follow external status changes (bulk actions) without discarding edits.
@@ -451,10 +528,41 @@ function ListingCard({
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  /** Flush draft edits, then download listing.txt + photos as a zip. */
+  async function exportBundle() {
+    if (exporting) return;
+    setExporting(true);
+    setExportNote(null);
+    const nextAsking = dollarsToCents(priceInput);
+    const save = await updateSaleListing({
+      itemId: listing.itemId,
+      title,
+      description,
+      askingCents: nextAsking,
+      condition: condition || null,
+      marketplaces,
+    });
+    if (!save.ok) {
+      setExportNote("Save failed — try again");
+      setExporting(false);
+      return;
+    }
+    onPatch(listing.itemId, { askingCents: nextAsking });
+    const res = await downloadExportBundle([listing.itemId]);
+    setExportNote(res.ok ? "Downloaded" : res.error);
+    if (res.ok) window.setTimeout(() => setExportNote(null), 2000);
+    setExporting(false);
+  }
+
   const selectedMarketplaces = MARKETPLACES.filter((m) => marketplaces.includes(m.id));
 
   return (
-    <li
+    <motion.li
+      layout
+      variants={listItem}
+      initial="hidden"
+      animate="show"
+      exit="exit"
       className={`rounded-3xl border bg-white p-4 shadow-tile sm:p-5 ${
         selected ? "border-ink ring-1 ring-ink/30" : "border-ink/10"
       }`}
@@ -618,6 +726,15 @@ function ListingCard({
             >
               {copied ? "Copied!" : "Copy listing"}
             </button>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={exportBundle}
+              className="rounded-full border border-ink/15 px-4 py-2 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+              title="Download listing.txt plus catalog photos as a zip"
+            >
+              {exporting ? "Exporting…" : exportNote === "Downloaded" ? "Downloaded!" : "Download bundle"}
+            </button>
             {selectedMarketplaces.length > 0 ? (
               selectedMarketplaces.map((m) => (
                 <button
@@ -636,13 +753,15 @@ function ListingCard({
               </span>
             )}
             <span className="ml-auto text-[11px] text-ink-muted">
-              {saveState === "saving"
-                ? "Saving…"
-                : saveState === "saved"
-                  ? "Saved"
-                  : saveState === "error"
-                    ? "Save failed"
-                    : ""}
+              {exportNote && exportNote !== "Downloaded"
+                ? exportNote
+                : saveState === "saving"
+                  ? "Saving…"
+                  : saveState === "saved"
+                    ? "Saved"
+                    : saveState === "error"
+                      ? "Save failed"
+                      : ""}
             </span>
           </div>
 
@@ -734,7 +853,7 @@ function ListingCard({
           </div>
         </div>
       </div>
-    </li>
+    </motion.li>
   );
 }
 
