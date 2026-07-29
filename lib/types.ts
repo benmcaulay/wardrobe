@@ -18,6 +18,8 @@ export type ItemFormValue = {
   pattern: string;
   styleTags: string[];
   season: Season[];
+  /** Owner ids (see stylePrefs.owners roster); defaults to the primary owner. */
+  owners: string[];
   notes: string;
   isWishlist: boolean;
 };

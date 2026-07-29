@@ -3,7 +3,9 @@
 import { useMemo } from "react";
 import type { ItemFormValue, Season } from "@/lib/types";
 import { CATEGORIES, SEASONS } from "@/lib/types";
+import type { Owner } from "@/lib/json";
 import { NONE_CATEGORY, normalizeCategoryName } from "@/lib/categories";
+import { DEFAULT_OWNERS } from "@/lib/owners";
 import { COMMON_STYLE_TAGS, FAVORITE_COLOR_OPTIONS, normalizeStyleTagName } from "@/lib/preferences";
 
 type Props = {
@@ -13,6 +15,8 @@ type Props = {
   categories?: string[];
   /** Ordered style-tag chips (from Settings); defaults to built-ins when omitted. */
   styleTags?: string[];
+  /** Owner roster chips (from Settings); defaults to the Me/Her seed when omitted. */
+  owners?: Owner[];
   /** Ordered color palette (from Settings); defaults to built-ins when omitted. */
   colorOptions?: readonly { hex: string; name: string }[];
 };
@@ -23,6 +27,7 @@ export function ItemFormFields({
   disabled,
   categories = CATEGORIES,
   styleTags = [...COMMON_STYLE_TAGS],
+  owners = DEFAULT_OWNERS,
   colorOptions = FAVORITE_COLOR_OPTIONS,
 }: Props) {
   const selectedNames = new Set(value.colors.map((c) => c.name));
@@ -65,6 +70,16 @@ export function ItemFormFields({
     const extras = value.styleTags.filter((t) => !keys.has(normalizeStyleTagName(t)));
     return [...base, ...extras];
   }, [styleTags, value.styleTags]);
+
+  const ownerChips = useMemo<Owner[]>(() => {
+    const base = owners.length > 0 ? owners : DEFAULT_OWNERS;
+    const known = new Set(base.map((o) => o.id));
+    // Ids stored on the item but no longer in the roster still show so they can be cleared.
+    const extras = value.owners
+      .filter((id) => !known.has(id))
+      .map((id) => ({ id, name: id }) satisfies Owner);
+    return [...base, ...extras];
+  }, [owners, value.owners]);
 
   function toggleColor(hex: string, name: string) {
     if (selectedNames.has(name)) {
@@ -250,6 +265,37 @@ export function ItemFormFields({
           />
         </Field>
       </div>
+
+      <Field label="Owner">
+        <div className="flex flex-wrap gap-2">
+          {ownerChips.map((owner) => {
+            const checked = value.owners.includes(owner.id);
+            return (
+              <label
+                key={owner.id}
+                className={`cursor-pointer rounded-full border px-3 py-1 text-xs capitalize transition ${
+                  checked
+                    ? "bg-ink text-paper border-ink"
+                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                } ${disabled ? "opacity-50 pointer-events-none" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={checked}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...value.owners, owner.id]
+                      : value.owners.filter((x) => x !== owner.id);
+                    onChange({ owners: next });
+                  }}
+                />
+                {owner.name}
+              </label>
+            );
+          })}
+        </div>
+      </Field>
 
       <Field label="Style tags">
         <div className="flex flex-wrap gap-2">

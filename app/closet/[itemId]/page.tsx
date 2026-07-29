@@ -6,6 +6,7 @@ import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseColors, parseSeasons, parseStringArray, parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
+import { getOwnersFromPrefs, getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
 import type { ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
 import { ImageCarousel } from "./image-carousel";
@@ -26,6 +27,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
+  const ownersList = getOwnersFromPrefs(prefs);
   const colorOptions = getColorsListFromPrefs(prefs);
 
   const initial: ItemFormValue = {
@@ -40,6 +42,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     pattern: item.pattern ?? "",
     styleTags: parseStringArray(item.styleTags),
     season: parseSeasons(item.season),
+    owners: resolveItemOwnerIds(parseStringArray(item.owners), getPrimaryOwnerId(prefs)),
     notes: item.notes ?? "",
     isWishlist: item.isWishlist,
   };
@@ -116,6 +119,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
             initial={initial}
             categories={categories}
             styleTagsList={styleTagsList}
+            ownersList={ownersList}
             colorOptions={colorOptions}
           />
         </div>

@@ -56,6 +56,7 @@ const EMPTY_FILTERS: ActiveFilters = {
   colors: [],
   season: "",
   tag: "",
+  owner: "",
   wishlist: false,
   sort: "newest",
 };
@@ -73,6 +74,7 @@ function toFilterable(item: OutfitClosetItem): ClosetFilterableItem {
     notes: item.notes,
     season: item.season,
     colors: encode(item.colors),
+    owners: "[]", // outfit builder never filters by owner
     isWishlist: false,
     createdAt: new Date(0),
   };

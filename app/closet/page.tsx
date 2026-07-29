@@ -5,6 +5,12 @@ import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseColors, parseStringArray, parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs, normalizeStyleTagName } from "@/lib/preferences";
+import {
+  getOwnersFromPrefs,
+  getPrimaryOwnerId,
+  resolveItemOwnerIds,
+  SHARED_OWNER_FILTER,
+} from "@/lib/owners";
 import { CreditMark } from "@/components/credit-mark";
 import { AddItemFab } from "@/components/add-item-fab";
 import { ClosetFilteredView, type ClosetPageItem } from "@/components/closet-filtered-view";
@@ -21,6 +27,7 @@ type SearchParams = {
   color?: string;
   season?: string;
   tag?: string;
+  owner?: string;
   wishlist?: string;
   sort?: string;
 };
@@ -60,6 +67,8 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
   const preferredCategories = getCategoriesListFromPrefs(prefs);
   const preferredColors = getColorsListFromPrefs(prefs);
   const preferredTags = getStyleTagsListFromPrefs(prefs);
+  const ownersList = getOwnersFromPrefs(prefs);
+  const primaryOwnerId = getPrimaryOwnerId(prefs);
   const sortOrders = {
     categoryOrder: preferredCategories,
     colorOrder: preferredColors.map((c) => c.name),
@@ -155,7 +164,12 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       ? (tagFilterOptions.find((t) => normalizeStyleTagName(t) === tagParamNorm) ?? filters.tag)
       : "";
 
-  const filtersForUi = { ...filters, tag: resolvedTag };
+  const ownerFilterOptions = ownersList.map((o) => ({ value: o.id, label: o.name }));
+  // Only keep the owner param if it's a known owner or the "shared" sentinel.
+  const validOwnerValues = new Set([...ownersList.map((o) => o.id), SHARED_OWNER_FILTER]);
+  const resolvedOwner = validOwnerValues.has(filters.owner) ? filters.owner : "";
+
+  const filtersForUi = { ...filters, tag: resolvedTag, owner: resolvedOwner };
 
   const options: FilterOptions = {
     categories: categoryFilterOptions,
@@ -164,6 +178,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
     ),
     colors: colorFilterOptions,
     tags: tagFilterOptions,
+    owners: ownerFilterOptions,
   };
 
   const pageItems: ClosetPageItem[] = allItems.map((item) => {
@@ -185,6 +200,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       notes: item.notes,
       season: item.season,
       colors: item.colors,
+      owners: JSON.stringify(resolveItemOwnerIds(parseStringArray(item.owners), primaryOwnerId)),
       isWishlist: item.isWishlist,
       createdAt: item.createdAt,
       imagePath: bestImage,

@@ -3,6 +3,7 @@ import type { ActiveFilters } from "@/components/closet-filters";
 import { parseMultiFilterParam } from "@/lib/closet-filter-params";
 import { parseColors, parseStringArray } from "@/lib/json";
 import { normalizeStyleTagName } from "@/lib/preferences";
+import { SHARED_OWNER_FILTER } from "@/lib/owners";
 import { readClosetSort, sortWardrobeItems, type SortOrders } from "@/lib/closet-sort";
 
 /** URL param for “uncategorized” filter (empty string in DB). */
@@ -20,6 +21,8 @@ export type ClosetFilterableItem = {
   notes: string | null;
   season: string;
   colors: string;
+  /** JSON string[] of owner ids, already resolved so it's never empty. */
+  owners: string;
   isWishlist: boolean;
   createdAt: Date;
 };
@@ -31,6 +34,7 @@ export function readFiltersFromSearchParams(params: {
   color?: string;
   season?: string;
   tag?: string;
+  owner?: string;
   wishlist?: string;
   sort?: string;
 }): ActiveFilters {
@@ -41,6 +45,7 @@ export function readFiltersFromSearchParams(params: {
     colors: parseMultiFilterParam(params.color),
     season: params.season ?? "",
     tag: params.tag ?? "",
+    owner: params.owner ?? "",
     wishlist: params.wishlist === "1",
     sort: readClosetSort(params.sort),
   };
@@ -55,6 +60,7 @@ export function readFiltersFromQueryString(qs: string): ActiveFilters {
     color: p.get("color") ?? undefined,
     season: p.get("season") ?? undefined,
     tag: p.get("tag") ?? undefined,
+    owner: p.get("owner") ?? undefined,
     wishlist: p.get("wishlist") ?? undefined,
     sort: p.get("sort") ?? undefined,
   });
@@ -107,6 +113,17 @@ function itemMatchesSeasonFilter(item: ClosetFilterableItem, season: string): bo
   return parseStringArray(item.season).some((s) => s.trim().toLowerCase() === want);
 }
 
+/**
+ * Owner filter. "" = everyone; SHARED = 2+ owners; otherwise items whose owner
+ * set includes that owner id — so a person's view also surfaces shared items.
+ */
+function itemMatchesOwnerFilter(item: ClosetFilterableItem, owner: string): boolean {
+  if (!owner) return true;
+  const ids = parseStringArray(item.owners);
+  if (owner === SHARED_OWNER_FILTER) return ids.length >= 2;
+  return ids.includes(owner);
+}
+
 /** Client-side mirror of server closet filters (instant, no navigation). */
 export function filterClosetItems(
   items: ClosetFilterableItem[],
@@ -118,6 +135,7 @@ export function filterClosetItems(
     if (!itemMatchesCategoryFilter(item, filters.categories)) return false;
     if (!itemMatchesColorFilter(item, filters.colors)) return false;
     if (!itemMatchesSeasonFilter(item, filters.season)) return false;
+    if (!itemMatchesOwnerFilter(item, filters.owner)) return false;
     if (filters.tag && !itemHasStyleTag(item.styleTags, filters.tag)) return false;
     if (!itemMatchesTextQuery(item, filters.q)) return false;
     return true;

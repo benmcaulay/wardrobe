@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { encode } from "@/lib/json";
+import { encode, parseStylePrefs } from "@/lib/json";
+import { getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
 import { deleteUpload } from "@/lib/uploads";
 import type { ItemFormValue } from "@/lib/types";
 
@@ -22,6 +23,13 @@ export async function updateItem(input: UpdateItemInput): Promise<ActionResponse
   await assertOwned(input.itemId, user.id);
   if (!input.name.trim()) return { ok: false, error: "Name is required" };
 
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const primaryOwnerId = getPrimaryOwnerId(parseStylePrefs(dbUser?.stylePrefs));
+  const owners = resolveItemOwnerIds(input.owners ?? [], primaryOwnerId);
+
   await prisma.wardrobeItem.update({
     where: { id: input.itemId },
     data: {
@@ -36,6 +44,7 @@ export async function updateItem(input: UpdateItemInput): Promise<ActionResponse
       pattern: input.pattern.trim() || null,
       styleTags: encode(input.styleTags),
       season: encode(input.season),
+      owners: encode(owners),
       notes: input.notes.trim() || null,
       isWishlist: input.isWishlist,
     },

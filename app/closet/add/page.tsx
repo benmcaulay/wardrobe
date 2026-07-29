@@ -4,6 +4,7 @@ import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
+import { getOwnersFromPrefs } from "@/lib/owners";
 import { webMatchAutofillEnabled } from "@/lib/web-match-autofill";
 import { AddItemFlow } from "./add-item-flow";
 
@@ -16,6 +17,7 @@ export default async function AddItemPage() {
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
+  const ownersList = getOwnersFromPrefs(prefs);
   const colorOptions = getColorsListFromPrefs(prefs);
   const webMatchAutofill = webMatchAutofillEnabled();
   return (
@@ -33,6 +35,7 @@ export default async function AddItemPage() {
         autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
         categories={categories}
         styleTagsList={styleTagsList}
+        ownersList={ownersList}
         colorOptions={colorOptions}
         webMatchAutofill={webMatchAutofill}
       />

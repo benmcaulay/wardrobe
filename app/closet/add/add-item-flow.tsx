@@ -17,7 +17,8 @@ import { canonicalCategoryChoice } from "@/lib/categories";
 import { enqueueGhostPreview, getGhostJobStatus } from "@/lib/actions/ghost-mannequin";
 import { mapCategoryToGhost } from "@/lib/services/ghost-mannequin-shared";
 import type { ItemFormValue } from "@/lib/types";
-import type { Color } from "@/lib/json";
+import type { Color, Owner } from "@/lib/json";
+import { DEFAULT_OWNERS } from "@/lib/owners";
 import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import {
   analyzeUpload,
@@ -77,6 +78,7 @@ type Props = {
   autoGenerateGhost: boolean;
   categories: string[];
   styleTagsList: string[];
+  ownersList: Owner[];
   colorOptions: Color[];
   webMatchAutofill: boolean;
 };
@@ -104,6 +106,7 @@ function buildReadyState(
   analyze: AnalyzeOk,
   formPatch: Partial<ItemFormValue>,
   categories: string[],
+  primaryOwnerId: string,
 ): ReadyState {
   const merged = { ...analyze.bundle.prefill, ...formPatch };
   return {
@@ -128,6 +131,7 @@ function buildReadyState(
       pattern: merged.pattern ?? "",
       styleTags: merged.styleTags ?? [],
       season: merged.season ?? [],
+      owners: merged.owners ?? [primaryOwnerId],
       notes: "",
       isWishlist: false,
     },
@@ -140,9 +144,11 @@ export function AddItemFlow({
   autoGenerateGhost,
   categories,
   styleTagsList,
+  ownersList,
   colorOptions,
   webMatchAutofill,
 }: Props) {
+  const primaryOwnerId = ownersList[0]?.id ?? DEFAULT_OWNERS[0]!.id;
   const [state, setState] = useState<FlowState>({ kind: "idle" });
   const [credits, setCredits] = useState(initialCredits);
   const [webcam, setWebcam] = useState<null | { facing: "environment" | "user" }>(null);
@@ -300,7 +306,7 @@ export function AddItemFlow({
         thumbnailImagePath: res.thumbnailImagePath,
         bundle: res.bundle,
       };
-      const ready = buildReadyState(imageUrl(res.originalImagePath), analyze, res.patch, categories);
+      const ready = buildReadyState(imageUrl(res.originalImagePath), analyze, res.patch, categories, primaryOwnerId);
       setState(ready);
       setPendingFormPatch(null);
 
@@ -359,7 +365,7 @@ export function AddItemFlow({
       return;
     }
 
-    const ready = buildReadyState(previewUrl, analyzeRes, pendingFormPatch ?? {}, categories);
+    const ready = buildReadyState(previewUrl, analyzeRes, pendingFormPatch ?? {}, categories, primaryOwnerId);
     setState(ready);
     setPendingFormPatch(null);
     if (webMatchAutofill && analyzeRes.bundle.matches.length > 0 && webSearchResults.length === 0) {
@@ -694,6 +700,7 @@ export function AddItemFlow({
           state={state}
           categories={categories}
           styleTagsList={styleTagsList}
+          ownersList={ownersList}
           colorOptions={colorOptions}
           credits={credits}
           extraInputRef={extraInputRef}
@@ -1284,6 +1291,7 @@ function ReadyView({
   state,
   categories,
   styleTagsList,
+  ownersList,
   colorOptions,
   credits,
   extraInputRef,
@@ -1318,6 +1326,7 @@ function ReadyView({
   state: ReadyState;
   categories: string[];
   styleTagsList: string[];
+  ownersList: Owner[];
   colorOptions: Color[];
   credits: number;
   extraInputRef: RefObject<HTMLInputElement>;
@@ -1524,6 +1533,7 @@ function ReadyView({
           onChange={onChange}
           categories={categories}
           styleTags={styleTagsList}
+          owners={ownersList}
           colorOptions={colorOptions}
         />
 

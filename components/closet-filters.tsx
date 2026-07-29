@@ -11,15 +11,20 @@ import {
 } from "@/lib/closet-sort";
 import { readFiltersFromQueryString } from "@/lib/closet-item-filter";
 import { SEASONS } from "@/lib/types";
+import { SHARED_OWNER_FILTER } from "@/lib/owners";
 import { parseMultiFilterParam, serializeMultiFilterParam } from "@/lib/closet-filter-params";
 
 export type CategoryFilterOption = { value: string; label: string };
+
+export type OwnerFilterOption = { value: string; label: string };
 
 export type FilterOptions = {
   categories: CategoryFilterOption[];
   brands: string[];
   colors: string[];
   tags: string[];
+  /** Owner segmented options (excluding "Everyone"/"Shared", which are built in). */
+  owners: OwnerFilterOption[];
 };
 
 export type ActiveFilters = {
@@ -29,6 +34,7 @@ export type ActiveFilters = {
   colors: string[];
   season: string;
   tag: string;
+  owner: string;
   wishlist: boolean;
   sort: ClosetSortKey;
 };
@@ -52,6 +58,7 @@ function searchParamsHasActiveFilters(sp: URLSearchParams): boolean {
     sp.get("color") ||
     sp.get("season") ||
     sp.get("tag") ||
+    sp.get("owner") ||
     sp.get("wishlist") ||
     (sp.get("sort") && sp.get("sort") !== "newest")
   );
@@ -83,6 +90,7 @@ function buildQueryString(filters: ActiveFilters): string {
   if (colorParam) p.set("color", colorParam);
   if (filters.season) p.set("season", filters.season);
   if (filters.tag) p.set("tag", filters.tag);
+  if (filters.owner) p.set("owner", filters.owner);
   if (filters.wishlist) p.set("wishlist", "1");
   if (filters.sort && filters.sort !== "newest") p.set("sort", filters.sort);
   return p.toString();
@@ -110,6 +118,7 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
     (filters.colors.length > 0 ? 1 : 0) +
     (filters.season ? 1 : 0) +
     (filters.tag ? 1 : 0) +
+    (filters.owner ? 1 : 0) +
     (filters.wishlist ? 1 : 0) +
     (filters.sort !== "newest" ? 1 : 0);
 
@@ -157,6 +166,7 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
       colors: [],
       season: "",
       tag: "",
+      owner: "",
       wishlist: false,
       sort: "newest",
     };
@@ -168,6 +178,13 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
 
   return (
     <div className="mb-8 space-y-3">
+      {options.owners.length >= 2 && (
+        <OwnerFilter
+          options={options.owners}
+          value={filters.owner}
+          onChange={(owner) => patch({ owner })}
+        />
+      )}
       <div className="relative">
         <input
           ref={searchRef}
@@ -262,6 +279,45 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Segmented owner switcher: Everyone · <each owner> · Shared. */
+function OwnerFilter({
+  options,
+  value,
+  onChange,
+}: {
+  options: OwnerFilterOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const segments: OwnerFilterOption[] = [
+    { value: "", label: "Everyone" },
+    ...options,
+    { value: SHARED_OWNER_FILTER, label: "Shared" },
+  ];
+  return (
+    <div className="inline-flex flex-wrap items-center gap-1 rounded-full border border-ink/10 bg-white p-1">
+      {segments.map((seg) => {
+        const active = value === seg.value;
+        return (
+          <button
+            key={seg.value || "__everyone__"}
+            type="button"
+            onClick={() => onChange(seg.value)}
+            aria-pressed={active}
+            className={`rounded-full px-3.5 py-1 text-xs capitalize transition ${
+              active
+                ? "bg-ink text-paper"
+                : "text-ink-muted hover:text-ink hover:bg-paper-warm"
+            }`}
+          >
+            {seg.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

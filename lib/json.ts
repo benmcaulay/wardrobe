@@ -7,6 +7,15 @@
 export type Color = { hex: string; name: string };
 export type Season = "spring" | "summer" | "fall" | "winter";
 
+/**
+ * A wardrobe owner (e.g. "Me", "Her"). Items reference owners by the stable
+ * `id`, not the display `name`, so renaming an owner never orphans items.
+ * `linkedUserId` is null until the owner is migrated to a real login account —
+ * it's the anchor that keeps a future single-account → multi-account split
+ * mechanical rather than a rewrite.
+ */
+export type Owner = { id: string; name: string; linkedUserId?: string | null };
+
 export type StylePrefs = {
   sizes?: Record<string, string>;
   favoriteColors?: string[];
@@ -17,6 +26,8 @@ export type StylePrefs = {
   styleTagsList?: string[];
   /** Ordered wardrobe color palette (swatch + name); defaults to built-ins when absent. */
   colorsList?: Color[];
+  /** Ordered wardrobe owner roster; defaults to the built-in Me/Her seed when absent. */
+  owners?: Owner[];
   /** @deprecated — read for migration only; omit on save */
   customCategories?: string[];
   /** @deprecated */

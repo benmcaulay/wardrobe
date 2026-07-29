@@ -134,7 +134,7 @@ export function ClosetFilteredView({
           </motion.div>
         ) : (
           <motion.div
-            key={`${filters.sort}-${filteredGridItems.length}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.brand}-${filters.season}-${filters.wishlist}`}
+            key={`${filters.sort}-${filteredGridItems.length}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.owner}-${filters.brand}-${filters.season}-${filters.wishlist}`}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

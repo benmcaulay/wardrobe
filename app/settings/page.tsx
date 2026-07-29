@@ -5,6 +5,7 @@ import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getStyleTagsListFromPrefs } from "@/lib/preferences";
+import { getOwnersFromPrefs } from "@/lib/owners";
 import { stripeEnabled } from "@/lib/stripe";
 import { SettingsClient } from "./settings-client";
 
@@ -17,6 +18,7 @@ export default async function SettingsPage() {
   const initialPrefs = parseStylePrefs(dbUser?.stylePrefs);
   const categoryList = getCategoriesListFromPrefs(initialPrefs);
   const styleTagsList = getStyleTagsListFromPrefs(initialPrefs);
+  const ownersList = getOwnersFromPrefs(initialPrefs);
   const colorList = getColorsListFromPrefs(initialPrefs);
 
   return (
@@ -51,6 +53,7 @@ export default async function SettingsPage() {
           initialPrefs={initialPrefs}
           categoryList={categoryList}
           styleTagsList={styleTagsList}
+          ownersList={ownersList}
           colorList={colorList}
           credits={dbUser?.credits ?? 0}
           autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}

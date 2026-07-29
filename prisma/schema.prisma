@@ -141,6 +141,7 @@ model WardrobeItem {
   pattern           String?
   styleTags         String            // JSON: string[]
   season            String            // JSON: string[]
+  owners            String            @default("[]") // JSON: string[] of owner ids (see stylePrefs.owners roster)
   originalImagePath String
   originalThumbZoom Float             @default(1)     // zoom applied when framing the original in square tiles
   originalMirror    Boolean           @default(false)

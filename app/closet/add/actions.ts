@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { saveUpload, saveImageBuffer, deleteUpload, UploadError } from "@/lib/uploads";
-import { encode } from "@/lib/json";
+import { encode, parseStylePrefs } from "@/lib/json";
+import { getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
 import { NONE_CATEGORY } from "@/lib/categories";
 import { productMatchToFormPatch, productMatchToPrefill, resolveProductMetadata } from "@/lib/product-match";
 import { runPrefill, type PrefillBundle } from "@/lib/prefill";
@@ -211,6 +212,13 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
   }
   if (!input.name.trim()) return { ok: false, error: "Name is required" };
 
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const primaryOwnerId = getPrimaryOwnerId(parseStylePrefs(dbUser?.stylePrefs));
+  const owners = resolveItemOwnerIds(input.owners ?? [], primaryOwnerId);
+
   const item = await prisma.wardrobeItem.create({
     data: {
       userId: user.id,
@@ -225,6 +233,7 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
       pattern: input.pattern.trim() || null,
       styleTags: encode(input.styleTags),
       season: encode(input.season),
+      owners: encode(owners),
       originalImagePath: input.originalImagePath,
       ghostImagePath: input.ghostImagePath ?? null,
       ghostViews: input.ghostViews?.length

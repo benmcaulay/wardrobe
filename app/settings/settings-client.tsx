@@ -23,11 +23,17 @@ import {
   removeWardrobeColor,
   reorderWardrobeColors,
 } from "@/lib/actions/wardrobeColors";
+import {
+  addWardrobeOwner,
+  removeWardrobeOwner,
+  renameWardrobeOwner,
+  reorderWardrobeOwners,
+} from "@/lib/actions/wardrobeOwners";
 import { clearAllData } from "@/lib/actions/account";
 import { createCreditCheckout } from "@/lib/actions/billing";
 import { CREDIT_PACKS, formatPackPrice } from "@/lib/credit-packs";
 import { normalizeCategoryName } from "@/lib/categories";
-import type { Color, StylePrefs } from "@/lib/json";
+import type { Color, Owner, StylePrefs } from "@/lib/json";
 
 type EyeDropperResult = { sRGBHex: string };
 type EyeDropperConstructor = new () => { open: () => Promise<EyeDropperResult> };
@@ -36,6 +42,7 @@ type Props = {
   initialPrefs: StylePrefs;
   categoryList: string[];
   styleTagsList: string[];
+  ownersList: Owner[];
   colorList: Color[];
   credits: number;
   autoGenerateGhost: boolean;
@@ -49,6 +56,7 @@ export function SettingsClient({
   initialPrefs,
   categoryList,
   styleTagsList,
+  ownersList,
   colorList,
   credits,
   autoGenerateGhost,
@@ -57,6 +65,7 @@ export function SettingsClient({
   const [prefs, setPrefs] = useState<StylePrefs>(initialPrefs);
   const [newCategory, setNewCategory] = useState("");
   const [newTag, setNewTag] = useState("");
+  const [newOwner, setNewOwner] = useState("");
   const [newColorHex, setNewColorHex] = useState("#4a6fb0");
   const [newColorName, setNewColorName] = useState("");
   const [autoGen, setAutoGen] = useState(autoGenerateGhost);
@@ -64,9 +73,11 @@ export function SettingsClient({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [catError, setCatError] = useState<string | null>(null);
   const [tagError, setTagError] = useState<string | null>(null);
+  const [ownerError, setOwnerError] = useState<string | null>(null);
   const [colorError, setColorError] = useState<string | null>(null);
   const [localCategories, setLocalCategories] = useState(categoryList);
   const [localTags, setLocalTags] = useState(styleTagsList);
+  const [localOwners, setLocalOwners] = useState(ownersList);
   const [localColors, setLocalColors] = useState(colorList);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const [, startCat] = useTransition();
@@ -127,6 +138,10 @@ export function SettingsClient({
   useEffect(() => {
     setLocalTags(styleTagsList);
   }, [styleTagsList]);
+
+  useEffect(() => {
+    setLocalOwners(ownersList);
+  }, [ownersList]);
 
   useEffect(() => {
     setLocalColors(colorList);
@@ -256,6 +271,60 @@ export function SettingsClient({
       const res = await removeWardrobeStyleTag(name);
       if (!res.ok) {
         setTagError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function handleAddOwner() {
+    setOwnerError(null);
+    startCat(async () => {
+      const res = await addWardrobeOwner(newOwner);
+      if (!res.ok) {
+        setOwnerError(res.error);
+        return;
+      }
+      setNewOwner("");
+      router.refresh();
+    });
+  }
+
+  function handleReorderOwners(nextNames: string[]) {
+    const reordered = nextNames
+      .map((n) => localOwners.find((o) => o.name === n))
+      .filter((o): o is Owner => !!o);
+    setLocalOwners(reordered);
+    setOwnerError(null);
+    startCat(async () => {
+      const res = await reorderWardrobeOwners(nextNames);
+      if (!res.ok) setOwnerError(res.error);
+      router.refresh();
+    });
+  }
+
+  function handleRenameOwner(oldName: string, newName: string) {
+    setLocalOwners((prev) => prev.map((o) => (o.name === oldName ? { ...o, name: newName } : o)));
+    setOwnerError(null);
+    startCat(async () => {
+      const res = await renameWardrobeOwner(oldName, newName);
+      if (!res.ok) setOwnerError(res.error);
+      router.refresh();
+    });
+  }
+
+  function handleDeleteOwner(name: string) {
+    if (
+      !confirm(
+        `Remove “${name}” as an owner?\nItems owned by ${name} will fall back to your first owner.`,
+      )
+    )
+      return;
+    setOwnerError(null);
+    startCat(async () => {
+      const res = await removeWardrobeOwner(name);
+      if (!res.ok) {
+        setOwnerError(res.error);
         return;
       }
       router.refresh();
@@ -424,6 +493,51 @@ export function SettingsClient({
           onReorder={handleReorderCategories}
           onRename={handleRenameCategory}
           onRemove={handleDeleteCategory}
+        />
+      </section>
+
+      <section className="space-y-4">
+        <h3 className="text-xs uppercase tracking-wide text-ink-muted">Owners</h3>
+        <p className="text-sm text-ink-muted">
+          Who a piece belongs to. Shown as chips when adding or editing, and as the{" "}
+          <span className="text-ink">Everyone / Shared</span> switcher at the top of your closet.
+          A piece can have more than one owner — that&apos;s a shared item. Click a name to rename;
+          drag the ⋮⋮ handle to reorder (the first owner is the default for new pieces). Keep at
+          least one.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newOwner}
+            onChange={(e) => setNewOwner(e.target.value)}
+            placeholder="e.g. Alex"
+            className="flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleAddOwner();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleAddOwner}
+            className="rounded-full border border-ink/15 px-4 py-2 text-xs hover:bg-paper-warm transition"
+          >
+            Add
+          </button>
+        </div>
+        {ownerError && (
+          <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            {ownerError}
+          </p>
+        )}
+        <ReorderableStringList
+          items={localOwners.map((o) => o.name)}
+          onReorder={handleReorderOwners}
+          onRename={handleRenameOwner}
+          onRemove={handleDeleteOwner}
+          removeDisabled={() => localOwners.length <= 1}
         />
       </section>
 
