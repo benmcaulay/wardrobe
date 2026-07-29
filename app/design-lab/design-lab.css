@@ -91,6 +91,303 @@
 .lab-stage {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  perspective: 1600px;
+  perspective-origin: 50% 45%;
+}
+
+.lab-parallax-root {
+  min-height: 100dvh;
+  --lab-px: 0;
+  --lab-py: 0;
+}
+
+.lab-world {
+  position: relative;
+  min-height: 100%;
+  transform-style: preserve-3d;
+  will-change: transform;
+  transform: perspective(1400px)
+    translate3d(calc(var(--lab-px) * -42px), calc(var(--lab-py) * -30px), 0)
+    rotateX(calc(var(--lab-py) * 3.2deg))
+    rotateY(calc(var(--lab-px) * -4.2deg))
+    scale(1.045);
+}
+
+.lab-parallax-root[data-reduce="1"] .lab-world {
+  transform: none;
+}
+
+.lab-stage-body {
+  position: relative;
+  z-index: 2;
+}
+
+/* Depth helpers — Unifiers layered shift */
+.lab-shift-soft {
+  transform: translate3d(
+    calc(var(--lab-px) * -8px),
+    calc(var(--lab-py) * -4px),
+    0
+  );
+}
+.lab-shift-mid {
+  transform: translate3d(
+    calc(var(--lab-px) * -14px),
+    calc(var(--lab-py) * -10px),
+    0
+  );
+}
+.lab-shift-near {
+  transform: translate3d(
+    calc(var(--lab-px) * -24px),
+    calc(var(--lab-py) * -16px),
+    0
+  );
+}
+.lab-shift-counter {
+  transform: translate3d(calc(var(--lab-px) * 18px), 0, 0);
+}
+.lab-shift-far-counter {
+  transform: translate3d(
+      calc(var(--lab-px) * 28px),
+      calc(var(--lab-py) * 20px),
+      0
+    )
+    skewY(calc(-6deg + var(--lab-px) * 1.5deg))
+    rotate(calc(var(--lab-px) * 2deg));
+}
+.lab-shift-tilt {
+  transform: translate3d(
+      calc(var(--lab-px) * -28px),
+      calc(var(--lab-py) * -14px),
+      0
+    )
+    rotateY(calc(var(--lab-px) * -6deg))
+    rotateX(calc(var(--lab-py) * 3deg));
+}
+
+.lab-parallax-root[data-reduce="1"] .lab-shift-soft,
+.lab-parallax-root[data-reduce="1"] .lab-shift-mid,
+.lab-parallax-root[data-reduce="1"] .lab-shift-near,
+.lab-parallax-root[data-reduce="1"] .lab-shift-counter,
+.lab-parallax-root[data-reduce="1"] .lab-shift-far-counter,
+.lab-parallax-root[data-reduce="1"] .lab-shift-tilt {
+  transform: none;
+}
+
+/* ─── Unifiers-style drift atmosphere ─── */
+.lab-drift {
+  pointer-events: none;
+  position: absolute;
+  inset: -12% -8%;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.lab-drift-mark {
+  position: absolute;
+  will-change: transform;
+  animation: lab-idle-drift 14s ease-in-out infinite alternate;
+  transform: translate3d(
+      calc(-50% + var(--lab-px) * var(--depth, 1) * -28px),
+      calc(-50% + var(--lab-py) * var(--depth, 1) * -22px),
+      0
+    )
+    rotate(calc(var(--base-rot, 0deg) + var(--lab-px) * var(--depth, 1) * 2.5deg));
+}
+
+.lab-parallax-root[data-reduce="1"] .lab-drift-mark {
+  transform: translate(-50%, -50%) rotate(var(--base-rot, 0deg));
+  animation: none;
+}
+
+.lab-drift-orb {
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(255, 255, 255, 0.28),
+    rgba(255, 255, 255, 0.04) 45%,
+    transparent 70%
+  );
+  filter: blur(2px);
+  opacity: 0.85;
+}
+
+.lab-drift-ring {
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 40px rgba(255, 255, 255, 0.06);
+}
+
+.lab-drift-ring i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transform: scale(0.72) rotate(18deg);
+}
+
+.lab-drift-rule {
+  width: min(38vw, 22rem);
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.45),
+    transparent
+  );
+  opacity: 0.7;
+}
+
+.lab-drift-flare {
+  border-radius: 50%;
+  background: conic-gradient(
+    from 120deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.16) 18%,
+    transparent 36%,
+    rgba(255, 255, 255, 0.1) 58%,
+    transparent 78%
+  );
+  filter: blur(8px);
+  opacity: 0.55;
+  mix-blend-mode: screen;
+}
+
+.lab-drift-glyph,
+.lab-drift-index {
+  width: auto;
+  height: auto;
+  white-space: nowrap;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-drift-glyph {
+  font-size: clamp(1.4rem, 3vw, 2.4rem);
+  letter-spacing: 0.08em;
+  opacity: 0.35;
+  font-weight: 600;
+}
+
+.lab-drift-vignette {
+  position: absolute;
+  inset: -20%;
+  background: radial-gradient(
+    ellipse at 50% 45%,
+    transparent 35%,
+    rgba(0, 0, 0, 0.18) 78%,
+    rgba(0, 0, 0, 0.38) 100%
+  );
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  transform: translate3d(calc(var(--lab-px) * 18px), calc(var(--lab-py) * 14px), 0);
+}
+
+.lab-drift-orbit .lab-drift-orb {
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(62, 207, 191, 0.28),
+    rgba(122, 215, 255, 0.08) 42%,
+    transparent 70%
+  );
+}
+.lab-drift-orbit .lab-drift-ring {
+  border-color: rgba(62, 207, 191, 0.35);
+}
+.lab-drift-orbit .lab-drift-rule {
+  background: linear-gradient(90deg, transparent, rgba(62, 207, 191, 0.55), transparent);
+}
+.lab-drift-orbit .lab-drift-glyph,
+.lab-drift-orbit .lab-drift-index {
+  color: rgba(217, 230, 239, 0.45);
+  font-family: var(--lab-font-orbit-mono), ui-monospace, monospace;
+}
+
+.lab-drift-runway .lab-drift-orb {
+  background: radial-gradient(
+    circle at 40% 30%,
+    rgba(219, 255, 0, 0.22),
+    rgba(0, 0, 0, 0.05) 48%,
+    transparent 72%
+  );
+  mix-blend-mode: multiply;
+}
+.lab-drift-runway .lab-drift-ring {
+  border-color: rgba(20, 20, 20, 0.35);
+  border-width: 2px;
+}
+.lab-drift-runway .lab-drift-rule {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #141414, transparent);
+  opacity: 0.35;
+}
+.lab-drift-runway .lab-drift-glyph,
+.lab-drift-runway .lab-drift-index {
+  color: rgba(20, 20, 20, 0.4);
+  font-family: var(--lab-font-runway-ui), system-ui, sans-serif;
+  font-weight: 700;
+}
+.lab-drift-runway .lab-drift-vignette {
+  mix-blend-mode: normal;
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    transparent 40%,
+    rgba(219, 255, 0, 0.08) 75%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
+  opacity: 0.7;
+}
+
+.lab-drift-stack .lab-drift-orb {
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(182, 242, 92, 0.35),
+    rgba(31, 107, 79, 0.1) 45%,
+    transparent 70%
+  );
+}
+.lab-drift-stack .lab-drift-ring {
+  border-color: rgba(16, 36, 28, 0.22);
+}
+.lab-drift-stack .lab-drift-rule {
+  background: linear-gradient(90deg, transparent, rgba(16, 36, 28, 0.35), transparent);
+}
+.lab-drift-stack .lab-drift-glyph,
+.lab-drift-stack .lab-drift-index {
+  color: rgba(16, 36, 28, 0.4);
+  font-family: var(--lab-font-stack-ui), system-ui, sans-serif;
+}
+.lab-drift-stack .lab-drift-vignette {
+  mix-blend-mode: normal;
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    transparent 42%,
+    rgba(16, 36, 28, 0.08) 100%
+  );
+}
+
+.lab-drift-hub .lab-drift-orb {
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(255, 255, 255, 0.2),
+    rgba(120, 160, 255, 0.08) 45%,
+    transparent 70%
+  );
+}
+
+@keyframes lab-idle-drift {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 1.2% -1.6%;
+  }
 }
 
 /* ─── Shared reduced motion ─── */
@@ -100,7 +397,9 @@
   .runway-marquee-track,
   .runway-fab-orbit,
   .stack-shear,
-  .stack-sheet {
+  .stack-sheet,
+  .lab-drift-mark,
+  .lab-world {
     animation: none !important;
     transition: none !important;
   }
@@ -235,11 +534,11 @@
 @keyframes orbit-spin-in {
   from {
     opacity: 0;
-    transform: rotateX(28deg) translateZ(-80px) scale(0.92);
+    filter: blur(6px);
   }
   to {
     opacity: 1;
-    transform: rotateX(0) translateZ(0) scale(1);
+    filter: blur(0);
   }
 }
 
@@ -286,11 +585,16 @@
   color: var(--o-warn);
 }
 
+.orbit-layout {
+  will-change: transform;
+}
+
 .orbit-field {
   position: relative;
   min-height: 28rem;
   transform-style: preserve-3d;
-  transition: transform 120ms linear;
+  transform: rotateY(calc(var(--lab-px) * 12deg)) rotateX(calc(var(--lab-py) * -9deg))
+    translate3d(calc(var(--lab-px) * -22px), calc(var(--lab-py) * -16px), 40px);
 }
 
 .orbit-card {
@@ -306,6 +610,11 @@
   transform-style: preserve-3d;
   animation: orbit-float-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
   transition: box-shadow 200ms ease, border-color 200ms ease;
+  transform: translate3d(
+    calc(var(--lab-px) * var(--card-depth, 0.5) * -36px),
+    calc(var(--lab-py) * var(--card-depth, 0.5) * -28px),
+    var(--lab-dz, 0px)
+  );
 }
 
 .orbit-card:hover,
@@ -318,10 +627,11 @@
 @keyframes orbit-float-in {
   from {
     opacity: 0;
-    transform: translateZ(-220px) scale(0.7);
+    filter: blur(8px);
   }
   to {
     opacity: 1;
+    filter: blur(0);
   }
 }
 
@@ -580,15 +890,29 @@
   position: relative;
   transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease;
   animation: runway-slide-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform: translate3d(
+    calc(var(--lab-px) * var(--card-depth, 0.5) * -20px),
+    calc(var(--lab-py) * var(--card-depth, 0.5) * -16px),
+    0
+  );
 }
 
 .runway-tile:hover {
-  transform: translateY(-10px) rotate(-1deg);
+  transform: translate3d(
+      calc(var(--lab-px) * var(--card-depth, 0.5) * -20px),
+      calc(var(--lab-py) * var(--card-depth, 0.5) * -16px - 10px),
+      0
+    )
+    rotate(-1deg);
   box-shadow: 10px 10px 0 var(--r-ink);
 }
 
 .runway-tile.is-selected {
-  transform: translateY(-14px) rotate(0);
+  transform: translate3d(
+    calc(var(--lab-px) * var(--card-depth, 0.5) * -20px),
+    calc(var(--lab-py) * var(--card-depth, 0.5) * -16px - 14px),
+    0
+  );
   box-shadow: 12px 12px 0 var(--r-acid);
   z-index: 3;
 }
@@ -596,11 +920,9 @@
 @keyframes runway-slide-in {
   from {
     opacity: 0;
-    transform: translateX(40px);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
   }
 }
 
@@ -773,17 +1095,17 @@
       #d7efe3
     ),
     linear-gradient(118deg, transparent 40%, rgba(182, 242, 92, 0.35) 40.5%, transparent 70%);
-  transform: skewY(-6deg);
-  animation: stack-drift 18s ease-in-out infinite alternate;
   z-index: 0;
+  will-change: transform;
+  animation: stack-drift 18s ease-in-out infinite alternate;
 }
 
 @keyframes stack-drift {
   from {
-    transform: skewY(-6deg) translateY(-2%);
+    filter: hue-rotate(-4deg);
   }
   to {
-    transform: skewY(-4deg) translateY(3%) translateX(-2%);
+    filter: hue-rotate(8deg);
   }
 }
 
@@ -849,16 +1171,27 @@
   border-radius: 1.5rem;
   padding: 1rem 1.1rem;
   box-shadow: 0 24px 50px rgba(16, 36, 28, 0.08);
-  transform: translateY(0) rotate(-0.6deg);
+  --card-depth: 0.55;
+  transform: translate3d(
+      calc(var(--lab-px) * var(--card-depth) * -26px),
+      calc(var(--lab-py) * var(--card-depth) * -20px),
+      0
+    )
+    rotate(calc(var(--lab-rot, -0.6deg) + var(--lab-px) * var(--card-depth) * 1.8deg));
   transition: transform 280ms ease, box-shadow 280ms ease;
 }
 
 .stack-sheet:nth-child(even) {
-  transform: rotate(0.8deg);
+  --lab-rot: 0.8deg;
 }
 
 .stack-sheet:hover {
-  transform: translateY(-4px) rotate(0);
+  transform: translate3d(
+      calc(var(--lab-px) * var(--card-depth) * -26px),
+      calc(var(--lab-py) * var(--card-depth) * -20px - 4px),
+      0
+    )
+    rotate(0deg);
   box-shadow: 0 30px 60px rgba(16, 36, 28, 0.12);
 }
 
@@ -1155,10 +1488,20 @@
   background: rgba(255, 255, 255, 0.04);
   transition: transform 220ms ease, background 220ms ease, border-color 220ms ease;
   min-height: 100%;
+  --card-depth: 0.5;
+  transform: translate3d(
+    calc(var(--lab-px) * var(--card-depth) * -18px),
+    calc(var(--lab-py) * var(--card-depth) * -14px),
+    0
+  );
 }
 
 .lab-hub-card:hover {
-  transform: translateY(-4px);
+  transform: translate3d(
+      calc(var(--lab-px) * var(--card-depth) * -18px),
+      calc(var(--lab-py) * var(--card-depth) * -14px - 4px),
+      0
+    );
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.22);
 }

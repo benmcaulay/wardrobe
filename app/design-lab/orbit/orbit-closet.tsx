@@ -1,23 +1,22 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { LAB_ITEMS, type LabItem } from "../mock-items";
 
 const CATEGORIES = ["all", ...Array.from(new Set(LAB_ITEMS.map((i) => i.category)))];
 
 const POSITIONS = [
-  { x: 8, y: 8, z: 40, delay: 0 },
-  { x: 38, y: 4, z: -20, delay: 0.05 },
-  { x: 68, y: 12, z: 60, delay: 0.1 },
-  { x: 18, y: 42, z: -40, delay: 0.12 },
-  { x: 48, y: 38, z: 20, delay: 0.16 },
-  { x: 74, y: 48, z: -10, delay: 0.2 },
-  { x: 28, y: 68, z: 50, delay: 0.22 },
-  { x: 58, y: 72, z: -30, delay: 0.26 },
+  { x: 8, y: 8, z: 40, delay: 0, depth: 0.55 },
+  { x: 38, y: 4, z: -20, delay: 0.05, depth: 0.35 },
+  { x: 68, y: 12, z: 60, delay: 0.1, depth: 0.75 },
+  { x: 18, y: 42, z: -40, delay: 0.12, depth: 0.3 },
+  { x: 48, y: 38, z: 20, delay: 0.16, depth: 0.5 },
+  { x: 74, y: 48, z: -10, delay: 0.2, depth: 0.4 },
+  { x: 28, y: 68, z: 50, delay: 0.22, depth: 0.7 },
+  { x: 58, y: 72, z: -30, delay: 0.26, depth: 0.25 },
 ];
 
 export function OrbitCloset() {
-  const fieldRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState("all");
   const [selected, setSelected] = useState<LabItem | null>(null);
@@ -32,23 +31,10 @@ export function OrbitCloset() {
     });
   }, [query, cat]);
 
-  function onPointerMove(e: React.PointerEvent) {
-    const el = fieldRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    el.style.transform = `rotateY(${px * 10}deg) rotateX(${-py * 7}deg)`;
-  }
-
-  function onPointerLeave() {
-    if (fieldRef.current) fieldRef.current.style.transform = "";
-  }
-
   return (
     <div className="orbit-shell">
       <div className="orbit-noise" aria-hidden />
-      <div className="orbit-layout">
+      <div className="orbit-layout lab-shift-mid">
         <nav className="orbit-rail" aria-label="Primary">
           {[
             ["closet", "Closet"],
@@ -88,7 +74,7 @@ export function OrbitCloset() {
         <div className="orbit-main">
           <div className="orbit-top">
             <div>
-              <div className="orbit-wordmark">WARDROBE</div>
+              <div className="orbit-wordmark lab-shift-near">WARDROBE</div>
               <p className="orbit-sub">Orbit · spatial closet · {items.length} in field</p>
             </div>
             <div className="orbit-tools">
@@ -124,12 +110,7 @@ export function OrbitCloset() {
               </button>
             </div>
           ) : (
-            <div
-              ref={fieldRef}
-              className="orbit-field"
-              onPointerMove={onPointerMove}
-              onPointerLeave={onPointerLeave}
-            >
+            <div className="orbit-field">
               {items.map((item, idx) => {
                 const pos = POSITIONS[idx % POSITIONS.length]!;
                 return (
@@ -137,14 +118,17 @@ export function OrbitCloset() {
                     key={item.id}
                     type="button"
                     className={`orbit-card ${selected?.id === item.id ? "is-selected" : ""}`}
-                    style={{
-                      left: `${pos.x}%`,
-                      top: `${pos.y}%`,
-                      transform: `translateZ(${pos.z}px)`,
-                      animationDelay: `${pos.delay}s`,
-                      ["--g-hue" as string]: item.hue,
-                      ["--g-accent" as string]: item.accent,
-                    }}
+                    style={
+                      {
+                        left: `${pos.x}%`,
+                        top: `${pos.y}%`,
+                        animationDelay: `${pos.delay}s`,
+                        ["--card-depth" as string]: pos.depth,
+                        ["--lab-dz" as string]: `${pos.z}px`,
+                        ["--g-hue" as string]: item.hue,
+                        ["--g-accent" as string]: item.accent,
+                      } as React.CSSProperties
+                    }
                     onClick={() => setSelected(item)}
                   >
                     <div className="orbit-swatch" />
@@ -163,7 +147,7 @@ export function OrbitCloset() {
       </div>
 
       {selected && nav === "closet" && (
-        <aside className="orbit-detail" aria-live="polite">
+        <aside className="orbit-detail lab-shift-near" aria-live="polite">
           <h3>{selected.name}</h3>
           <p style={{ color: "var(--o-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>
             {selected.brand} · {selected.category} · {selected.season}

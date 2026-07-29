@@ -61,9 +61,9 @@ export function RunwayCloset() {
 
   return (
     <div className="runway-shell">
-      <header className="runway-header">
+      <header className="runway-header lab-shift-mid">
         <div>
-          <div className="runway-brand">
+          <div className="runway-brand lab-shift-near">
             WAR<em>DROBE</em>
           </div>
         </div>
@@ -90,14 +90,14 @@ export function RunwayCloset() {
         </nav>
       </header>
 
-      <div className="runway-marquee" aria-hidden>
+      <div className="runway-marquee lab-shift-counter" aria-hidden>
         <div className="runway-marquee-track">
           <span>{marqueeText}</span>
           <span>{marqueeText}</span>
         </div>
       </div>
 
-      <div className="runway-controls">
+      <div className="runway-controls lab-shift-soft">
         <input
           placeholder="Filter the strip…"
           value={query}
@@ -127,33 +127,39 @@ export function RunwayCloset() {
       </div>
 
       {panel === "closet" ? (
-        <div className="runway-strip-wrap">
+        <div className="runway-strip-wrap lab-shift-tilt">
           <div className="runway-strip">
-            {items.map((item, i) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`runway-tile ${selected?.id === item.id ? "is-selected" : ""}`}
-                style={{
-                  animationDelay: `${i * 0.04}s`,
-                  ["--g-hue" as string]: item.hue,
-                  ["--g-accent" as string]: item.accent,
-                }}
-                onClick={() => setSelected(item)}
-              >
-                <div className="runway-tile-art" />
-                <div className="runway-tile-meta">
-                  <strong>{item.name}</strong>
-                  <span>
-                    {item.brand} · {item.season}
-                  </span>
-                </div>
-              </button>
-            ))}
+            {items.map((item, i) => {
+              const depth = 0.35 + (i % 5) * 0.12;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`runway-tile ${selected?.id === item.id ? "is-selected" : ""}`}
+                  style={
+                    {
+                      animationDelay: `${i * 0.04}s`,
+                      ["--card-depth" as string]: depth,
+                      ["--g-hue" as string]: item.hue,
+                      ["--g-accent" as string]: item.accent,
+                    } as React.CSSProperties
+                  }
+                  onClick={() => setSelected(item)}
+                >
+                  <div className="runway-tile-art" />
+                  <div className="runway-tile-meta">
+                    <strong>{item.name}</strong>
+                    <span>
+                      {item.brand} · {item.season}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : (
-        <div style={{ padding: "2rem 1.25rem", position: "relative", zIndex: 2 }}>
+        <div style={{ padding: "2rem 1.25rem", position: "relative", zIndex: 2 }} className="lab-shift-mid">
           <h2
             style={{
               fontFamily: "var(--lab-font-runway-display), Impact, sans-serif",

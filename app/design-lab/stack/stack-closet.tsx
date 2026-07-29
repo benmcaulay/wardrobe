@@ -22,18 +22,21 @@ export function StackCloset() {
 
   return (
     <div className="stack-shell">
-      <div className="stack-shear" aria-hidden />
-      <div className="stack-content">
+      <div className="stack-shear lab-shift-far-counter" aria-hidden />
+      <div className="stack-content lab-shift-mid">
         <div className="stack-hero">
           <div>
-            <h1 className="stack-title">
+            <h1 className="stack-title lab-shift-near">
               Your
               <span>wardrobe</span>
               stacked
             </h1>
           </div>
           <div className="stack-side">
-            <div className="stack-sheet">
+            <div
+              className="stack-sheet"
+              style={{ ["--lab-rot" as string]: "-1.5deg" } as React.CSSProperties}
+            >
               <nav className="stack-nav" aria-label="Primary">
                 {(
                   [
@@ -72,7 +75,15 @@ export function StackCloset() {
         </div>
 
         {nav !== "closet" ? (
-          <div className="stack-sheet" style={{ maxWidth: "32rem", transform: "rotate(-1deg)" }}>
+          <div
+            className="stack-sheet lab-shift-mid"
+            style={
+              {
+                maxWidth: "32rem",
+                ["--lab-rot" as string]: "-1deg",
+              } as React.CSSProperties
+            }
+          >
             <h2
               style={{
                 fontFamily: "var(--lab-font-stack-display), Georgia, serif",
@@ -120,38 +131,45 @@ export function StackCloset() {
             </div>
 
             <div className="stack-grid">
-              {items.map((item, i) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`stack-card ${selected?.id === item.id ? "is-selected" : ""}`}
-                  style={{ animationDelay: `${i * 0.045}s` }}
-                  onClick={() => setSelected(item)}
-                >
-                  <div
-                    className="stack-sheet"
-                    style={{
-                      transform: `rotate(${i % 2 === 0 ? -1.2 : 1.1}deg)`,
-                    }}
+              {items.map((item, i) => {
+                const depth = 0.4 + (i % 4) * 0.15;
+                const baseRot = i % 2 === 0 ? -1.2 : 1.1;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`stack-card ${selected?.id === item.id ? "is-selected" : ""}`}
+                    style={{ animationDelay: `${i * 0.045}s` }}
+                    onClick={() => setSelected(item)}
                   >
                     <div
-                      className="stack-art"
+                      className="stack-sheet"
                       style={
                         {
-                          ["--g-hue" as string]: item.hue,
-                          ["--g-accent" as string]: item.accent,
+                          ["--card-depth" as string]: depth,
+                          ["--lab-rot" as string]: `${baseRot}deg`,
                         } as React.CSSProperties
                       }
-                    />
-                    <div className="stack-card-meta">
-                      <strong>{item.name}</strong>
-                      <span>
-                        {item.brand} · {item.category}
-                      </span>
+                    >
+                      <div
+                        className="stack-art"
+                        style={
+                          {
+                            ["--g-hue" as string]: item.hue,
+                            ["--g-accent" as string]: item.accent,
+                          } as React.CSSProperties
+                        }
+                      />
+                      <div className="stack-card-meta">
+                        <strong>{item.name}</strong>
+                        <span>
+                          {item.brand} · {item.category}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
