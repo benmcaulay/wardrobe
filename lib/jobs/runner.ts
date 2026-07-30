@@ -22,6 +22,7 @@ import {
   tallyScanProgress,
 } from "../server/camera-roll-scan";
 import { assignDuplicateGroups } from "../server/scan-duplicate-groups";
+import { loadClosetHashIndex } from "../server/scan-closet-index";
 import {
   markJobSucceeded,
   markJobFailed,
@@ -206,12 +207,16 @@ async function runCameraRollScan(
   });
   const creditsRemaining = dbUser?.credits;
 
+  // Perceptual hashes of the existing closet, loaded once, so we can skip
+  // re-scans of already-imported photos and flag per-garment duplicates.
+  const closetIndex = await loadClosetHashIndex(userId);
+
   // Bounded-concurrency pool: each worker pulls the next photo until drained,
   // pushing results and emitting progress as photos complete.
   async function worker() {
     while (cursor < total) {
       const photoPath = payload.photoPaths[cursor++]!;
-      const batch = await processScanPhotoForReview(userId, photoPath);
+      const batch = await processScanPhotoForReview(userId, photoPath, closetIndex);
       items.push(...batch);
       photosProcessed += 1;
       await updateJobProgress(jobId, {

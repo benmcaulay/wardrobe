@@ -142,6 +142,7 @@ model WardrobeItem {
   styleTags         String            // JSON: string[]
   season            String            // JSON: string[]
   owners            String            @default("[]") // JSON: string[] of owner ids (see stylePrefs.owners roster)
+  dHash             String?           // perceptual hash of the garment image (duplicate detection); computed lazily
   originalImagePath String
   originalThumbZoom Float             @default(1)     // zoom applied when framing the original in square tiles
   originalMirror    Boolean           @default(false)

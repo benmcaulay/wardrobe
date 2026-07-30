@@ -84,6 +84,12 @@ export type CameraRollScanItemResult = {
   splitGroupId?: string;
   /** True when this piece was cropped out of a multi-item scene (affects ghost prompt). */
   isolatedCrop?: boolean;
+  /** Perceptual hash of the garment image, carried so commit persists it without recompute. */
+  dHash?: string;
+  /** Set when this piece already appears to exist in the closet (pre-unchecked in review). */
+  alreadyInCloset?: boolean;
+  /** Name of the existing closet item this one duplicates. */
+  duplicateOfName?: string;
   /** Original camera-roll upload before per-garment crop. */
   sourcePhotoPath?: string;
   reason?: string;

@@ -10,6 +10,8 @@ import {
   type DetectedGarment,
 } from "@/lib/services/garmentClassifier";
 import { cropGarmentRegion } from "@/lib/services/garment-crop";
+import { computeDHash } from "@/lib/image-dhash";
+import { findClosetMatch, type ClosetHashEntry } from "@/lib/server/scan-closet-index";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { deleteUpload } from "@/lib/uploads";
 import type {
@@ -54,11 +56,20 @@ async function resolveGarmentWorkItems(
   return items;
 }
 
-function workItemToReview(
+async function workItemToReview(
   work: GarmentWorkItem,
   sourcePhotoPath: string,
+  closetIndex: ClosetHashEntry[],
   splitGroupId?: string,
-): CameraRollScanItemResult {
+): Promise<CameraRollScanItemResult> {
+  // Hash the crop so commit can persist it and so we can flag pieces already
+  // in the closet (e.g. a garment from a multi-item scene we've imported before).
+  const hash = await computeDHash(work.garmentImagePath).catch(() => null);
+  const match =
+    hash && closetIndex.length > 0
+      ? findClosetMatch(hash, work.garment.name, work.garment.category, closetIndex)
+      : null;
+
   return {
     reviewId: crypto.randomUUID(),
     originalImagePath: work.garmentImagePath,
@@ -67,6 +78,9 @@ function workItemToReview(
     // The garment is isolated from a multi-item scene, so its ghost needs the
     // "ignore other pieces" instruction. Persisted so commit can pass it on.
     isolatedCrop: work.isDerivedCrop || undefined,
+    dHash: hash ?? undefined,
+    alreadyInCloset: match ? true : undefined,
+    duplicateOfName: match?.name,
     status: "ready",
     name: work.garment.name.trim() || "Imported piece",
     category: work.garment.category || NONE_CATEGORY,
@@ -80,10 +94,15 @@ function workItemToReview(
  * Classify + crop one camera-roll photo into review items. Ghosting is deferred
  * to commit so we only pay (time + credits) for pieces the user actually keeps.
  * May return multiple review items when the photo contains several garments.
+ *
+ * `closetIndex` holds perceptual hashes of the existing closet: an exact re-scan
+ * of an already-imported photo is skipped before the paid classifier call, and
+ * per-garment matches are flagged so review can pre-uncheck them.
  */
 export async function processScanPhotoForReview(
   userId: string,
   originalImagePath: string,
+  closetIndex: ClosetHashEntry[] = [],
 ): Promise<CameraRollScanItemResult[]> {
   const reviewId = crypto.randomUUID();
 
@@ -98,6 +117,16 @@ export async function processScanPhotoForReview(
     ];
   }
 
+  // Cheap gate before paying to classify: if this exact photo already matches a
+  // closet item (common when re-scanning the same roll), skip it entirely.
+  if (closetIndex.length > 0) {
+    const photoHash = await computeDHash(originalImagePath).catch(() => null);
+    if (photoHash && findClosetMatch(photoHash, undefined, undefined, closetIndex)) {
+      await deleteUpload(originalImagePath).catch(() => undefined);
+      return [{ reviewId, originalImagePath, status: "skipped", reason: "Already in your closet" }];
+    }
+  }
+
   const quota = await checkAiQuota(userId);
   if (!quota.ok) {
     return [{ reviewId, originalImagePath, status: "failed", error: quota.error }];
@@ -106,12 +135,14 @@ export async function processScanPhotoForReview(
   const detection = await detectGarmentsInPhoto(originalImagePath);
   if (!detection.isGarment || detection.garments.length === 0) {
     await deleteUpload(originalImagePath).catch(() => undefined);
-    return [{ reviewId, originalImagePath, status: "skipped" }];
+    return [{ reviewId, originalImagePath, status: "skipped", reason: "Not clothing" }];
   }
 
   const splitGroupId = detection.garments.length > 1 ? crypto.randomUUID() : undefined;
   const workItems = await resolveGarmentWorkItems(userId, originalImagePath, detection.garments);
-  return workItems.map((work) => workItemToReview(work, originalImagePath, splitGroupId));
+  return Promise.all(
+    workItems.map((work) => workItemToReview(work, originalImagePath, closetIndex, splitGroupId)),
+  );
 }
 
 export type CommitScanReviewSelection = {
@@ -186,6 +217,7 @@ export async function commitScanReview(
         season: encode([]),
         owners: encode([primaryOwnerId]),
         originalImagePath: item.originalImagePath,
+        dHash: item.dHash ?? null,
       },
     });
 

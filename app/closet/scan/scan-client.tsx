@@ -38,6 +38,8 @@ type ReviewDraft = {
   originalImagePath: string;
   duplicateGroupId?: string;
   splitGroupId?: string;
+  alreadyInCloset?: boolean;
+  duplicateOfName?: string;
 };
 
 type ReviewSection = {
@@ -80,10 +82,11 @@ function readyItems(result: CameraRollScanProgress): CameraRollScanItemResult[] 
 function draftsFromResult(result: CameraRollScanProgress): ReviewDraft[] {
   const seenGroups = new Set<string>();
   return readyItems(result).map((item) => {
-    let include = true;
+    // Pieces already in the closet start unchecked; the user can still opt in.
+    let include = !item.alreadyInCloset;
     if (item.duplicateGroupId) {
       if (seenGroups.has(item.duplicateGroupId)) include = false;
-      else seenGroups.add(item.duplicateGroupId);
+      else if (include) seenGroups.add(item.duplicateGroupId);
     }
     return {
       reviewId: item.reviewId,
@@ -94,6 +97,8 @@ function draftsFromResult(result: CameraRollScanProgress): ReviewDraft[] {
       originalImagePath: item.originalImagePath,
       duplicateGroupId: item.duplicateGroupId,
       splitGroupId: item.splitGroupId,
+      alreadyInCloset: item.alreadyInCloset,
+      duplicateOfName: item.duplicateOfName,
     };
   });
 }
@@ -644,6 +649,11 @@ type ReviewFieldProps = {
 function ReviewFields({ draft, categories, onPatch }: ReviewFieldProps) {
   return (
     <div className="flex-1 min-w-0 space-y-2">
+      {draft.alreadyInCloset && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-0.5 text-[10px] uppercase tracking-wide">
+          Already in closet{draft.duplicateOfName ? ` · ${draft.duplicateOfName}` : ""}
+        </span>
+      )}
       <input
         type="text"
         value={draft.name}
