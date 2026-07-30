@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { getObject } from "./storage";
+import type { Color } from "./json";
 
 /** 64-bit difference hash as a binary string (8×8). */
 export async function computeDHash(imageKey: string): Promise<string | null> {
@@ -56,6 +57,50 @@ export function titlesLikelySame(a: string | undefined, b: string | undefined): 
     if (wordsA.has(w)) common += 1;
   }
   return common >= 2;
+}
+
+/**
+ * A garment "signature" from the classifier's discriminative attributes
+ * (category + dominant colors + pattern). Two photos of the same piece share
+ * one; different garments do not — far more reliable than a whole-photo hash,
+ * which on wearing-shots keys on pose/background, not the clothes.
+ * Returns null when there isn't enough signal to compare (no category/colors).
+ */
+export function garmentSignature(
+  category: string | undefined,
+  colors: Color[] | undefined,
+  pattern: string | undefined,
+): string | null {
+  if (!category || category === "None") return null;
+  const names = (colors ?? [])
+    .map((c) => c.name.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+  if (names.length === 0) return null;
+  return `${category.toLowerCase()}|${names.join(",")}|${(pattern ?? "solid").toLowerCase()}`;
+}
+
+export type GarmentDuplicateInput = {
+  hash: string;
+  category?: string;
+  colors?: Color[];
+  pattern?: string;
+};
+
+/**
+ * Whether two scanned garments are likely the SAME piece. Groups only when the
+ * frames are near-identical (exact re-upload) OR the garment signatures match —
+ * so different-colored / different-patterned pieces are never merged.
+ */
+export function garmentsLikelyDuplicate(
+  a: GarmentDuplicateInput,
+  b: GarmentDuplicateInput,
+): boolean {
+  // Near-identical frame (burst shot / re-upload of the exact same photo).
+  if (hammingDistance(a.hash, b.hash) <= 8) return true;
+  const sigA = garmentSignature(a.category, a.colors, a.pattern);
+  const sigB = garmentSignature(b.category, b.colors, b.pattern);
+  return sigA !== null && sigA === sigB;
 }
 
 export type VisualSimilarityInput = {

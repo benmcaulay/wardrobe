@@ -130,32 +130,86 @@ function ensureFalConfigured() {
 
 /** Map vision-model category labels to wardrobe DB categories. */
 export function mapClassifierCategory(raw: string | undefined): string {
-  const key = (raw ?? "").trim().toLowerCase();
+  const key = (raw ?? "").trim().toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ");
   switch (key) {
     case "top":
     case "shirt":
+    case "t shirt":
+    case "tshirt":
+    case "tee":
+    case "tee shirt":
+    case "tank":
+    case "tank top":
+    case "polo":
+    case "polo shirt":
+    case "jersey":
     case "sweater":
+    case "sweatshirt":
     case "hoodie":
+    case "cardigan":
+    case "turtleneck":
+    case "henley":
     case "blouse":
+    case "long sleeve":
       return "top";
     case "bottom":
+    case "bottoms":
     case "pants":
+    case "trousers":
+    case "jeans":
     case "shorts":
     case "skirt":
+    case "leggings":
+    case "chinos":
+    case "joggers":
+    case "sweatpants":
+    case "slacks":
       return "bottom";
     case "dress":
+    case "gown":
+    case "sundress":
       return "dress";
     case "outerwear":
     case "jacket":
     case "coat":
+    case "blazer":
+    case "parka":
+    case "vest":
+    case "windbreaker":
+    case "overcoat":
+    case "raincoat":
       return "outerwear";
     case "shoes":
+    case "shoe":
     case "footwear":
     case "sneakers":
+    case "sneaker":
+    case "trainers":
+    case "boots":
+    case "boot":
+    case "sandals":
+    case "sandal":
+    case "heels":
+    case "loafers":
+    case "flats":
       return "shoes";
     case "accessory":
+    case "accessories":
     case "bag":
+    case "backpack":
+    case "purse":
     case "hat":
+    case "cap":
+    case "beanie":
+    case "belt":
+    case "scarf":
+    case "gloves":
+    case "tie":
+    case "socks":
+    case "sunglasses":
+    case "watch":
+    case "jewelry":
+    case "necklace":
       return "accessory";
     default:
       return NONE_CATEGORY;

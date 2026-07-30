@@ -1,8 +1,5 @@
 import crypto from "node:crypto";
-import {
-  computeDHash,
-  photosLikelyDuplicate,
-} from "@/lib/image-dhash";
+import { computeDHash, garmentsLikelyDuplicate } from "@/lib/image-dhash";
 import type { CameraRollScanItemResult } from "@/lib/jobs/queue";
 
 type ReadyItem = CameraRollScanItemResult & { status: "ready" };
@@ -12,8 +9,10 @@ function isReady(item: CameraRollScanItemResult): item is ReadyItem {
 }
 
 /**
- * Cluster likely duplicate garment photos (same piece, multiple angles) using
- * perceptual hash + category/title hints. Groups of size ≥ 2 get a shared id.
+ * Cluster likely duplicate garment photos (same piece, multiple angles) by
+ * garment signature (category + colors + pattern) or a near-identical frame.
+ * Whole-photo hashing alone over-merges wearing-shots (same pose, different
+ * clothes), so attributes are the primary signal. Groups of size ≥ 2 share an id.
  */
 export async function assignDuplicateGroups(
   items: CameraRollScanItemResult[],
@@ -50,14 +49,10 @@ export async function assignDuplicateGroups(
       const hashB = hashes.get(b.reviewId);
       if (!hashB) continue;
       if (
-        photosLikelyDuplicate({
-          hashA,
-          hashB,
-          nameA: a.name,
-          nameB: b.name,
-          categoryA: a.category,
-          categoryB: b.category,
-        })
+        garmentsLikelyDuplicate(
+          { hash: hashA, category: a.category, colors: a.colors, pattern: a.pattern },
+          { hash: hashB, category: b.category, colors: b.colors, pattern: b.pattern },
+        )
       ) {
         union(a.reviewId, b.reviewId);
       }
