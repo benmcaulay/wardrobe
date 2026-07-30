@@ -66,7 +66,14 @@ function buildReviewSections(drafts: ReviewDraft[]): ReviewSection[] {
     drafts: [draft],
   }));
   for (const [groupId, list] of groups) {
-    sections.push({ key: groupId, isDuplicateGroup: true, drafts: list });
+    // A group of one (after removals/ungrouping) is just a single item.
+    if (list.length <= 1) {
+      for (const d of list) {
+        sections.push({ key: d.reviewId, isDuplicateGroup: false, drafts: [d] });
+      }
+    } else {
+      sections.push({ key: groupId, isDuplicateGroup: true, drafts: list });
+    }
   }
   return sections;
 }
@@ -364,6 +371,35 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
     });
   }
 
+  // Remove a review item entirely — it won't import and its upload is discarded
+  // at commit (any reviewId not in the selection is treated as excluded).
+  function removeDraft(reviewId: string) {
+    setDrafts((prev) => prev.filter((d) => d.reviewId !== reviewId));
+  }
+
+  // Pull one item out of its duplicate group into its own standalone item.
+  function ungroupItem(reviewId: string) {
+    setDrafts((prev) =>
+      prev.map((d) =>
+        d.reviewId === reviewId ? { ...d, duplicateGroupId: undefined, include: true } : d,
+      ),
+    );
+  }
+
+  // Dissolve a whole "likely duplicate" group into independent items.
+  function ungroupGroup(groupId: string) {
+    setDrafts((prev) =>
+      prev.map((d) =>
+        d.duplicateGroupId === groupId ? { ...d, duplicateGroupId: undefined, include: true } : d,
+      ),
+    );
+    setSplitGroups((prev) => {
+      const next = new Set(prev);
+      next.delete(groupId);
+      return next;
+    });
+  }
+
   const selectedCount = drafts.filter((d) => d.include).length;
   const duplicateGroupCount = new Set(
     drafts.filter((d) => d.duplicateGroupId).map((d) => d.duplicateGroupId),
@@ -534,6 +570,9 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
                       onSplitToggle={() => toggleSplitGroup(section.key)}
                       onSelectPrimary={(reviewId) => selectPrimaryInGroup(section.key, reviewId)}
                       onPatch={patchDraftInGroup}
+                      onRemove={removeDraft}
+                      onUngroupItem={ungroupItem}
+                      onUngroupAll={() => ungroupGroup(section.key)}
                       onToggleInclude={(reviewId, include) => {
                         if (splitGroups.has(section.key)) {
                           patchDraft(reviewId, { include });
@@ -548,6 +587,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
                       draft={section.drafts[0]!}
                       categories={categories}
                       onPatch={patchDraft}
+                      onRemove={removeDraft}
                     />
                   ),
                 )}
@@ -646,6 +686,21 @@ type ReviewFieldProps = {
   onPatch: (reviewId: string, patch: Partial<ReviewDraft>) => void;
 };
 
+/** Small × that drops a review item from the list (discarded at commit). */
+function RemoveButton({ onClick, title = "Remove from scan" }: { onClick: () => void; title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-ink/15 bg-white text-ink-muted hover:border-red-300 hover:text-red-700 hover:bg-red-50 transition text-sm leading-none"
+    >
+      ×
+    </button>
+  );
+}
+
 function ReviewFields({ draft, categories, onPatch }: ReviewFieldProps) {
   return (
     <div className="flex-1 min-w-0 space-y-2">
@@ -680,13 +735,15 @@ function SingleReviewItem({
   draft,
   categories,
   onPatch,
-}: ReviewFieldProps) {
+  onRemove,
+}: ReviewFieldProps & { onRemove: (reviewId: string) => void }) {
   return (
     <li
-      className={`rounded-xl border p-3 space-y-2 transition ${
+      className={`relative rounded-xl border p-3 space-y-2 transition ${
         draft.include ? "border-ink/15 bg-white" : "border-ink/10 bg-paper-warm/50 opacity-80"
       }`}
     >
+      <RemoveButton onClick={() => onRemove(draft.reviewId)} />
       <div className="flex gap-3">
         <input
           type="checkbox"
@@ -718,6 +775,9 @@ type DuplicateGroupReviewProps = {
   onSelectPrimary: (reviewId: string) => void;
   onPatch: (reviewId: string, patch: Partial<ReviewDraft>) => void;
   onToggleInclude: (reviewId: string, include: boolean) => void;
+  onRemove: (reviewId: string) => void;
+  onUngroupItem: (reviewId: string) => void;
+  onUngroupAll: () => void;
 };
 
 function DuplicateGroupReview({
@@ -728,6 +788,9 @@ function DuplicateGroupReview({
   onSelectPrimary,
   onPatch,
   onToggleInclude,
+  onRemove,
+  onUngroupItem,
+  onUngroupAll,
 }: DuplicateGroupReviewProps) {
   const selected = drafts.find((d) => d.include) ?? drafts[0]!;
   const anyIncluded = drafts.some((d) => d.include);
@@ -742,19 +805,30 @@ function DuplicateGroupReview({
         <p className="text-xs text-ink-muted">
           Likely duplicate · {drafts.length} photos of the same piece
         </p>
-        <button
-          type="button"
-          onClick={onSplitToggle}
-          className="text-xs underline underline-offset-2 hover:text-ink"
-        >
-          {split ? "Pick one only" : "Import all separately"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onUngroupAll}
+            className="text-xs underline underline-offset-2 hover:text-ink"
+            title="These are different pieces — split into separate items"
+          >
+            Not the same
+          </button>
+          <button
+            type="button"
+            onClick={onSplitToggle}
+            className="text-xs underline underline-offset-2 hover:text-ink"
+          >
+            {split ? "Pick one only" : "Import all separately"}
+          </button>
+        </div>
       </div>
 
       {split ? (
         <ul className="space-y-2">
           {drafts.map((draft) => (
-            <li key={draft.reviewId} className="flex gap-3">
+            <li key={draft.reviewId} className="relative flex gap-3 rounded-lg border border-ink/10 bg-white/60 p-2 pr-9">
+              <RemoveButton onClick={() => onRemove(draft.reviewId)} />
               <input
                 type="checkbox"
                 checked={draft.include}
@@ -770,7 +844,17 @@ function DuplicateGroupReview({
                   className="w-full h-full object-cover"
                 />
               </div>
-              <ReviewFields draft={draft} categories={categories} onPatch={onPatch} />
+              <div className="flex-1 min-w-0 space-y-2">
+                <ReviewFields draft={draft} categories={categories} onPatch={onPatch} />
+                <button
+                  type="button"
+                  onClick={() => onUngroupItem(draft.reviewId)}
+                  className="text-[11px] text-ink-muted underline underline-offset-2 hover:text-ink"
+                  title="Move this out of the group as its own item"
+                >
+                  Separate this one
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -778,30 +862,40 @@ function DuplicateGroupReview({
         <>
           <div className="flex flex-wrap gap-2">
             {drafts.map((draft) => (
-              <label
-                key={draft.reviewId}
-                className={`cursor-pointer rounded-lg border p-1 transition ${
-                  draft.include
-                    ? "border-accent ring-2 ring-accent/30 bg-white"
-                    : "border-ink/10 bg-paper-warm/60 hover:border-ink/25"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name={`dup-${draft.duplicateGroupId}`}
-                  checked={draft.include}
-                  onChange={() => onSelectPrimary(draft.reviewId)}
-                  className="sr-only"
-                />
-                <div className="w-16 h-20 rounded-md overflow-hidden bg-paper-warm">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={imageUrl(draft.ghostImagePath ?? draft.originalImagePath)}
-                    alt=""
-                    className="w-full h-full object-cover"
+              <div key={draft.reviewId} className="relative">
+                <label
+                  className={`block cursor-pointer rounded-lg border p-1 transition ${
+                    draft.include
+                      ? "border-accent ring-2 ring-accent/30 bg-white"
+                      : "border-ink/10 bg-paper-warm/60 hover:border-ink/25"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={`dup-${draft.duplicateGroupId}`}
+                    checked={draft.include}
+                    onChange={() => onSelectPrimary(draft.reviewId)}
+                    className="sr-only"
                   />
-                </div>
-              </label>
+                  <div className="w-16 h-20 rounded-md overflow-hidden bg-paper-warm">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={imageUrl(draft.ghostImagePath ?? draft.originalImagePath)}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onRemove(draft.reviewId)}
+                  title="Remove from scan"
+                  aria-label="Remove from scan"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-ink/15 bg-white text-[11px] leading-none text-ink-muted hover:border-red-300 hover:text-red-700 hover:bg-red-50 transition"
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
           <div className="flex gap-3">
