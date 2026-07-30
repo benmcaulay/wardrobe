@@ -34,6 +34,41 @@ describe("garmentClassifier", () => {
     expect(out.skipReason).toBe("Scenery");
   });
 
+  it("extracts palette colors, pattern, and material", () => {
+    const scan = normalizeScanDetection({
+      isGarment: true,
+      garments: [
+        {
+          category: "top",
+          name: "Striped tee",
+          confidence: 0.9,
+          colors: ["Blue", "white", "fuchsia"],
+          pattern: "Striped",
+          material: "Cotton",
+        },
+      ],
+    });
+    const g = scan.garments[0]!;
+    // Known palette colors map (case-insensitive); unknown "fuchsia" is dropped.
+    expect(g.colors.map((c) => c.name)).toEqual(["blue", "white"]);
+    expect(g.colors[0]?.hex).toMatch(/^#[0-9a-f]{6}$/);
+    expect(g.pattern).toBe("striped");
+    expect(g.material).toBe("cotton");
+  });
+
+  it("drops filler attribute values", () => {
+    const scan = normalizeScanDetection({
+      isGarment: true,
+      garments: [
+        { category: "top", name: "Tee", confidence: 0.9, pattern: "none", material: "unknown" },
+      ],
+    });
+    const g = scan.garments[0]!;
+    expect(g.pattern).toBeUndefined();
+    expect(g.material).toBeUndefined();
+    expect(g.colors).toEqual([]);
+  });
+
   it("splits multi-garment flat-lay detections", () => {
     const scan = normalizeScanDetection({
       isGarment: true,

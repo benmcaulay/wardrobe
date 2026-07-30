@@ -25,8 +25,8 @@ export default async function CameraRollScanPage() {
       <header className="mb-8">
         <h1 className="font-serif text-4xl tracking-tight">Scan camera roll</h1>
         <p className="text-ink-muted mt-2">
-          Bulk-import clothing from Apple Photos or your camera roll — we detect garments, ghost
-          them, and let you review before anything hits your closet.
+          Bulk-import clothing from Apple Photos or your camera roll — we detect garments and let you
+          review before anything hits your closet, then ghost the pieces you keep.
         </p>
       </header>
       <ScanClient

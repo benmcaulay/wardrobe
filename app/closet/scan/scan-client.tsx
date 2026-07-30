@@ -394,7 +394,8 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
           >
             <p className="font-serif text-2xl">Drop photos here</p>
             <p className="text-sm text-ink-muted max-w-md mx-auto">
-              We&apos;ll ghost garments in the background, then you review before anything is saved.
+              We&apos;ll detect garments so you can review before anything is saved — ghost-mannequin
+              shots are generated after import, only for the pieces you keep.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-ink-muted">
               <span className="inline-flex items-center gap-1">
@@ -478,6 +479,9 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
                   ? ` · ${splitPhotoCount} multi-item photo${splitPhotoCount === 1 ? "" : "s"} split`
                   : ""}
                 {skippedCount > 0 ? ` · ${skippedCount} non-clothing skipped` : ""}
+              </p>
+              <p className="text-xs text-ink-muted mt-1">
+                Clean ghost-mannequin shots are generated after import — only for the pieces you keep.
               </p>
             </div>
             <span className="inline-flex items-center gap-1 text-xs text-ink-muted">

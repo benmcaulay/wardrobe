@@ -72,12 +72,18 @@ export type CameraRollScanItemResult = {
   ghostImagePath?: string;
   name?: string;
   category?: string;
+  /** Attributes inferred by the classifier, applied to the item at commit. */
+  colors?: { hex: string; name: string }[];
+  pattern?: string;
+  material?: string;
   creditsUsed?: number;
   itemId?: string;
   /** Shared when multiple photos likely show the same garment. */
   duplicateGroupId?: string;
   /** When a scan photo was split into multiple garments. */
   splitGroupId?: string;
+  /** True when this piece was cropped out of a multi-item scene (affects ghost prompt). */
+  isolatedCrop?: boolean;
   /** Original camera-roll upload before per-garment crop. */
   sourcePhotoPath?: string;
   reason?: string;

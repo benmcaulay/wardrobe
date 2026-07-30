@@ -2,6 +2,9 @@ import path from "node:path";
 import { fal } from "@fal-ai/client";
 import { log } from "../log";
 import { NONE_CATEGORY } from "../categories";
+import { normalizeColorName } from "../colors";
+import type { Color } from "../json";
+import { FAVORITE_COLOR_OPTIONS } from "../preferences";
 import { getObject, objectExists } from "../storage";
 
 export type GarmentClassification = {
@@ -17,7 +20,41 @@ export type DetectedGarment = {
   category: string;
   name: string;
   confidence: number;
+  /** Colors mapped to the built-in palette so they filter/sort in the closet. */
+  colors: Color[];
+  pattern?: string;
+  material?: string;
 };
+
+/** Named-color vocabulary the classifier must choose from, so results map to real swatches. */
+const COLOR_VOCAB = FAVORITE_COLOR_OPTIONS.map((c) => c.name);
+const COLOR_BY_NAME = new Map(
+  FAVORITE_COLOR_OPTIONS.map((c) => [normalizeColorName(c.name), c]),
+);
+
+/** Map free-text color names from the model onto known palette swatches (max 3). */
+function resolveColorNames(raw: unknown): Color[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Color[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const key = normalizeColorName(entry);
+    const hit = COLOR_BY_NAME.get(key);
+    if (!hit || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...hit });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+function cleanAttr(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().toLowerCase();
+  if (!v || v === "none" || v === "n/a" || v === "unknown") return undefined;
+  return v.slice(0, 60);
+}
 
 export type GarmentScanDetection = {
   isGarment: boolean;
@@ -30,11 +67,17 @@ type RawClassifierJson = {
   category?: string;
   name?: string;
   confidence?: number;
+  colors?: unknown;
+  pattern?: string;
+  material?: string;
   reason?: string;
   garments?: Array<{
     category?: string;
     name?: string;
     confidence?: number;
+    colors?: unknown;
+    pattern?: string;
+    material?: string;
   }>;
 };
 
@@ -61,9 +104,13 @@ Rules:
 - If only ONE primary item is visible, return a garments array with one entry.
 - Skip selfies where a person is the subject, food, scenery, receipts, or photos with no catalogue clothing.
 - Do NOT merge separate pieces into one entry (e.g. shirt + pants = two garments).
+- For each item, also report its colors, pattern, and material:
+  - "colors": 1-3 dominant colors, MOST dominant first, chosen ONLY from this list: ${COLOR_VOCAB.join(", ")}. Pick the closest match; omit if unclear.
+  - "pattern": e.g. solid, striped, plaid, floral, graphic, checked — or omit if unclear.
+  - "material": best guess, e.g. cotton, denim, leather, wool, knit — or omit if unclear.
 
 Reply with ONLY valid JSON (no markdown):
-{"isGarment":true|false,"garments":[{"category":"top"|"bottom"|"dress"|"outerwear"|"shoes"|"accessory"|"other","name":"short product title","confidence":0.0-1.0}],"reason":"optional skip reason when isGarment is false"}`;
+{"isGarment":true|false,"garments":[{"category":"top"|"bottom"|"dress"|"outerwear"|"shoes"|"accessory"|"other","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"optional skip reason when isGarment is false"}`;
 
 let falConfigured = false;
 function ensureFalConfigured() {
@@ -157,6 +204,9 @@ export function normalizeScanDetection(raw: RawClassifierJson): GarmentScanDetec
       category: mapClassifierCategory(raw.category),
       name: (raw.name ?? "").trim().slice(0, 120) || "Imported piece",
       confidence,
+      colors: resolveColorNames(raw.colors),
+      pattern: cleanAttr(raw.pattern),
+      material: cleanAttr(raw.material),
     });
   }
 
@@ -171,6 +221,9 @@ export function normalizeScanDetection(raw: RawClassifierJson): GarmentScanDetec
         category: mapClassifierCategory(g.category),
         name,
         confidence,
+        colors: resolveColorNames(g.colors),
+        pattern: cleanAttr(g.pattern),
+        material: cleanAttr(g.material),
       };
     })
     .filter((g) => g.confidence >= 0.35);
@@ -234,7 +287,7 @@ async function realClassifyGarment(imagePath: string): Promise<GarmentScanDetect
   if (!parsed) {
     return {
       isGarment: true,
-      garments: [{ category: NONE_CATEGORY, name: "Imported piece", confidence: 0.5 }],
+      garments: [{ category: NONE_CATEGORY, name: "Imported piece", confidence: 0.5, colors: [] }],
     };
   }
   return normalizeScanDetection(parsed);
@@ -275,7 +328,9 @@ function stubScanDetection(imagePath: string): GarmentScanDetection {
   const base = path.basename(imagePath, path.extname(imagePath));
   return {
     isGarment: true,
-    garments: [{ category: NONE_CATEGORY, name: `Imported ${base.slice(0, 8)}`, confidence: 0.9 }],
+    garments: [
+      { category: NONE_CATEGORY, name: `Imported ${base.slice(0, 8)}`, confidence: 0.9, colors: [] },
+    ],
   };
 }
 
@@ -294,7 +349,7 @@ export async function detectGarmentsInPhoto(imagePath: string): Promise<GarmentS
   } catch {
     return {
       isGarment: true,
-      garments: [{ category: NONE_CATEGORY, name: "Imported piece", confidence: 0.4 }],
+      garments: [{ category: NONE_CATEGORY, name: "Imported piece", confidence: 0.4, colors: [] }],
     };
   }
 }

@@ -185,42 +185,53 @@ async function runGhostPreview(
   };
 }
 
+/** Photos classified/cropped concurrently per scan job (classify+crop only; ghosting is deferred to commit). */
+const SCAN_PHOTO_CONCURRENCY = 5;
+
 async function runCameraRollScan(
   userId: string,
   jobId: string,
   payload: CameraRollScanPayload,
 ): Promise<CameraRollScanResult> {
+  const total = payload.photoPaths.length;
   const items: CameraRollScanProgress["items"] = [];
-  let creditsRemaining: number | undefined;
   let photosProcessed = 0;
+  let cursor = 0;
 
-  for (const photoPath of payload.photoPaths) {
-    const batch = await processScanPhotoForReview(userId, photoPath);
-    items.push(...batch);
-    photosProcessed += 1;
-    const dbUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { credits: true },
-    });
-    creditsRemaining = dbUser?.credits;
-    const progress: CameraRollScanProgress = {
-      total: payload.photoPaths.length,
-      processed: photosProcessed,
-      ...tallyScanProgress(items),
-      items,
-      creditsRemaining,
-    };
-    await updateJobProgress(jobId, progress);
+  // Credits are no longer spent during the scan (ghosting is deferred to
+  // commit), so read the balance once for display instead of per photo.
+  const dbUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { credits: true },
+  });
+  const creditsRemaining = dbUser?.credits;
 
-    if (batch.some((r) => r.status === "failed" && r.error === "Out of credits")) {
-      break;
+  // Bounded-concurrency pool: each worker pulls the next photo until drained,
+  // pushing results and emitting progress as photos complete.
+  async function worker() {
+    while (cursor < total) {
+      const photoPath = payload.photoPaths[cursor++]!;
+      const batch = await processScanPhotoForReview(userId, photoPath);
+      items.push(...batch);
+      photosProcessed += 1;
+      await updateJobProgress(jobId, {
+        total,
+        processed: photosProcessed,
+        ...tallyScanProgress(items),
+        items,
+        creditsRemaining,
+      });
     }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(SCAN_PHOTO_CONCURRENCY, total) }, () => worker()),
+  );
 
   const groupedItems = await assignDuplicateGroups(items);
 
   return {
-    total: payload.photoPaths.length,
+    total,
     processed: photosProcessed,
     ...tallyScanProgress(groupedItems),
     items: groupedItems,

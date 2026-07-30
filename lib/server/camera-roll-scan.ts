@@ -1,23 +1,25 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db";
-import { encode } from "@/lib/json";
+import { encode, parseStylePrefs } from "@/lib/json";
 import { NONE_CATEGORY } from "@/lib/categories";
+import { getPrimaryOwnerId } from "@/lib/owners";
 import { checkAiQuota } from "@/lib/ai-guardrails";
-import { log } from "@/lib/log";
 import {
   detectGarmentBounds,
   detectGarmentsInPhoto,
   type DetectedGarment,
 } from "@/lib/services/garmentClassifier";
 import { cropGarmentRegion } from "@/lib/services/garment-crop";
-import { createGhostMannequin, mapCategoryToGhost } from "@/lib/services/ghostMannequin";
+import { enqueueJob } from "@/lib/jobs/queue";
 import { deleteUpload } from "@/lib/uploads";
 import type {
   CameraRollScanItemResult,
   CameraRollScanProgress,
 } from "@/lib/jobs/queue";
 
-const REAL_GHOST = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
+/** Ghost prompt used when a piece was isolated from a multi-item scene. */
+const ISOLATED_CROP_GHOST_INSTRUCTION =
+  "This is a cropped photo of ONE garment from a multi-item scene. Ghost ONLY this piece — ignore any other clothing that may appear at the edges.";
 
 type GarmentWorkItem = {
   garment: DetectedGarment;
@@ -52,99 +54,32 @@ async function resolveGarmentWorkItems(
   return items;
 }
 
-async function ghostOneGarment(
-  userId: string,
+function workItemToReview(
   work: GarmentWorkItem,
   sourcePhotoPath: string,
   splitGroupId?: string,
-): Promise<CameraRollScanItemResult> {
-  const reviewId = crypto.randomUUID();
-  const category = work.garment.category || NONE_CATEGORY;
-  const name = work.garment.name.trim() || "Imported piece";
-
-  const quota = await checkAiQuota(userId);
-  if (!quota.ok) {
-    return {
-      reviewId,
-      originalImagePath: work.garmentImagePath,
-      sourcePhotoPath,
-      splitGroupId,
-      status: "failed",
-      name,
-      category,
-      error: quota.error,
-    };
-  }
-
-  const dbUser = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { credits: true },
-  });
-  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
-    return {
-      reviewId,
-      originalImagePath: work.garmentImagePath,
-      sourcePhotoPath,
-      splitGroupId,
-      status: "failed",
-      name,
-      category,
-      error: "Out of credits",
-    };
-  }
-
-  try {
-    const ghost = await createGhostMannequin({
-      userId,
-      garmentImagePath: work.garmentImagePath,
-      category: mapCategoryToGhost(category),
-      compositionHint: "default",
-      instructions:
-        work.isDerivedCrop || sourcePhotoPath !== work.garmentImagePath
-          ? "This is a cropped photo of ONE garment from a multi-item scene. Ghost ONLY this piece — ignore any other clothing that may appear at the edges."
-          : undefined,
-    });
-
-    if (REAL_GHOST && ghost.credits > 0) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: { credits: { decrement: ghost.credits } },
-      });
-    }
-
-    return {
-      reviewId,
-      originalImagePath: work.garmentImagePath,
-      sourcePhotoPath,
-      splitGroupId,
-      status: "ready",
-      ghostImagePath: ghost.resultImagePath,
-      name,
-      category,
-      creditsUsed: ghost.credits,
-    };
-  } catch (err) {
-    log.error("camera-roll.ghost.failed", err, {
-      userId,
-      originalImagePath: work.garmentImagePath,
-      sourcePhotoPath,
-    });
-    return {
-      reviewId,
-      originalImagePath: work.garmentImagePath,
-      sourcePhotoPath,
-      splitGroupId,
-      status: "failed",
-      name,
-      category,
-      error: (err as Error).message ?? "Ghost generation failed",
-    };
-  }
+): CameraRollScanItemResult {
+  return {
+    reviewId: crypto.randomUUID(),
+    originalImagePath: work.garmentImagePath,
+    sourcePhotoPath,
+    splitGroupId,
+    // The garment is isolated from a multi-item scene, so its ghost needs the
+    // "ignore other pieces" instruction. Persisted so commit can pass it on.
+    isolatedCrop: work.isDerivedCrop || undefined,
+    status: "ready",
+    name: work.garment.name.trim() || "Imported piece",
+    category: work.garment.category || NONE_CATEGORY,
+    colors: work.garment.colors.length > 0 ? work.garment.colors : undefined,
+    pattern: work.garment.pattern,
+    material: work.garment.material,
+  };
 }
 
 /**
- * Classify + ghost one camera-roll photo. May return multiple review items when
- * the photo contains several distinct garments.
+ * Classify + crop one camera-roll photo into review items. Ghosting is deferred
+ * to commit so we only pay (time + credits) for pieces the user actually keeps.
+ * May return multiple review items when the photo contains several garments.
  */
 export async function processScanPhotoForReview(
   userId: string,
@@ -163,6 +98,11 @@ export async function processScanPhotoForReview(
     ];
   }
 
+  const quota = await checkAiQuota(userId);
+  if (!quota.ok) {
+    return [{ reviewId, originalImagePath, status: "failed", error: quota.error }];
+  }
+
   const detection = await detectGarmentsInPhoto(originalImagePath);
   if (!detection.isGarment || detection.garments.length === 0) {
     await deleteUpload(originalImagePath).catch(() => undefined);
@@ -171,15 +111,7 @@ export async function processScanPhotoForReview(
 
   const splitGroupId = detection.garments.length > 1 ? crypto.randomUUID() : undefined;
   const workItems = await resolveGarmentWorkItems(userId, originalImagePath, detection.garments);
-  const results: CameraRollScanItemResult[] = [];
-
-  for (const work of workItems) {
-    const result = await ghostOneGarment(userId, work, originalImagePath, splitGroupId);
-    results.push(result);
-    if (result.status === "failed" && result.error === "Out of credits") break;
-  }
-
-  return results;
+  return workItems.map((work) => workItemToReview(work, originalImagePath, splitGroupId));
 }
 
 export type CommitScanReviewSelection = {
@@ -196,7 +128,13 @@ export type CommitScanReviewResult = {
   updatedItems: CameraRollScanItemResult[];
 };
 
-/** Persist approved review items; discard the rest (and their uploads). */
+/**
+ * Persist approved review items; discard the rest (and their uploads).
+ *
+ * Items are created immediately from the classified crop (so they appear in the
+ * closet right away) and a background ghost-mannequin job is enqueued for each —
+ * ghosting only runs for pieces the user kept, not the whole scan.
+ */
 export async function commitScanReview(
   userId: string,
   jobResult: CameraRollScanProgress,
@@ -207,6 +145,12 @@ export async function commitScanReview(
   let discarded = 0;
   const itemIds: string[] = [];
   const updatedItems: CameraRollScanItemResult[] = [];
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { stylePrefs: true },
+  });
+  const primaryOwnerId = getPrimaryOwnerId(parseStylePrefs(dbUser?.stylePrefs));
 
   for (const item of jobResult.items) {
     if (item.status !== "ready") {
@@ -225,35 +169,35 @@ export async function commitScanReview(
       continue;
     }
 
-    if (!item.ghostImagePath?.startsWith(`${userId}/`)) {
-      updatedItems.push({ ...item, status: "failed", error: "Missing ghost image" });
+    if (!item.originalImagePath.startsWith(`${userId}/`)) {
+      updatedItems.push({ ...item, status: "failed", error: "Missing garment image" });
       continue;
     }
 
-    const ghostViews = [
-      { label: "Ghost", imagePath: item.ghostImagePath, mirror: false, thumbZoom: 1 },
-    ];
     const created = await prisma.wardrobeItem.create({
       data: {
         userId,
         name,
         category,
-        colors: encode([]),
+        colors: encode(item.colors ?? []),
+        pattern: item.pattern ?? null,
+        material: item.material ?? null,
         styleTags: encode([]),
         season: encode([]),
+        owners: encode([primaryOwnerId]),
         originalImagePath: item.originalImagePath,
-        ghostImagePath: item.ghostImagePath,
-        ghostViews: encode(ghostViews),
       },
     });
-    await prisma.tryOnGeneration.create({
-      data: {
-        userId,
-        itemId: created.id,
-        resultImagePath: item.ghostImagePath,
-        creditsUsed: item.creditsUsed ?? 1,
-      },
+
+    // Ghost in the background so import is instant and we only ghost kept pieces.
+    await enqueueJob(userId, "ghost_view", {
+      itemId: created.id,
+      selectedExtraPaths: [],
+      label: "Ghost",
+      instructions: item.isolatedCrop ? ISOLATED_CROP_GHOST_INSTRUCTION : undefined,
+      compositionHint: "default",
     });
+
     updatedItems.push({ ...item, status: "imported", name, category, itemId: created.id });
     itemIds.push(created.id);
     imported += 1;

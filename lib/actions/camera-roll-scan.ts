@@ -202,7 +202,7 @@ export async function commitScanReviewItems(
   });
   if (result.committed) return { ok: false, error: "This scan was already imported" };
 
-  const { imported, discarded, updatedItems } = await commitScanReview(
+  const { imported, discarded, itemIds, updatedItems } = await commitScanReview(
     user.id,
     result,
     selections,
@@ -219,6 +219,10 @@ export async function commitScanReviewItems(
     where: { id: jobId },
     data: { result: encode(nextResult) },
   });
+
+  // Kick the worker to process the background ghost jobs enqueued for each
+  // imported piece (ghosting is deferred so we only ghost kept items).
+  if (itemIds.length > 0) kickJobDrain(itemIds.length);
 
   revalidatePath("/closet");
   revalidatePath("/closet/scan");
