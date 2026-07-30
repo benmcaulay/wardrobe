@@ -92,10 +92,15 @@ const FAL_DETECT_MODEL =
   process.env.FAL_GARMENT_DETECT_MODEL ?? "fal-ai/moondream2/object-detection";
 
 const REAL_MODE = process.env.USE_REAL_GARMENT_CLASSIFIER !== "false";
+// moondream2 only captions — it ignores the JSON instruction. The any-llm/vision
+// gateway with an instruction-following model returns the structured JSON we need.
 const FAL_VISION_MODEL =
-  process.env.FAL_GARMENT_CLASSIFIER_MODEL ?? "fal-ai/moondream2";
+  process.env.FAL_GARMENT_CLASSIFIER_MODEL ?? "fal-ai/any-llm/vision";
+/** Underlying model when FAL_VISION_MODEL is the any-llm/vision gateway. */
+const FAL_VISION_LLM =
+  process.env.FAL_GARMENT_CLASSIFIER_LLM ?? "google/gemini-flash-1.5";
 
-const CLASSIFIER_PROMPT = `You are sorting photos for a digital wardrobe app.
+export const CLASSIFIER_PROMPT = `You are sorting photos for a digital wardrobe app.
 
 Look at this image and list every DISTINCT clothing item (garment, shoes, or wearable accessory) that could be catalogued separately.
 
@@ -269,9 +274,12 @@ async function realClassifyGarment(imagePath: string): Promise<GarmentScanDetect
   const imageUrl = await uploadKeyToFal(imagePath);
   const startedAt = Date.now();
   let text = "";
+  // The any-llm/vision gateway needs the underlying model in the input.
+  const input: Record<string, unknown> = { image_url: imageUrl, prompt: CLASSIFIER_PROMPT };
+  if (FAL_VISION_MODEL.includes("any-llm")) input.model = FAL_VISION_LLM;
   try {
     const response = await fal.subscribe(FAL_VISION_MODEL, {
-      input: { image_url: imageUrl, prompt: CLASSIFIER_PROMPT },
+      input,
       logs: false,
     });
     const data = response?.data as { output?: string; text?: string; answer?: string } | undefined;
