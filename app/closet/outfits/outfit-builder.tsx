@@ -356,7 +356,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
 
   return (
     <div className="flex flex-col items-start gap-8 md:flex-row">
-      <section className="w-full shrink-0 md:w-auto">
+      <section className="w-full md:flex-1 md:min-w-0">
         {savedOutfits.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {savedOutfits.map((outfit) => (
@@ -464,7 +464,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
       </section>
 
       <aside
-        className="w-full shrink-0 space-y-3 md:sticky md:top-6 md:max-w-[280px] md:overflow-y-auto md:pr-1"
+        className="w-full shrink-0 space-y-3 md:sticky md:top-6 md:w-[300px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
         <div className="rounded-2xl border border-ink/10 bg-white p-3 space-y-2">

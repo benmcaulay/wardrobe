@@ -485,14 +485,15 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
   return (
     <div className="flex flex-col items-start gap-8 md:flex-row">
-      <section className="w-full md:flex-1 md:min-w-0 md:flex md:flex-col md:items-center">
-        <div className="mb-4 flex flex-wrap items-center gap-5 justify-center">
+      <section className="w-full md:flex-1 md:min-w-0">
+        <div className="flex flex-col items-center gap-5 md:flex-row md:items-start md:justify-center md:gap-6">
+        <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:flex-col md:items-stretch md:w-[132px] md:pt-1">
           <button
             type="button"
             onClick={() => void spin()}
             disabled={!readyToSpin || spinning}
             aria-label={spinning ? "Spinning…" : "Spin outfit"}
-            className="group relative flex h-[104px] w-[104px] items-center justify-center rounded-full border-2 border-dashed border-ink/30 bg-white text-ink transition hover:border-ink/50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="group relative mx-auto flex h-[104px] w-[104px] items-center justify-center rounded-full border-2 border-dashed border-ink/30 bg-white text-ink transition hover:border-ink/50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <span
               aria-hidden
@@ -516,17 +517,17 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
           >
             Clear items
           </button>
+          {spinError && (
+            <p role="alert" className="text-xs text-red-700 text-center">
+              {spinError}
+            </p>
+          )}
+          {spinHint && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-2 text-center">
+              {spinHint}
+            </p>
+          )}
         </div>
-        {spinError && (
-          <p role="alert" className="text-sm text-red-700 text-center mb-2">
-            {spinError}
-          </p>
-        )}
-        {spinHint && (
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-center mb-3">
-            {spinHint}
-          </p>
-        )}
         {/* Reserves the on-screen footprint of the scaled canvas so the page
             doesn't leave a gap the size of the unscaled frame. */}
         <div
@@ -599,10 +600,11 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
         </div>
 
         </div>
+        </div>
       </section>
 
       <aside
-        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[320px] md:overflow-y-auto md:pr-1"
+        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[380px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
