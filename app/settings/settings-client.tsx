@@ -6,7 +6,18 @@ import { CreditMark } from "@/components/credit-mark";
 import { ReorderableStringList } from "@/components/reorderable-string-list";
 import { ReorderableColorList } from "@/components/reorderable-color-list";
 import { StylePrefsEditor } from "@/components/style-prefs-editor";
-import { updateStylePrefs, setAutoGenerateGhost } from "@/lib/actions/preferences";
+import {
+  updateStylePrefs,
+  setAutoGenerateGhost,
+  setHiddenClosetFilters,
+} from "@/lib/actions/preferences";
+import {
+  CLOSET_FILTER_KEYS,
+  CLOSET_FILTER_LABELS,
+  getHiddenFiltersFromPrefs,
+  toggleHiddenFilter,
+  type ClosetFilterKey,
+} from "@/lib/closet-filter-visibility";
 import {
   addWardrobeCategory,
   removeWardrobeCategory,
@@ -75,6 +86,10 @@ export function SettingsClient({
   const [tagError, setTagError] = useState<string | null>(null);
   const [ownerError, setOwnerError] = useState<string | null>(null);
   const [colorError, setColorError] = useState<string | null>(null);
+  const [hiddenFilters, setHiddenFilters] = useState<ClosetFilterKey[]>(() =>
+    getHiddenFiltersFromPrefs(initialPrefs),
+  );
+  const [filterError, setFilterError] = useState<string | null>(null);
   const [localCategories, setLocalCategories] = useState(categoryList);
   const [localTags, setLocalTags] = useState(styleTagsList);
   const [localOwners, setLocalOwners] = useState(ownersList);
@@ -161,6 +176,23 @@ export function SettingsClient({
     setAutoGen(next);
     await setAutoGenerateGhost(next);
     router.refresh();
+  }
+
+  /** `shown` is the checkbox state, so hiding is the inverse. */
+  function handleToggleFilter(key: ClosetFilterKey, shown: boolean) {
+    const next = toggleHiddenFilter(hiddenFilters, key, !shown);
+    const previous = hiddenFilters;
+    setHiddenFilters(next);
+    setFilterError(null);
+    startCat(async () => {
+      try {
+        await setHiddenClosetFilters(next);
+        router.refresh();
+      } catch {
+        setHiddenFilters(previous);
+        setFilterError("Couldn't save that. Try again.");
+      }
+    });
   }
 
   const deleteConfirmed =
@@ -643,6 +675,42 @@ export function SettingsClient({
           onRemove={handleDeleteColor}
           removeDisabled={() => localColors.length <= 1}
         />
+      </section>
+
+      <section className="space-y-4">
+        <h3 className="text-xs uppercase tracking-wide text-ink-muted">Closet filters</h3>
+        <p className="text-sm text-ink-muted max-w-xl">
+          Choose which filters appear above your closet. Turning one off only hides it for you —
+          nothing is deleted, and any filtering it was doing is cleared so your closet never stays
+          narrowed by a control you can&apos;t see. Search and sort always stay.
+        </p>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {CLOSET_FILTER_KEYS.map((key) => {
+            const shown = !hiddenFilters.includes(key);
+            const meta = CLOSET_FILTER_LABELS[key];
+            return (
+              <li key={key}>
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ink/10 bg-white px-3 py-2.5 transition hover:border-ink/25">
+                  <input
+                    type="checkbox"
+                    checked={shown}
+                    onChange={(e) => handleToggleFilter(key, e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm">{meta.label}</span>
+                    <span className="block text-xs text-ink-muted">{meta.hint}</span>
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        {filterError && (
+          <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            {filterError}
+          </p>
+        )}
       </section>
 
       <section className="rounded-2xl border border-ink/10 bg-white p-5 space-y-3">

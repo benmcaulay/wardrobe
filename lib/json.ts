@@ -34,6 +34,14 @@ export type StylePrefs = {
   categoryOrder?: string[];
   /** @deprecated */
   hiddenCategories?: string[];
+  /**
+   * Closet filter controls the user has chosen to hide (see
+   * lib/closet-filter-visibility.ts). Absent means "show everything" — the
+   * feature stays available for everyone else, it's just off your own screen.
+   */
+  hiddenClosetFilters?: string[];
+  /** Sort the closet opens with — remembers whatever you last chose. */
+  defaultClosetSort?: string;
   /** Manual item order within category + primary-color groups (group key → item ids). */
   closetGroupOrders?: Record<string, string[]>;
   /** Default canvas placement per outfit slot category rule (signature → layout). */

@@ -35,7 +35,6 @@ export function readFiltersFromSearchParams(params: {
   season?: string;
   tag?: string;
   owner?: string;
-  wishlist?: string;
   sort?: string;
 }): ActiveFilters {
   return {
@@ -46,7 +45,6 @@ export function readFiltersFromSearchParams(params: {
     season: params.season ?? "",
     tag: params.tag ?? "",
     owner: params.owner ?? "",
-    wishlist: params.wishlist === "1",
     sort: readClosetSort(params.sort),
   };
 }
@@ -61,7 +59,6 @@ export function readFiltersFromQueryString(qs: string): ActiveFilters {
     season: p.get("season") ?? undefined,
     tag: p.get("tag") ?? undefined,
     owner: p.get("owner") ?? undefined,
-    wishlist: p.get("wishlist") ?? undefined,
     sort: p.get("sort") ?? undefined,
   });
 }
@@ -130,7 +127,6 @@ export function filterClosetItems(
   filters: ActiveFilters,
 ): ClosetFilterableItem[] {
   return items.filter((item) => {
-    if (filters.wishlist && !item.isWishlist) return false;
     if (filters.brand && item.brand !== filters.brand) return false;
     if (!itemMatchesCategoryFilter(item, filters.categories)) return false;
     if (!itemMatchesColorFilter(item, filters.colors)) return false;

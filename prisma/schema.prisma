@@ -39,6 +39,56 @@ model User {
   sessions          Session[]
   generationJobs    GenerationJob[]
   creditPurchases   CreditPurchase[]
+  budgets           Budget[]
+  shareLinks        ShareLink[]
+}
+
+// An unlisted public link to one item, one outfit, or the wishlist.
+//
+// The token is the only credential, so it must be long and random — see
+// lib/share/token.ts. Links never expire but can be revoked at any time;
+// `revokedAt` is kept rather than deleting the row so a revoked URL keeps
+// resolving to a clear "this link was turned off" page instead of a 404 that
+// looks like a bug.
+//
+// Only ever exposes derived data: the *thumbnail* of an item (never the
+// full-resolution original) plus name, brand and colours.
+model ShareLink {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  /// "item" | "outfit" | "wishlist" — see lib/share/kinds.ts
+  kind      String
+  /// WardrobeItem or Outfit id. Null for the wishlist, which is per-user.
+  targetId  String?
+  /// Optional note shown on the public page, e.g. "my birthday list".
+  note      String?
+  revokedAt DateTime?
+  viewCount Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([userId, kind])
+}
+
+// A pot of money earmarked for wishlist buying (e.g. "Grandma fund"). Wishlist
+// items attach to a budget; purchased ones draw it down. When fundedBySales is
+// on, proceeds from SaleListings marked sold top the pot back up, so clearing
+// out the closet visibly grows the number you have to spend.
+model Budget {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  amountCents   Int
+  currency      String         @default("USD")
+  fundedBySales Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  items         WardrobeItem[]
+
+  @@index([userId])
 }
 
 // A completed Stripe Checkout purchase of a credit pack. The unique
@@ -150,6 +200,18 @@ model WardrobeItem {
   ghostViews        String?           // JSON: { label: string; imagePath: string }[]
   extraImagePaths   String?           // JSON: string[] — extra context shots
   isWishlist        Boolean           @default(false)
+  // Wishlist budgeting. `budgetId` is the pot this item draws from;
+  // `wishlistPriority` is 0 = must have, 1 = want, 2 = someday (see
+  // lib/wishlist/priority.ts). Once bought, isWishlist flips false and
+  // purchasedAt/purchasedCents record the actual draw-down — priceCents stays
+  // the retail sticker so cost tracking and resale estimates still anchor to it.
+  budgetId          String?
+  budget            Budget?           @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+  wishlistPriority  Int               @default(1)
+  purchasedAt       DateTime?
+  purchasedCents    Int?
+  priceHistory      String?           // JSON: { cents: number; at: string }[] — oldest first
+  priceCheckedAt    DateTime?
   timesWorn         Int               @default(0)
   lastWornAt        DateTime?
   // Packing estimates (SmartPakker). Null = derive from the heuristic table in
@@ -164,6 +226,8 @@ model WardrobeItem {
 
   @@index([userId])
   @@index([userId, category])
+  @@index([userId, isWishlist])
+  @@index([budgetId])
 }
 
 model TryOnGeneration {

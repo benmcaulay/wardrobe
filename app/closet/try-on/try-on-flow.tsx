@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreditMark } from "@/components/credit-mark";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
@@ -8,6 +8,7 @@ import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
   deletePersonPhoto,
   deleteOutfit,
+  deleteVirtualTryOn,
   enqueueVirtualTryOn,
   getTryOnJobStatus,
   saveOutfit,
@@ -77,6 +78,14 @@ export function TryOnFlow({
   recent,
 }: Props) {
   const [photos, setPhotos] = useState<PersonPhotoSummary[]>(initialPhotos);
+  const [recentList, setRecentList] = useState<RecentTryOn[]>(recent);
+  const [deletingRecentId, setDeletingRecentId] = useState<string | null>(null);
+
+  // The page sends only the latest six, so after a delete the refreshed prop
+  // carries the next one down — adopt it rather than keeping the stale list.
+  useEffect(() => {
+    setRecentList(recent);
+  }, [recent]);
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(
     initialPhotos[0]?.id ?? null,
   );
@@ -165,6 +174,20 @@ export function TryOnFlow({
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  async function onDeleteRecent(id: string) {
+    if (!confirm("Delete this try-on image? This can't be undone.")) return;
+    setDeletingRecentId(id);
+    const res = await deleteVirtualTryOn(id);
+    setDeletingRecentId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setRecentList((prev) => prev.filter((r) => r.id !== id));
+    // Pull the next one into the strip (the page only sends the latest six).
+    router.refresh();
   }
 
   async function onDeletePhoto(id: string) {
@@ -658,12 +681,12 @@ export function TryOnFlow({
       )}
 
       {/* Recent */}
-      {recent.length > 0 && (
+      {recentList.length > 0 && (
         <section className="space-y-3">
           <SectionHeader step={null} title="Recent try-ons" subtitle="" />
           <ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-            {recent.map((r) => (
-              <li key={r.id}>
+            {recentList.map((r) => (
+              <li key={r.id} className="relative group">
                 <a
                   href={imageUrl(r.resultImagePath)}
                   target="_blank"
@@ -677,6 +700,15 @@ export function TryOnFlow({
                     className="w-full h-full object-cover"
                   />
                 </a>
+                <button
+                  type="button"
+                  onClick={() => onDeleteRecent(r.id)}
+                  disabled={deletingRecentId === r.id}
+                  aria-label="Delete try-on image"
+                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition disabled:opacity-60"
+                >
+                  {deletingRecentId === r.id ? "…" : "\u00d7"}
+                </button>
               </li>
             ))}
           </ul>

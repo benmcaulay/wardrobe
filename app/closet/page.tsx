@@ -11,7 +11,6 @@ import {
   resolveItemOwnerIds,
   SHARED_OWNER_FILTER,
 } from "@/lib/owners";
-import { CreditMark } from "@/components/credit-mark";
 import { AddItemFab } from "@/components/add-item-fab";
 import { ClosetFilteredView, type ClosetPageItem } from "@/components/closet-filtered-view";
 import type { FilterOptions } from "@/components/closet-filters";
@@ -19,6 +18,11 @@ import {
   FILTER_CATEGORY_NONE,
   readFiltersFromSearchParams,
 } from "@/lib/closet-item-filter";
+import { readClosetSort } from "@/lib/closet-sort";
+import {
+  clearHiddenFilterValues,
+  getHiddenFiltersFromPrefs,
+} from "@/lib/closet-filter-visibility";
 
 type SearchParams = {
   q?: string;
@@ -28,7 +32,6 @@ type SearchParams = {
   season?: string;
   tag?: string;
   owner?: string;
-  wishlist?: string;
   sort?: string;
 };
 
@@ -56,14 +59,24 @@ function readPrimaryGhostMeta(
 
 export default async function ClosetPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser();
-  const filters = readFiltersFromSearchParams(searchParams);
+  const rawFilters = readFiltersFromSearchParams(searchParams);
 
+  // Credits are read by the layout for the drawer's badge, not here.
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
-    select: { credits: true, stylePrefs: true },
+    select: { stylePrefs: true },
   });
-  const credits = dbUser?.credits ?? 0;
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  // A hidden control must not keep filtering — otherwise a stale value would
+  // silently narrow the closet with no visible way to clear it.
+  const hiddenFilters = getHiddenFiltersFromPrefs(prefs);
+  // No explicit ?sort= means "open how I left it last time". An explicit param
+  // still wins, so shared/bookmarked links keep their own ordering.
+  const withSavedSort =
+    searchParams.sort === undefined
+      ? { ...rawFilters, sort: readClosetSort(prefs.defaultClosetSort) }
+      : rawFilters;
+  const filters = clearHiddenFilterValues(withSavedSort, hiddenFilters);
   const preferredCategories = getCategoriesListFromPrefs(prefs);
   const preferredColors = getColorsListFromPrefs(prefs);
   const preferredTags = getStyleTagsListFromPrefs(prefs);
@@ -212,77 +225,9 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
 
   return (
     <main className="max-w-[1800px] mx-auto px-6 py-12">
-      <header className="mb-2 flex items-start justify-end gap-6 flex-wrap">
-        <div className="flex flex-col items-end gap-2 pt-2 ml-auto">
-          <nav className="flex items-center gap-3 text-sm">
-            <Link
-              href="/closet/scan"
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
-              title="Scan camera roll for garments"
-            >
-              Scan roll
-            </Link>
-            <Link
-              href="/closet/try-on"
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
-              title="Virtual try-on"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icons/try-on.png"
-                alt=""
-                className="h-3.5 w-3.5 object-contain shrink-0"
-                aria-hidden
-              />
-              Try on
-            </Link>
-            <Link
-              href="/closet/outfits"
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
-              title="Outfit builder"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icons/outfits.png"
-                alt=""
-                className="h-3.5 w-3.5 object-contain shrink-0"
-                aria-hidden
-              />
-              Outfits
-            </Link>
-            <Link
-              href="/closet/smartpakker"
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
-              title="Pack for a trip"
-            >
-              Trip Packing Assistant
-            </Link>
-            <Link
-              href="/closet/sell"
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide bg-paper-warm text-ink hover:bg-ink/5 transition"
-              title="Swipe to sell"
-            >
-              Sell
-            </Link>
-            <Link
-              href="/settings"
-              className={`rounded-full px-3 py-1 text-xs tracking-wide transition ${
-                credits < 10
-                  ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
-                  : "bg-paper-warm text-ink hover:bg-ink/5"
-              }`}
-              title={credits < 10 ? "Running low on credits" : "Ghost-mannequin credits"}
-            >
-              <span className="inline-flex items-center gap-1">
-                <CreditMark className="h-3.5 w-3.5" title="tokens" />
-                {credits}
-              </span>
-            </Link>
-            <Link href="/settings" className="text-ink-muted hover:text-ink">
-              Settings
-            </Link>
-          </nav>
-        </div>
+      {/* Navigation lives in the drawer (app/closet/layout.tsx). The trigger is
+          fixed to the top-right, so leave room for it. */}
+      <header className="mb-2 pr-28">
         <h1 className="sr-only">Closet</h1>
       </header>
 
@@ -294,6 +239,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
           options={options}
           initialFilters={filtersForUi}
           sortOrders={sortOrders}
+        hiddenFilters={hiddenFilters}
           totalCount={totalCount}
         />
       )}

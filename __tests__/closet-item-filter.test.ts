@@ -28,7 +28,6 @@ const emptyFilters: ActiveFilters = {
   season: "",
   tag: "",
   owner: "",
-  wishlist: false,
   sort: "newest",
 };
 

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import type { ClosetFilterKey } from "@/lib/closet-filter-visibility";
 import {
   ClosetFilters,
   type ActiveFilters,
@@ -25,6 +26,7 @@ type Props = {
   initialFilters: ActiveFilters;
   sortOrders: SortOrders;
   totalCount: number;
+  hiddenFilters?: readonly ClosetFilterKey[];
 };
 
 export function ClosetFilteredView({
@@ -33,6 +35,7 @@ export function ClosetFilteredView({
   initialFilters,
   sortOrders,
   totalCount,
+  hiddenFilters,
 }: Props) {
   const [filters, setFilters] = useState(initialFilters);
 
@@ -109,7 +112,8 @@ export function ClosetFilteredView({
             Wardrobe value
           </p>
         </div>
-        <p className="text-xs text-ink-muted pt-2">
+        {/* mt-14 drops this clear of the fixed menu trigger (app/closet/layout.tsx). */}
+        <p className="mt-14 text-xs text-ink-muted">
           {filteredGridItems.length === totalCount
             ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"} in closet`
             : `${filteredGridItems.length} of ${totalCount} shown`}
@@ -117,7 +121,12 @@ export function ClosetFilteredView({
       </motion.div>
 
       {totalCount > 0 && (
-        <ClosetFilters options={options} filters={filters} onFiltersChange={setFilters} />
+        <ClosetFilters
+          options={options}
+          filters={filters}
+          onFiltersChange={setFilters}
+          hiddenFilters={hiddenFilters}
+        />
       )}
 
       <AnimatePresence mode="wait">
@@ -134,7 +143,7 @@ export function ClosetFilteredView({
           </motion.div>
         ) : (
           <motion.div
-            key={`${filters.sort}-${filteredGridItems.length}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.owner}-${filters.brand}-${filters.season}-${filters.wishlist}`}
+            key={`${filters.sort}-${filteredGridItems.length}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.owner}-${filters.brand}-${filters.season}`}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

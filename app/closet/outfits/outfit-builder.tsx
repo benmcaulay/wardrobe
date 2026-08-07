@@ -16,6 +16,11 @@ import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import { itemTileImageTransform } from "@/lib/item-tile-meta";
 import { OUTFIT_PIECE_IMG_CLASS, resolveOutfitPieceDisplayUrl } from "@/lib/outfit-piece-image";
 import { swapLayerOrder } from "@/lib/outfit-layer";
+import {
+  clampToFrame,
+  computeFrameScale,
+  toFrameSpace,
+} from "@/lib/outfit-frame-scale";
 import { SEASONS } from "@/lib/types";
 import { deleteOutfitLayout, saveOutfitLayout } from "./actions";
 import type { RandomOutfitItem } from "./random-outfit-builder";
@@ -48,6 +53,8 @@ const BASE_PIECE_SIZE = 180;
 const FRAME_WIDTH = 560;
 const FRAME_MIN_HEIGHT = 520;
 const FRAME_MAX_HEIGHT = 1200;
+/** Space kept below the canvas when fitting it to the viewport (page py-12). */
+const FRAME_GUTTER = 48;
 
 const EMPTY_FILTERS: ActiveFilters = {
   q: "",
@@ -57,7 +64,6 @@ const EMPTY_FILTERS: ActiveFilters = {
   season: "",
   tag: "",
   owner: "",
-  wishlist: false,
   sort: "newest",
 };
 
@@ -84,6 +90,45 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
   const [pieces, setPieces] = useState<PlacedPiece[]>([]);
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [frameHeight, setFrameHeight] = useState(1000);
+  const frameSlotRef = useRef<HTMLDivElement>(null);
+  // Scale the fixed logical canvas to fit rather than resizing it — saved
+  // pieces store absolute coordinates in that space.
+  const [frameScale, setFrameScale] = useState(1);
+  const [panelMaxHeight, setPanelMaxHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    function measure() {
+      const slot = frameSlotRef.current;
+      if (!slot) return;
+      const top = slot.getBoundingClientRect().top + window.scrollY;
+      const available = window.innerHeight - top - FRAME_GUTTER;
+      setFrameScale(
+        computeFrameScale({
+          frameWidth: FRAME_WIDTH,
+          frameHeight,
+          availableHeight: available,
+          availableWidth: slot.parentElement?.clientWidth ?? 0,
+        }),
+      );
+      const wide = window.matchMedia("(min-width: 768px)").matches;
+      setPanelMaxHeight(wide ? Math.max(320, available) : null);
+    }
+    let raf = 0;
+    function schedule() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    }
+    schedule();
+    window.addEventListener("resize", schedule);
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.documentElement);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", schedule);
+      observer.disconnect();
+    };
+    // frameHeight is user-adjustable, so the fit has to follow it.
+  }, [frameHeight]);
   const [filters, setFilters] = useState<ActiveFilters>(EMPTY_FILTERS);
   const [outfitName, setOutfitName] = useState("");
   const [savedOutfits, setSavedOutfits] = useState<SavedOutfit[]>(initialOutfits);
@@ -275,10 +320,11 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
 
     setSelectedPieceId(piece.id);
     // Store drag offset in frame-local coordinates to avoid initial jump.
+    const localDown = toFrameSpace(e.clientX, e.clientY, frameRect, frameScale);
     setDragState({
       pieceId: piece.id,
-      dx: e.clientX - frameRect.left - piece.x,
-      dy: e.clientY - frameRect.top - piece.y,
+      dx: localDown.x - piece.x,
+      dy: localDown.y - piece.y,
     });
     target.setPointerCapture(e.pointerId);
   }
@@ -286,8 +332,13 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
   function handleCanvasPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!dragState) return;
     const frameRect = e.currentTarget.getBoundingClientRect();
-    const x = clamp(e.clientX - frameRect.left - dragState.dx, 0, FRAME_WIDTH);
-    const y = clamp(e.clientY - frameRect.top - dragState.dy, 0, frameHeight);
+    const local = toFrameSpace(e.clientX, e.clientY, frameRect, frameScale);
+    const { x, y } = clampToFrame(
+      local.x - dragState.dx,
+      local.y - dragState.dy,
+      FRAME_WIDTH,
+      frameHeight,
+    );
     setPieces((prev) =>
       prev.map((piece) => (piece.id === dragState.pieceId ? { ...piece, x, y } : piece)),
     );
@@ -304,8 +355,8 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row flex-wrap gap-8 items-start">
-      <section className="w-[560px] max-w-full shrink-0">
+    <div className="flex flex-col items-start gap-8 md:flex-row">
+      <section className="w-full shrink-0 md:w-auto">
         {savedOutfits.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {savedOutfits.map((outfit) => (
@@ -344,8 +395,20 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
         </div>
 
         <div
+          ref={frameSlotRef}
+          // overflow-hidden: transform:scale() shrinks the frame visually but
+          // not its layout box, which would otherwise stretch the page.
+          className="overflow-hidden"
+          style={{ width: FRAME_WIDTH * frameScale, height: frameHeight * frameScale }}
+        >
+        <div
           className="relative surface-canvas rounded-2xl border border-ink/10 overflow-hidden shadow-tile"
-          style={{ width: FRAME_WIDTH, height: frameHeight }}
+          style={{
+            width: FRAME_WIDTH,
+            height: frameHeight,
+            transform: `scale(${frameScale})`,
+            transformOrigin: "top left",
+          }}
           onPointerDown={handleCanvasBackgroundPointerDown}
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
@@ -397,9 +460,13 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
         <p className="text-[11px] text-ink-muted mt-2">
           Near-white pixels (`#f0f0f0` and above) are made transparent for cleaner layering.
         </p>
+        </div>
       </section>
 
-      <aside className="w-full max-w-[280px] space-y-3 shrink-0">
+      <aside
+        className="w-full shrink-0 space-y-3 md:sticky md:top-6 md:max-w-[280px] md:overflow-y-auto md:pr-1"
+        style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
+      >
         <div className="rounded-2xl border border-ink/10 bg-white p-3 space-y-2">
           <div className="text-[10px] uppercase tracking-wide text-ink-muted">Outfit</div>
           <div className="flex gap-2">

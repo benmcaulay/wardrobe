@@ -107,8 +107,7 @@ export default async function TryOnPage() {
           <h1 className="font-serif text-4xl tracking-tight">Virtual try-on</h1>
           <p className="text-ink-muted mt-2 max-w-xl">
             Upload up to 5 photos of yourself, pick one, then choose a saved
-            outfit or any items from your closet — the AI agent will redress
-            you in seconds.
+            outfit or any items from your closet.
           </p>
         </div>
         <Link

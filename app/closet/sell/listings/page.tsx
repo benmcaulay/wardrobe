@@ -79,7 +79,8 @@ export default async function ListingsPage() {
 
   return (
     <main className="max-w-4xl mx-auto px-6 py-12">
-      <nav className="text-xs text-ink-muted mb-6 flex items-center justify-between">
+      {/* pr-28 clears the fixed menu trigger (app/closet/layout.tsx). */}
+      <nav className="text-xs text-ink-muted mb-6 flex items-center justify-between pr-28">
         <Link href="/closet/sell" className="hover:text-ink">
           ← Keep swiping
         </Link>

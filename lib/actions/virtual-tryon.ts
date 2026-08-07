@@ -204,6 +204,27 @@ export async function saveOutfit(
   return { ok: true, id: created.id };
 }
 
+export type DeleteTryOnResponse = { ok: true } | { ok: false; error: string };
+
+/**
+ * Remove a generated try-on and its image files.
+ *
+ * The credit it cost is not refunded — the generation really happened. This
+ * only clears the result from the "Recent try-ons" strip.
+ */
+export async function deleteVirtualTryOn(id: string): Promise<DeleteTryOnResponse> {
+  const user = await requireUser();
+  const tryOn = await prisma.virtualTryOn.findUnique({ where: { id } });
+  if (!tryOn || tryOn.userId !== user.id) {
+    return { ok: false, error: "Try-on not found" };
+  }
+  await prisma.virtualTryOn.delete({ where: { id } });
+  // Best-effort: a missing file shouldn't leave an undeletable row behind.
+  await deleteUpload(tryOn.resultImagePath).catch(() => {});
+  revalidatePath("/closet/try-on");
+  return { ok: true };
+}
+
 export type DeleteOutfitResponse = { ok: true } | { ok: false; error: string };
 
 export async function deleteOutfit(id: string): Promise<DeleteOutfitResponse> {

@@ -11,6 +11,11 @@ const PUBLIC_PREFIXES = [
   "/api/stripe/webhook",
   // Interactive UI direction prototypes (no auth; mock data only).
   "/design-lab",
+  // Unlisted share links. The token in the URL is the credential — see
+  // lib/share/resolve.ts, which is what actually decides what a token may
+  // read (thumbnails only, allow-listed by item id).
+  "/s/",
+  "/api/share/",
 ];
 
 /**

@@ -43,7 +43,8 @@ export default async function SmartPakkerPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
-      <nav className="mb-6 flex items-center justify-between text-xs text-ink-muted">
+      {/* pr-28 clears the fixed menu trigger (app/closet/layout.tsx). */}
+      <nav className="mb-6 flex items-center justify-between pr-28 text-xs text-ink-muted">
         <Link href="/closet" className="hover:text-ink">
           ← Closet
         </Link>

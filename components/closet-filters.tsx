@@ -13,6 +13,8 @@ import { readFiltersFromQueryString } from "@/lib/closet-item-filter";
 import { SEASONS } from "@/lib/types";
 import { SHARED_OWNER_FILTER } from "@/lib/owners";
 import { parseMultiFilterParam, serializeMultiFilterParam } from "@/lib/closet-filter-params";
+import { isFilterVisible, type ClosetFilterKey } from "@/lib/closet-filter-visibility";
+import { setDefaultClosetSort } from "@/lib/actions/preferences";
 
 export type CategoryFilterOption = { value: string; label: string };
 
@@ -23,7 +25,7 @@ export type FilterOptions = {
   brands: string[];
   colors: string[];
   tags: string[];
-  /** Owner segmented options (excluding "Everyone"/"Shared", which are built in). */
+  /** Owner options (excluding "Everyone"/"Shared", which are built in). */
   owners: OwnerFilterOption[];
 };
 
@@ -35,7 +37,6 @@ export type ActiveFilters = {
   season: string;
   tag: string;
   owner: string;
-  wishlist: boolean;
   sort: ClosetSortKey;
 };
 
@@ -43,6 +44,9 @@ type Props = {
   options: FilterOptions;
   filters: ActiveFilters;
   onFiltersChange: (next: ActiveFilters) => void;
+  /** Controls the user has hidden in Settings. Their values are already
+   *  neutralised server-side, so we simply don't render them. */
+  hiddenFilters?: readonly ClosetFilterKey[];
 };
 
 const DEBOUNCE_MS = 400;
@@ -59,7 +63,6 @@ function searchParamsHasActiveFilters(sp: URLSearchParams): boolean {
     sp.get("season") ||
     sp.get("tag") ||
     sp.get("owner") ||
-    sp.get("wishlist") ||
     (sp.get("sort") && sp.get("sort") !== "newest")
   );
 }
@@ -91,7 +94,6 @@ function buildQueryString(filters: ActiveFilters): string {
   if (filters.season) p.set("season", filters.season);
   if (filters.tag) p.set("tag", filters.tag);
   if (filters.owner) p.set("owner", filters.owner);
-  if (filters.wishlist) p.set("wishlist", "1");
   if (filters.sort && filters.sort !== "newest") p.set("sort", filters.sort);
   return p.toString();
 }
@@ -102,7 +104,13 @@ function syncUrl(filters: ActiveFilters) {
   replaceClosetUrl(qs);
 }
 
-export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
+export function ClosetFilters({
+  options,
+  filters,
+  onFiltersChange,
+  hiddenFilters = [],
+}: Props) {
+  const shows = (key: ClosetFilterKey) => isFilterVisible(key, hiddenFilters);
   const searchParams = useSearchParams();
   const searchRef = useRef<HTMLInputElement>(null);
   const [qDraft, setQDraft] = useState(filters.q);
@@ -118,14 +126,20 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
     (filters.colors.length > 0 ? 1 : 0) +
     (filters.season ? 1 : 0) +
     (filters.tag ? 1 : 0) +
-    (filters.owner ? 1 : 0) +
-    (filters.wishlist ? 1 : 0) +
-    (filters.sort !== "newest" ? 1 : 0);
+    (filters.owner ? 1 : 0);
 
   function patch(next: Partial<ActiveFilters>) {
     const merged = { ...filters, ...next };
     onFiltersChange(merged);
     syncUrl(merged);
+    // Remember the sort so the closet reopens the same way next time. Only on
+    // an actual change, and deliberately not awaited — the grid has already
+    // re-sorted locally, so this is bookkeeping.
+    if (next.sort !== undefined && next.sort !== filters.sort) {
+      void setDefaultClosetSort(next.sort).catch(() => {
+        /* a lost preference write isn't worth interrupting the user over */
+      });
+    }
   }
 
   // Restore filters when returning via plain `/closet` links (e.g. item detail ← Closet).
@@ -167,8 +181,8 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
       season: "",
       tag: "",
       owner: "",
-      wishlist: false,
-      sort: "newest",
+      // Sort is a saved preference, not a filter — "Clear" leaves it alone.
+      sort: filters.sort,
     };
     setQDraft("");
     onFiltersChange(cleared);
@@ -178,13 +192,6 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
 
   return (
     <div className="mb-8 space-y-3">
-      {options.owners.length >= 2 && (
-        <OwnerFilter
-          options={options.owners}
-          value={filters.owner}
-          onChange={(owner) => patch({ owner })}
-        />
-      )}
       <div className="relative">
         <input
           ref={searchRef}
@@ -217,57 +224,69 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <MultiSelectFilter
-          label="Category"
-          selected={filters.categories}
-          options={options.categories}
-          onChange={(categories) => patch({ categories })}
-          disabled={options.categories.length === 0}
-        />
-        <Select
-          label="Brand"
-          value={filters.brand}
-          options={options.brands.map((b) => ({ value: b, label: b }))}
-          onChange={(brand) => patch({ brand })}
-          disabled={options.brands.length === 0}
-        />
-        <MultiSelectFilter
-          label="Color"
-          selected={filters.colors}
-          options={options.colors.map((c) => ({ value: c, label: c }))}
-          onChange={(colors) => patch({ colors })}
-          disabled={options.colors.length === 0}
-          formatLabel={(s) => s.charAt(0).toUpperCase() + s.slice(1)}
-        />
-        <Select
-          label="Season"
-          value={filters.season}
-          options={SEASONS.map((s) => ({ value: s, label: s }))}
-          onChange={(season) => patch({ season })}
-        />
-        <Select
-          label="Tag"
-          value={filters.tag}
-          options={options.tags.map((t) => ({ value: t, label: t }))}
-          onChange={(tag) => patch({ tag })}
-          disabled={options.tags.length === 0}
-        />
-        <SortControl sort={filters.sort} onChange={(sort) => patch({ sort })} />
-        <label
-          className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs transition ${
-            filters.wishlist
-              ? "bg-ink text-paper border-ink"
-              : "bg-white border-ink/10 text-ink hover:border-ink/30"
-          }`}
-        >
-          <input
-            type="checkbox"
-            className="sr-only"
-            checked={filters.wishlist}
-            onChange={(e) => patch({ wishlist: e.target.checked })}
+        {shows("owner") && options.owners.length >= 2 && (
+          <OwnerFilter
+            options={options.owners}
+            value={filters.owner}
+            onChange={(owner) => patch({ owner })}
           />
-          Wishlist
-        </label>
+        )}
+        {shows("category") && (
+          <MultiSelectFilter
+            label="Category"
+            selected={filters.categories}
+            options={options.categories}
+            onChange={(categories) => patch({ categories })}
+            disabled={options.categories.length === 0}
+          />
+        )}
+        {shows("brand") && (
+          <Select
+            label="Brand"
+            value={filters.brand}
+            options={options.brands.map((b) => ({ value: b, label: b }))}
+            onChange={(brand) => patch({ brand })}
+            disabled={options.brands.length === 0}
+          />
+        )}
+        {shows("color") && (
+          <MultiSelectFilter
+            label="Color"
+            selected={filters.colors}
+            options={options.colors.map((c) => ({ value: c, label: c }))}
+            onChange={(colors) => patch({ colors })}
+            disabled={options.colors.length === 0}
+            formatLabel={(s) => s.charAt(0).toUpperCase() + s.slice(1)}
+          />
+        )}
+        {shows("season") && (
+          <Select
+            label="Season"
+            value={filters.season}
+            options={SEASONS.map((s) => ({ value: s, label: s }))}
+            onChange={(season) => patch({ season })}
+          />
+        )}
+        {shows("tag") && (
+          <Select
+            label="Tag"
+            value={filters.tag}
+            options={options.tags.map((t) => ({ value: t, label: t }))}
+            onChange={(tag) => patch({ tag })}
+            disabled={options.tags.length === 0}
+          />
+        )}
+        {/* Sorting isn't a filter, so it sits behind a divider and its own
+            label. Grouped so the rule, the label and the control wrap together
+            rather than the divider stranding at the start of a new line. */}
+        <div className="ml-1 flex items-center gap-2">
+          {/* gray-200, not ink/15: the theme colours are `var(--ink)` holding a
+              hex, so Tailwind's /opacity modifiers resolve to transparent on
+              them. This is the same value the chip borders actually render. */}
+          <span aria-hidden className="h-5 w-px shrink-0 bg-gray-200" />
+          <span className="shrink-0 text-xs text-ink-muted">Sort by:</span>
+          <SortControl sort={filters.sort} onChange={(sort) => patch({ sort })} />
+        </div>
 
         {activeCount > 0 && (
           <button
@@ -283,7 +302,15 @@ export function ClosetFilters({ options, filters, onFiltersChange }: Props) {
   );
 }
 
-/** Segmented owner switcher: Everyone · <each owner> · Shared. */
+/**
+ * Owner switcher: a single pill showing who you're looking at, with the roster
+ * behind a dropdown. Replaces the old Everyone/Me/Her/Shared segmented row,
+ * which grew a segment per owner and dominated the filter bar.
+ *
+ * Never fills solid black — it always holds a value, so a permanent black pill
+ * would read as "filtering" even at the default. A picked owner gets a soft
+ * warm fill instead, which still reads as set without shouting.
+ */
 function OwnerFilter({
   options,
   value,
@@ -293,31 +320,80 @@ function OwnerFilter({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   const segments: OwnerFilterOption[] = [
     { value: "", label: "Everyone" },
     ...options,
     { value: SHARED_OWNER_FILTER, label: "Shared" },
   ];
+  const active = value !== "";
+  const current = segments.find((s) => s.value === value) ?? segments[0];
+
   return (
-    <div className="inline-flex flex-wrap items-center gap-1 rounded-full border border-ink/10 bg-white p-1">
-      {segments.map((seg) => {
-        const active = value === seg.value;
-        return (
-          <button
-            key={seg.value || "__everyone__"}
-            type="button"
-            onClick={() => onChange(seg.value)}
-            aria-pressed={active}
-            className={`rounded-full px-3.5 py-1 text-xs capitalize transition ${
-              active
-                ? "bg-ink text-paper"
-                : "text-ink-muted hover:text-ink hover:bg-paper-warm"
-            }`}
-          >
-            {seg.label}
-          </button>
-        );
-      })}
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label="Owner"
+        className={`inline-flex max-w-[200px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs capitalize transition ${
+          active
+            ? "border-ink/30 bg-paper-warm text-ink"
+            : "border-ink/10 bg-white text-ink hover:border-ink/30"
+        }`}
+      >
+        <span className="truncate">{current.label}</span>
+        <span className="shrink-0 text-[10px]" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Owner filter"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[160px] rounded-xl border border-ink/10 bg-white p-1.5 shadow-lg"
+        >
+          {segments.map((seg) => {
+            const isOn = seg.value === value;
+            return (
+              <button
+                key={seg.value || "__everyone__"}
+                type="button"
+                role="option"
+                aria-selected={isOn}
+                onClick={() => {
+                  onChange(seg.value);
+                  setOpen(false);
+                }}
+                className={`block w-full rounded-lg px-2.5 py-1.5 text-left text-xs capitalize transition ${
+                  isOn ? "bg-paper-warm text-ink" : "text-ink-muted hover:bg-paper-warm hover:text-ink"
+                }`}
+              >
+                {seg.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -342,8 +418,10 @@ function SortControl({
 
   return (
     <div
-      className={`inline-flex items-stretch rounded-full border text-xs transition overflow-hidden ${
-        active ? "bg-ink text-paper border-ink" : "bg-white border-ink/10 text-ink hover:border-ink/30"
+      className={`inline-flex items-stretch overflow-hidden rounded-full border text-xs transition ${
+        active
+          ? "border-ink/30 bg-paper-warm text-ink"
+          : "border-ink/10 bg-white text-ink hover:border-ink/30"
       }`}
     >
       <label className="relative flex items-center">
@@ -351,9 +429,7 @@ function SortControl({
         <select
           value={field}
           onChange={(e) => setField(e.target.value as ClosetSortField)}
-          className={`appearance-none bg-transparent pl-3 pr-1 py-1.5 cursor-pointer focus:outline-none ${
-            active ? "text-paper" : "text-ink"
-          }`}
+          className="cursor-pointer appearance-none bg-transparent py-1.5 pl-3 pr-1 text-ink focus:outline-none"
         >
           {SORT_FIELD_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -367,11 +443,9 @@ function SortControl({
         onClick={toggleDirection}
         aria-label={reversed ? "Reverse sort direction (currently reversed)" : "Reverse sort direction"}
         title={reversed ? "Sort reversed — click for default order" : "Default order — click to reverse"}
-        className={`flex items-center justify-center px-2 border-l transition-colors ${
-          active ? "border-paper/20 hover:bg-white/10" : "border-ink/10 hover:bg-paper-warm"
-        }`}
+        className="flex items-center justify-center border-l border-ink/10 px-2 transition-colors hover:bg-paper-warm"
       >
-        <SortDirectionArrow reversed={reversed} className={active ? "text-paper" : "text-ink-muted"} />
+        <SortDirectionArrow reversed={reversed} className="text-ink-muted" />
       </button>
     </div>
   );
@@ -505,6 +579,14 @@ export function MultiSelectFilter({
   );
 }
 
+/**
+ * Single-choice filter pill.
+ *
+ * Built as a popover rather than a native <select> because a <select> sizes
+ * itself to its widest *option* — the Brand control was as wide as
+ * "Legendary Headwear" while showing the word "Brand". A custom trigger renders
+ * only the current label, so every pill shrinks to fit its own text.
+ */
 function Select({
   label,
   value,
@@ -520,32 +602,92 @@ function Select({
   disabled?: boolean;
   formatLabel?: (label: string) => string;
 }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const active = !!value;
+  const current = options.find((o) => o.value === value);
+  const text = active ? formatLabel?.(current?.label ?? value) ?? current?.label ?? value : label;
+
+  function choose(next: string) {
+    onChange(next);
+    setOpen(false);
+  }
+
   return (
-    <label className="relative">
-      <span className="sr-only">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
         disabled={disabled}
-        className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
-          value
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={label}
+        className={`inline-flex max-w-[200px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs capitalize transition disabled:cursor-not-allowed disabled:opacity-40 ${
+          active
             ? "bg-ink text-paper border-ink"
             : "bg-white border-ink/10 text-ink hover:border-ink/30"
-        } disabled:opacity-40 disabled:cursor-not-allowed`}
+        }`}
       >
-        <option value="">{label}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {formatLabel ? formatLabel(o.label) : o.label}
-          </option>
-        ))}
-      </select>
-      <span
-        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
-        aria-hidden
-      >
-        ▾
-      </span>
-    </label>
+        <span className="truncate">{text}</span>
+        <span className="shrink-0 text-[10px]" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && !disabled && (
+        <div
+          role="listbox"
+          aria-label={`${label} filter`}
+          className="absolute left-0 top-full z-30 mt-1 max-h-72 min-w-[180px] max-w-[min(320px,calc(100vw-3rem))] overflow-y-auto rounded-xl border border-ink/10 bg-white p-2 shadow-lg"
+        >
+          <div className="flex flex-wrap gap-1">
+            {options.map((o) => {
+              const isOn = o.value === value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="option"
+                  aria-selected={isOn}
+                  onClick={() => choose(isOn ? "" : o.value)}
+                  className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-wide capitalize transition ${
+                    isOn
+                      ? "bg-ink text-paper border-ink"
+                      : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
+                  }`}
+                >
+                  {formatLabel ? formatLabel(o.label) : o.label}
+                </button>
+              );
+            })}
+          </div>
+          {active && (
+            <button
+              type="button"
+              onClick={() => choose("")}
+              className="mt-2 text-[10px] text-ink-muted underline underline-offset-2 hover:text-ink"
+            >
+              Clear {label.toLowerCase()}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

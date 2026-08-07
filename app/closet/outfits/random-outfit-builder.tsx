@@ -18,6 +18,11 @@ import { CategorySlotIcon } from "@/components/category-slot-icon";
 import { itemTileImageTransform } from "@/lib/item-tile-meta";
 import { OUTFIT_PIECE_IMG_CLASS, resolveOutfitPieceDisplayUrl } from "@/lib/outfit-piece-image";
 import { swapLayerOrder } from "@/lib/outfit-layer";
+import {
+  clampToFrame,
+  computeFrameScale,
+  toFrameSpace,
+} from "@/lib/outfit-frame-scale";
 import { saveOutfitSlotDefault } from "@/lib/actions/outfitSlotDefaults";
 import {
   resolveSlotLayout,
@@ -65,6 +70,11 @@ type Props = {
 const BASE_PIECE_SIZE = 180;
 const FRAME_WIDTH = 560;
 const FRAME_HEIGHT = 960;
+/**
+ * Space kept below the canvas when fitting it to the viewport. Covers the
+ * page's own bottom padding (py-12) so the whole studio lands inside the fold.
+ */
+const FRAME_GUTTER = 48;
 const SLOT_ICON_SIZE = 72;
 
 export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }: Props) {
@@ -73,10 +83,11 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
     [items],
   );
 
-  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>([
-    { categories: [], count: 1 },
-  ]);
+  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>([]);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [draftCats, setDraftCats] = useState<string[]>([]);
+  const [draftCount, setDraftCount] = useState(1);
   const [slots, setSlots] = useState<CanvasSlot[]>([]);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<{
@@ -98,6 +109,53 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   processedImageUrlsRef.current = processedImageUrls;
   const urlRegistryRef = useRef<string[]>([]);
   const frameRef = useRef<HTMLDivElement>(null);
+  const frameSlotRef = useRef<HTMLDivElement>(null);
+  // The canvas is a fixed logical space; we scale it to fit rather than resize
+  // it, so saved piece coordinates keep meaning what they meant.
+  const [frameScale, setFrameScale] = useState(1);
+  // Height left for the side panel below the page header. A flat
+  // `100dvh - gutter` overflows, because the panel starts partway down.
+  const [panelMaxHeight, setPanelMaxHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    function measure() {
+      const slot = frameSlotRef.current;
+      if (!slot) return;
+      const top = slot.getBoundingClientRect().top + window.scrollY;
+      const available = window.innerHeight - top - FRAME_GUTTER;
+      setFrameScale(
+        computeFrameScale({
+          frameWidth: FRAME_WIDTH,
+          frameHeight: FRAME_HEIGHT,
+          availableHeight: available,
+          availableWidth: slot.parentElement?.clientWidth ?? 0,
+        }),
+      );
+      // Only cage the panel once the columns sit side by side (Tailwind md).
+      const wide = window.matchMedia("(min-width: 768px)").matches;
+      setPanelMaxHeight(wide ? Math.max(320, available) : null);
+    }
+    // Measure on the next frame: a resize fires before layout has settled, so
+    // reading immediately can capture the previous viewport's geometry.
+    let raf = 0;
+    function schedule() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    }
+
+    schedule();
+    window.addEventListener("resize", schedule);
+    // documentElement's box tracks the viewport and is independent of
+    // frameScale, so observing it can't feed back into itself.
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.documentElement);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", schedule);
+      observer.disconnect();
+    };
+  }, []);
   const spinLockRef = useRef(false);
   const spinSeqRef = useRef(0);
 
@@ -232,37 +290,43 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
     });
   }
 
-  function updateCategoryRule(index: number, patch: Partial<CategoryRule>) {
-    setCategoryRules((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
-    setSpinError(null);
-  }
-
-  function toggleRuleCategory(ruleIndex: number, cat: string) {
+  // Tap a chip in the single row: add a one-of rule, or remove it. Categories
+  // that belong to a multi-select rule (OR-group or count > 1) are locked here
+  // and managed in the multi-select list instead.
+  function toggleSimpleCategory(cat: string) {
     setCategoryRules((prev) => {
       const key = normalizeCategoryName(cat);
-      const adding = !prev[ruleIndex]?.categories.some((c) => normalizeCategoryName(c) === key);
-      const next = prev.map((rule, i) => {
-        if (i !== ruleIndex) return rule;
-        const has = rule.categories.some((c) => normalizeCategoryName(c) === key);
-        if (has) {
-          return {
-            ...rule,
-            categories: rule.categories.filter((c) => normalizeCategoryName(c) !== key),
-          };
-        }
-        return { ...rule, categories: [...rule.categories, cat] };
-      });
-      return adding ? withTrailingBlankCategoryRule(next) : next;
+      const idx = prev.findIndex((r) => r.categories.some((c) => normalizeCategoryName(c) === key));
+      if (idx >= 0) {
+        const r = prev[idx]!;
+        if (r.categories.length === 1 && r.count === 1) return prev.filter((_, i) => i !== idx);
+        return prev; // in a multi-select rule — locked
+      }
+      return [...prev, { categories: [cat], count: 1 }];
     });
     setSpinError(null);
   }
 
-  function addCategoryRule() {
-    setCategoryRules((prev) => withTrailingBlankCategoryRule([...prev, { categories: [], count: 1 }]));
+  function toggleDraftCategory(cat: string) {
+    const key = normalizeCategoryName(cat);
+    setDraftCats((prev) =>
+      prev.some((c) => normalizeCategoryName(c) === key)
+        ? prev.filter((c) => normalizeCategoryName(c) !== key)
+        : [...prev, cat],
+    );
+  }
+
+  function addMultiSelectRule() {
+    if (draftCats.length === 0) return;
+    setCategoryRules((prev) => [...prev, { categories: draftCats, count: Math.max(1, draftCount) }]);
+    setDraftCats([]);
+    setDraftCount(1);
+    setSpinError(null);
   }
 
   function removeCategoryRule(index: number) {
     setCategoryRules((prev) => prev.filter((_, i) => i !== index));
+    setSpinError(null);
   }
 
   function addColorRule() {
@@ -383,8 +447,13 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   function handleFramePointerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!dragState || !frameRef.current) return;
     const rect = frameRef.current.getBoundingClientRect();
-    const x = clamp(e.clientX - rect.left - dragState.dx, 0, FRAME_WIDTH);
-    const y = clamp(e.clientY - rect.top - dragState.dy, 0, FRAME_HEIGHT);
+    const local = toFrameSpace(e.clientX, e.clientY, rect, frameScale);
+    const { x, y } = clampToFrame(
+      local.x - dragState.dx,
+      local.y - dragState.dy,
+      FRAME_WIDTH,
+      FRAME_HEIGHT,
+    );
     setSlots((prev) =>
       prev.map((s) => (s.id === dragState.slotId ? { ...s, x, y } : s)),
     );
@@ -403,23 +472,39 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   function startCanvasDrag(e: React.PointerEvent<HTMLButtonElement>, slot: CanvasSlot) {
     if (!frameRef.current) return;
     const frameRect = frameRef.current.getBoundingClientRect();
+    const localDown = toFrameSpace(e.clientX, e.clientY, frameRect, frameScale);
     setSelectedSlotId(slot.id);
     setDragState({
       kind: "canvas",
       slotId: slot.id,
-      dx: e.clientX - frameRect.left - slot.x,
-      dy: e.clientY - frameRect.top - slot.y,
+      dx: localDown.x - slot.x,
+      dy: localDown.y - slot.y,
     });
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
   return (
-    <div className="flex flex-col lg:flex-row flex-wrap gap-8 items-start">
-      <section className="w-[560px] max-w-full shrink-0">
+    <div className="flex flex-col items-start gap-8 md:flex-row">
+      <section className="w-full shrink-0 md:w-auto">
+        {/* Reserves the on-screen footprint of the scaled canvas so the page
+            doesn't leave a gap the size of the unscaled frame. */}
+        <div
+          ref={frameSlotRef}
+          // overflow-hidden matters: transform:scale() shrinks the frame
+          // visually but not its layout box, so without clipping the full
+          // unscaled height still stretches the page.
+          className="overflow-hidden"
+          style={{ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }}
+        >
         <div
           ref={frameRef}
           className="relative surface-canvas rounded-2xl border border-ink/10 overflow-hidden shadow-tile"
-          style={{ width: FRAME_WIDTH, height: FRAME_HEIGHT }}
+          style={{
+            width: FRAME_WIDTH,
+            height: FRAME_HEIGHT,
+            transform: `scale(${frameScale})`,
+            transformOrigin: "top left",
+          }}
           onPointerDown={handleFrameBackgroundPointerDown}
           onPointerMove={handleFramePointerMove}
           onPointerUp={handleFramePointerUp}
@@ -472,14 +557,29 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             })}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3 justify-center">
+        <div className="mt-4 flex flex-wrap items-center gap-5 justify-center">
           <button
             type="button"
             onClick={() => void spin()}
             disabled={!readyToSpin || spinning}
-            className="rounded-full bg-ink text-paper px-8 py-2.5 text-sm tracking-wide hover:bg-ink-soft transition disabled:opacity-40"
+            aria-label={spinning ? "Spinning…" : "Spin outfit"}
+            className="group relative flex h-[104px] w-[104px] items-center justify-center rounded-full border-2 border-dashed border-ink/30 bg-white text-ink transition hover:border-ink/50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {spinning ? "Spinning…" : "Spin outfit"}
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute inset-0 rounded-full ${
+                spinning
+                  ? "animate-spin"
+                  : "group-hover:animate-spin motion-reduce:group-hover:animate-none"
+              }`}
+            >
+              <span className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
+            </span>
+            <span className="flex flex-col items-center gap-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icons/outfits.png" alt="" aria-hidden className="h-6 w-6 object-contain" />
+              <span className="text-xs tracking-wide">{spinning ? "Spinning…" : "Spin"}</span>
+            </span>
           </button>
           <button
             type="button"
@@ -500,59 +600,144 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             {spinHint}
           </p>
         )}
+        </div>
       </section>
 
-      <aside className="w-full max-w-[300px] space-y-4 shrink-0">
+      <aside
+        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:max-w-[300px] md:overflow-y-auto md:pr-1"
+        style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
+      >
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
-          <div className="text-[10px] uppercase tracking-wide text-ink-muted">Category rules</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] uppercase tracking-wide text-ink-muted">Category rules</div>
+            <label className="flex items-center gap-1.5 text-[11px] text-ink-muted cursor-pointer select-none">
+              Multi-select
+              <input
+                type="checkbox"
+                checked={multiSelect}
+                onChange={(e) => setMultiSelect(e.target.checked)}
+                className="accent-ink"
+              />
+            </label>
+          </div>
           <p className="text-xs text-ink-muted">
-            Tap categories to build each rule (OR within a rule). A new blank rule appears when you
-            pick one. Slots auto-place on the frame. Each category can only be in one rule — use
-            count for multiples.
+            Tap a category to include one. Turn on multi-select to combine categories (OR) or pick
+            multiples.
           </p>
-          <ul className="space-y-3">
-            {categoryRules.map((rule, idx) => (
-              <li key={idx} className="space-y-2">
-                <CategoryOrPicker
-                  options={pickerOptionsForRule(categoryOptions, rule, idx, categoryRules)}
-                  selected={rule.categories}
-                  onToggle={(cat) => toggleRuleCategory(idx, cat)}
-                />
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-ink-muted shrink-0">Count</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={5}
-                    value={rule.count}
-                    onChange={(e) =>
-                      updateCategoryRule(idx, { count: Math.max(0, Number(e.target.value) || 0) })
-                    }
-                    className="w-12 rounded-full border border-ink/10 px-2 py-1.5 text-xs text-center bg-paper"
-                    aria-label="Count"
-                  />
+
+          {categoryOptions.length === 0 ? (
+            <p className="text-xs text-ink-muted/80 italic">
+              Your closet has no categorized pieces yet.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {categoryOptions.map((cat) => {
+                const key = normalizeCategoryName(cat);
+                const rule = categoryRules.find((r) =>
+                  r.categories.some((c) => normalizeCategoryName(c) === key),
+                );
+                const active = !!rule;
+                const locked = !!rule && !(rule.categories.length === 1 && rule.count === 1);
+                return (
                   <button
+                    key={cat}
                     type="button"
-                    onClick={() => removeCategoryRule(idx)}
-                    disabled={categoryRules.length === 1 && rule.categories.length === 0}
-                    className="ml-auto w-7 h-7 rounded-full text-ink-muted hover:bg-ink/10 disabled:opacity-30"
-                    aria-label="Remove rule"
+                    onClick={() => toggleSimpleCategory(cat)}
+                    disabled={locked}
+                    title={locked ? "Managed in multi-select below" : undefined}
+                    className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
+                      active
+                        ? "bg-ink text-paper border-ink"
+                        : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
+                    } ${locked ? "opacity-60" : ""}`}
                   >
-                    ×
+                    {cat}
+                    {rule && rule.count > 1 ? ` ×${rule.count}` : ""}
                   </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {!hasBlankCategoryRule(categoryRules) && (
-            <button
-              type="button"
-              onClick={addCategoryRule}
-              disabled={categoryOptions.length === 0}
-              className="text-xs text-ink-muted hover:text-ink underline underline-offset-2 disabled:opacity-40"
-            >
-              + Add category rule
-            </button>
+                );
+              })}
+            </div>
+          )}
+
+          {categoryRules.some((r) => r.categories.length > 1 || r.count !== 1) && (
+            <div className="flex flex-wrap gap-1.5">
+              {categoryRules.map((rule, idx) =>
+                rule.categories.length > 1 || rule.count !== 1 ? (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 rounded-full bg-ink text-paper pl-2.5 pr-1 py-1 text-[10px] uppercase tracking-wide capitalize"
+                  >
+                    {rule.categories.join(" / ")}
+                    {rule.count > 1 ? ` ×${rule.count}` : ""}
+                    <button
+                      type="button"
+                      onClick={() => removeCategoryRule(idx)}
+                      className="w-4 h-4 rounded-full hover:bg-paper/20"
+                      aria-label="Remove rule"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ) : null,
+              )}
+            </div>
+          )}
+
+          {multiSelect && (
+            <div className="rounded-xl border border-ink/10 bg-paper-warm/50 p-2.5 space-y-2">
+              <div className="text-[10px] text-ink-muted">
+                Pick categories to combine (matches any — “or”), then how many.
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {categoryOptions
+                  .filter((cat) => {
+                    const key = normalizeCategoryName(cat);
+                    const claimed = categoryRules.some((r) =>
+                      r.categories.some((c) => normalizeCategoryName(c) === key),
+                    );
+                    return !claimed;
+                  })
+                  .map((cat) => {
+                    const on = draftCats.some(
+                      (c) => normalizeCategoryName(c) === normalizeCategoryName(cat),
+                    );
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => toggleDraftCategory(cat)}
+                        className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-wide border transition capitalize ${
+                          on
+                            ? "bg-accent text-white border-accent"
+                            : "bg-white border-ink/10 text-ink-muted hover:border-ink/25"
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-ink-muted shrink-0">How many</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={draftCount}
+                  onChange={(e) => setDraftCount(Math.max(1, Math.min(5, Number(e.target.value) || 1)))}
+                  className="w-12 rounded-full border border-ink/10 px-2 py-1.5 text-xs text-center bg-paper"
+                  aria-label="How many"
+                />
+                <button
+                  type="button"
+                  onClick={addMultiSelectRule}
+                  disabled={draftCats.length === 0}
+                  className="ml-auto rounded-full bg-ink text-paper px-3 py-1.5 text-xs hover:bg-ink-soft transition disabled:opacity-40"
+                >
+                  Add rule
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -769,44 +954,6 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   );
 }
 
-function hasBlankCategoryRule(rules: CategoryRule[]): boolean {
-  return rules.some((r) => r.categories.length === 0);
-}
-
-function withTrailingBlankCategoryRule(rules: CategoryRule[]): CategoryRule[] {
-  if (hasBlankCategoryRule(rules)) return rules;
-  return [...rules, { categories: [], count: 1 }];
-}
-
-function categoriesClaimedByOtherRules(
-  rules: CategoryRule[],
-  excludeIndex: number,
-): Set<string> {
-  const claimed = new Set<string>();
-  rules.forEach((rule, i) => {
-    if (i === excludeIndex) return;
-    for (const cat of rule.categories) {
-      const key = normalizeCategoryName(cat);
-      if (key) claimed.add(key);
-    }
-  });
-  return claimed;
-}
-
-function pickerOptionsForRule(
-  allOptions: string[],
-  rule: CategoryRule,
-  ruleIndex: number,
-  allRules: CategoryRule[],
-): string[] {
-  const claimed = categoriesClaimedByOtherRules(allRules, ruleIndex);
-  return allOptions.filter((cat) => {
-    const key = normalizeCategoryName(cat);
-    if (rule.categories.some((selected) => normalizeCategoryName(selected) === key)) return true;
-    return !claimed.has(key);
-  });
-}
-
 function syncSlotsWithRules(
   slots: CanvasSlot[],
   rules: CategoryRule[],
@@ -854,42 +1001,6 @@ function syncSlotsWithRules(
   }
 
   return synced.map((slot, i) => ({ ...slot, z: i + 1 }));
-}
-
-function CategoryOrPicker({
-  options,
-  selected,
-  onToggle,
-}: {
-  options: string[];
-  selected: string[];
-  onToggle: (cat: string) => void;
-}) {
-  const selectedKeys = new Set(selected.map((c) => normalizeCategoryName(c)));
-  if (options.length === 0 && selected.length === 0) {
-    return <p className="text-xs text-ink-muted italic">All categories are used in other rules.</p>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1">
-      {options.map((cat) => {
-        const active = selectedKeys.has(normalizeCategoryName(cat));
-        return (
-          <button
-            key={cat}
-            type="button"
-            onClick={() => onToggle(cat)}
-            className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-wide border transition capitalize ${
-              active
-                ? "bg-ink text-paper border-ink"
-                : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
-            }`}
-          >
-            {cat}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 function formatFillIssue(issue: OutfitFillIssue): string {

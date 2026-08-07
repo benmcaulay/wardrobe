@@ -1,0 +1,715 @@
+[
+ {
+  "name": "closet",
+  "pascal": "Closet",
+  "keywords": [
+   "closet"
+  ],
+  "body": "<path d=\"M3.4 4.7H20.6\"/><path d=\"M6.12 8.3 7.8 4.7 9.48 8.3\"/><path d=\"M6.12 8.3H4.56L3.24 10.64L4.89 11.63L5.16 10.4V17.9a1 1 0 0 0 1 1h3.28a1 1 0 0 0 1 -1V10.4L10.71 11.63L12.36 10.64L11.04 8.3H9.48\"/><path d=\"M6.12 8.3a1.81 1.81 0 0 0 3.36 0\"/><path d=\"M16.9 5.8 15 7.7L14.2 18.9a1.4 1.4 0 0 0 1.4 1.4h2.6a1.4 1.4 0 0 0 1.4 -1.4L18.8 7.7Z\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "scan",
+  "pascal": "Scan",
+  "keywords": [
+   "scan"
+  ],
+  "body": "<path d=\"M8.6 3.4H6.1A2.7 2.7 0 0 0 3.4 6.1v2.5\"/><path d=\"M15.4 3.4h2.5a2.7 2.7 0 0 1 2.7 2.7v2.5\"/><path d=\"M20.6 15.4v2.5a2.7 2.7 0 0 1-2.7 2.7h-2.5\"/><path d=\"M8.6 20.6H6.1a2.7 2.7 0 0 1-2.7-2.7v-2.5\"/><path d=\"M12 8.8Q12.48 11.52 15.2 12 12.48 12.48 12 15.2 11.52 12.48 8.8 12 11.52 11.52 12 8.8Z\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "camera",
+  "pascal": "Camera",
+  "keywords": [
+   "camera"
+  ],
+  "body": "<rect x=\"3\" y=\"6.7\" width=\"18\" height=\"13.6\" rx=\"3.7\"/><path d=\"M8.5 6.7 9.9 4.15a1.5 1.5 0 0 1 1.3-.75h1.6a1.5 1.5 0 0 1 1.3.75L15.5 6.7\"/><path d=\"M5.1 6.7V6a.85.85 0 0 1 .85-.85h1.3a.85.85 0 0 1 .85.85v.4\"/><circle cx=\"12\" cy=\"13.3\" r=\"4.2\"/><circle cx=\"12\" cy=\"13.3\" r=\"2.05\"/><circle cx=\"17.9\" cy=\"9.9\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "hanger",
+  "pascal": "Hanger",
+  "keywords": [
+   "hanger"
+  ],
+  "body": "<path d=\"M12 6.55a1.75 1.75 0 1 1 1.75-1.75\"/><path d=\"M9.2 9.2 12 6.65 14.8 9.2\"/><path d=\"M9.2 9.2H6.6L4.4 13.1L7.15 14.75L7.6 12.7V19.8a1 1 0 0 0 1 1h6.8a1 1 0 0 0 1 -1V12.7L16.85 14.75L19.6 13.1L17.4 9.2H14.8\"/><path d=\"M9.2 9.2a3.01 3.01 0 0 0 5.6 0\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "suitcase",
+  "pascal": "Suitcase",
+  "keywords": [
+   "suitcase"
+  ],
+  "body": "<rect x=\"3.2\" y=\"7.5\" width=\"17.6\" height=\"12.6\" rx=\"3.5\"/><path d=\"M8.8 7.5V6a1.7 1.7 0 0 1 1.7-1.7h3a1.7 1.7 0 0 1 1.7 1.7v1.5\"/><path d=\"M9.3 11.3v5\"/><path d=\"M14.7 11.3v5\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "tag",
+  "pascal": "Tag",
+  "keywords": [
+   "tag"
+  ],
+  "body": "<path d=\"M11.6 3.6H6.6A3 3 0 0 0 3.6 6.6v5l7.6 7.6a2.6 2.6 0 0 0 3.68 0l4.3-4.3a2.6 2.6 0 0 0 0-3.68Z\"/><circle cx=\"7.4\" cy=\"7.4\" r=\"1\" fill=\"currentColor\" stroke=\"none\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "heart",
+  "pascal": "Heart",
+  "keywords": [
+   "heart"
+  ],
+  "body": "<path d=\"M18.6 13.6c1.6-1.5 2.4-3 2.4-4.9A4.9 4.9 0 0 0 16.2 3.8c-1.7 0-3.2.8-4.2 2.1-1-1.3-2.5-2.1-4.2-2.1A4.9 4.9 0 0 0 3 8.7c0 1.9.8 3.4 2.4 4.9l6.6 6.6Z\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "gear",
+  "pascal": "Gear",
+  "keywords": [
+   "gear"
+  ],
+  "body": "<path d=\"M9.55 3.44A8.9 8.9 0 0 1 14.45 3.44C15.24 3.67 13.48 5.87 14.24 6.17A6.25 6.25 0 0 1 15.93 7.14C16.57 7.66 17.59 5.03 18.18 5.6A8.9 8.9 0 0 1 20.64 9.85C20.83 10.64 18.04 10.21 18.17 11.02A6.25 6.25 0 0 1 18.17 12.98C18.04 13.79 20.83 13.36 20.64 14.15A8.9 8.9 0 0 1 18.18 18.4C17.59 18.97 16.57 16.34 15.93 16.86A6.25 6.25 0 0 1 14.24 17.83C13.48 18.13 15.24 20.33 14.45 20.56A8.9 8.9 0 0 1 9.55 20.56C8.76 20.33 10.52 18.13 9.76 17.83A6.25 6.25 0 0 1 8.07 16.86C7.43 16.34 6.41 18.97 5.82 18.4A8.9 8.9 0 0 1 3.36 14.15C3.17 13.36 5.96 13.79 5.83 12.98A6.25 6.25 0 0 1 5.83 11.02C5.96 10.21 3.17 10.64 3.36 9.85A8.9 8.9 0 0 1 5.82 5.6C6.41 5.03 7.43 7.66 8.07 7.14A6.25 6.25 0 0 1 9.76 6.17Z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>",
+  "group": "nav"
+ },
+ {
+  "name": "star-dollar",
+  "pascal": "StarDollar",
+  "keywords": [
+   "credits",
+   "star",
+   "dollar",
+   "reward",
+   "balance"
+  ],
+  "body": "<path d=\"M10.44 4.76Q12 2.2 13.56 4.76L14.27 5.94Q15.44 7.87 17.63 8.38L18.97 8.7Q21.89 9.39 19.93 11.66L19.03 12.7Q17.56 14.41 17.75 16.65L17.86 18.02Q18.11 21.01 15.35 19.85L14.07 19.32Q12 18.45 9.93 19.32L8.65 19.85Q5.89 21.01 6.14 18.02L6.25 16.65Q6.44 14.41 4.97 12.7L4.07 11.66Q2.11 9.39 5.03 8.7L6.37 8.38Q8.56 7.87 9.73 5.94Z\"/><path d=\"M13.9 8.2H11.6a1.8 1.8 0 0 0 0 3.6h.8a1.8 1.8 0 0 1 0 3.6H10.1\"/><path d=\"M12 7v9.6\"/>",
+  "group": "money"
+ },
+ {
+  "name": "wallet",
+  "pascal": "Wallet",
+  "keywords": [
+   "wallet",
+   "money",
+   "spend",
+   "cash",
+   "payment"
+  ],
+  "body": "<rect x=\"3.4\" y=\"5.9\" width=\"17.2\" height=\"13\" rx=\"3.7\"/><path d=\"M20.6 9.7h-4.4a2.7 2.7 0 1 0 0 5.4h4.4\"/><circle cx=\"17.1\" cy=\"12.4\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/>",
+  "group": "money"
+ },
+ {
+  "name": "receipt",
+  "pascal": "Receipt",
+  "keywords": [
+   "receipt",
+   "purchase",
+   "invoice",
+   "bill",
+   "order"
+  ],
+  "body": "<path d=\"M5.4 20.15V5.85a2.7 2.7 0 0 1 2.7-2.7h7.8a2.7 2.7 0 0 1 2.7 2.7v14.3l-3.3-1.35-3.3 1.35-3.3-1.35z\"/><path d=\"M8.4 8.4h7.2\"/><path d=\"M8.4 11.9h7.2\"/><path d=\"M8.4 15.4h4.2\"/>",
+  "group": "money"
+ },
+ {
+  "name": "coins",
+  "pascal": "Coins",
+  "keywords": [
+   "coins",
+   "money",
+   "cash",
+   "currency",
+   "savings"
+  ],
+  "body": "<circle cx=\"13.7\" cy=\"13.9\" r=\"5.6\"/><path d=\"M8.15 13.2A4.4 4.4 0 1 1 13.46 8.31\"/>",
+  "group": "money"
+ },
+ {
+  "name": "price-drop",
+  "pascal": "PriceDrop",
+  "keywords": [
+   "sale",
+   "discount",
+   "price",
+   "markdown",
+   "tag"
+  ],
+  "body": "<path d=\"M4.5 13.17Q3.4 12 4.5 10.83L8.7 6.37Q9.8 5.2 11.4 5.2L17.3 5.2Q20.5 5.2 20.5 8.4L20.5 15.6Q20.5 18.8 17.3 18.8L11.4 18.8Q9.8 18.8 8.7 17.63Z\"/><circle cx=\"8.2\" cy=\"12\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M14.9 8.9v6\"/><path d=\"m12.4 12.4 2.5 2.5 2.5-2.5\"/>",
+  "group": "money"
+ },
+ {
+  "name": "budget",
+  "pascal": "Budget",
+  "keywords": [
+   "budget",
+   "gauge",
+   "meter",
+   "remaining",
+   "limit"
+  ],
+  "body": "<path d=\"M6 18.4a8.5 8.5 0 1 1 12 0\"/><path d=\"M12 12.38 8.1 8.48\"/><circle cx=\"12\" cy=\"12.38\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/>",
+  "group": "money"
+ },
+ {
+  "name": "piggy-bank",
+  "pascal": "PiggyBank",
+  "keywords": [
+   "savings",
+   "piggy",
+   "bank",
+   "save",
+   "money"
+  ],
+  "body": "<ellipse cx=\"11.4\" cy=\"12.6\" rx=\"7.1\" ry=\"5.3\"/><path d=\"M17.98 10.6a2 2 0 0 1 0 4\"/><path d=\"M11.8 7.31 12.85 5.69Q13.3 5 13.85 5.63L15.4 8.22\"/><path d=\"M8.2 10.9 11.2 10.1\"/><path d=\"M8 17.25v2.55\"/><path d=\"M14.2 17.47v2.33\"/><circle cx=\"15.2\" cy=\"11.6\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/>",
+  "group": "money"
+ },
+ {
+  "name": "spring",
+  "pascal": "Spring",
+  "keywords": [
+   "spring"
+  ],
+  "body": "<path d=\"M12 20.7v-6.1\"/><path d=\"M12 14.6Q4.5 14.4 5.9 7 13.4 7.3 12 14.6Z\"/><path d=\"M12 14.6Q19.5 14.4 18.1 7 10.6 7.3 12 14.6Z\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "summer",
+  "pascal": "Summer",
+  "keywords": [
+   "summer"
+  ],
+  "body": "<circle cx=\"12\" cy=\"12\" r=\"3.8\"/><path d=\"M12 5.4V3.1\"/><path d=\"M12 18.6v2.3\"/><path d=\"M18.6 12h2.3\"/><path d=\"M5.4 12H3.1\"/><path d=\"m16.67 7.33 1.62-1.62\"/><path d=\"m7.33 16.67-1.62 1.62\"/><path d=\"m16.67 16.67 1.62 1.62\"/><path d=\"m7.33 7.33-1.62-1.62\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "fall",
+  "pascal": "Fall",
+  "keywords": [
+   "fall"
+  ],
+  "body": "<path d=\"M9.5 14.6C8 9.4 12.5 4.8 18.6 5.4c.6 6.1-4 10.7-9.1 9.2Z\"/><path d=\"M5.6 18.5 15.4 8.7\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "winter",
+  "pascal": "Winter",
+  "keywords": [
+   "winter"
+  ],
+  "body": "<path d=\"M3.6 12h16.8\"/><path d=\"M12 3.6v16.8\"/><path d=\"m17.9 15.2-3.2-3.2 3.2-3.2\"/><path d=\"m6.1 8.8 3.2 3.2-3.2 3.2\"/><path d=\"m15.2 6.1-3.2 3.2-3.2-3.2\"/><path d=\"m8.8 17.9 3.2-3.2 3.2 3.2\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "rain",
+  "pascal": "Rain",
+  "keywords": [
+   "rain"
+  ],
+  "body": "<path d=\"M7.5 14.6a2.8 2.8 0 0 1 .4-5.5 3.9 3.9 0 0 1 7.4-1.1 3.3 3.3 0 0 1 1.1 6.6z\"/><path d=\"M9.9 17.4 9 19.6\"/><path d=\"M13.2 17.9 12.3 20.6\"/><path d=\"M16.5 17.4 15.6 19.6\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "cloud",
+  "pascal": "Cloud",
+  "keywords": [
+   "cloud"
+  ],
+  "body": "<path d=\"M6.45 17.6a3.4 3.4 0 0 1 .5-6.7 4.8 4.8 0 0 1 9.1-1.3 4.1 4.1 0 0 1 1.3 8z\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "thermometer",
+  "pascal": "Thermometer",
+  "keywords": [
+   "thermometer"
+  ],
+  "body": "<path d=\"M12.4 14.67V5.9a1.7 1.7 0 0 0-3.4 0v8.77a3.3 3.3 0 1 0 3.4 0Z\"/><circle cx=\"10.7\" cy=\"17.5\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M15.6 9.2h2.6\"/><path d=\"M15.6 12.4h2.6\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "wind",
+  "pascal": "Wind",
+  "keywords": [
+   "wind"
+  ],
+  "body": "<path d=\"M12.9 18.7A1.8 1.8 0 1 0 14 15.5H3.4\"/><path d=\"M16.9 8.4a2.2 2.2 0 1 1 1.8 3.6H3.4\"/><path d=\"M10.1 5.2A1.8 1.8 0 1 1 11.2 8.5H3.4\"/>",
+  "group": "weather"
+ },
+ {
+  "name": "plus",
+  "pascal": "Plus",
+  "keywords": [
+   "add",
+   "new",
+   "create",
+   "plus"
+  ],
+  "body": "<path d=\"M12 5.5v13\"/><path d=\"M5.5 12h13\"/>",
+  "group": "action"
+ },
+ {
+  "name": "trash",
+  "pascal": "Trash",
+  "keywords": [
+   "delete",
+   "remove",
+   "bin",
+   "discard"
+  ],
+  "body": "<path d=\"M4.4 6.7h15.2\"/><path d=\"M9 6.7V5.65a1.7 1.7 0 0 1 1.7-1.7h2.6a1.7 1.7 0 0 1 1.7 1.7V6.7\"/><path d=\"m6.5 6.7.78 11.2a2.2 2.2 0 0 0 2.2 2.05h5.04a2.2 2.2 0 0 0 2.2-2.05L17.5 6.7\"/>",
+  "group": "action"
+ },
+ {
+  "name": "edit",
+  "pascal": "Edit",
+  "keywords": [
+   "pencil",
+   "write",
+   "rename",
+   "modify"
+  ],
+  "body": "<path d=\"m4.4 19.6.86-3.5a2.2 2.2 0 0 1 .58-1.05L15.5 5.4a2.35 2.35 0 0 1 3.32 3.32l-9.65 9.66a2.2 2.2 0 0 1-1.05.58l-3.5.86Z\"/><path d=\"m13.5 7.4 3.32 3.32\"/>",
+  "group": "action"
+ },
+ {
+  "name": "search",
+  "pascal": "Search",
+  "keywords": [
+   "find",
+   "magnifier",
+   "lookup",
+   "browse"
+  ],
+  "body": "<circle cx=\"10.7\" cy=\"10.7\" r=\"6.3\"/><path d=\"m15.3 15.3 4.2 4.2\"/>",
+  "group": "action"
+ },
+ {
+  "name": "filter",
+  "pascal": "Filter",
+  "keywords": [
+   "funnel",
+   "refine",
+   "narrow",
+   "facets"
+  ],
+  "body": "<path d=\"M5.7 5.1H18.3a1.5 1.5 0 0 1 1.06 2.56L14.5 12.52a2.2 2.2 0 0 0-.6 1.5v3.7a1.4 1.4 0 0 1-1.4 1.4h-1a1.4 1.4 0 0 1-1.4-1.4V14.02a2.2 2.2 0 0 0-.6-1.5L4.64 7.66A1.5 1.5 0 0 1 5.7 5.1Z\"/>",
+  "group": "action"
+ },
+ {
+  "name": "sort",
+  "pascal": "Sort",
+  "keywords": [
+   "order",
+   "arrange",
+   "rank",
+   "sequence"
+  ],
+  "body": "<path d=\"M4.4 6.9h8.6\"/><path d=\"M4.4 12h5.7\"/><path d=\"M4.4 17.1h3.1\"/><path d=\"M16.9 6.3v11.4\"/><path d=\"m14.2 15 2.7 2.7 2.7-2.7\"/>",
+  "group": "action"
+ },
+ {
+  "name": "check",
+  "pascal": "Check",
+  "keywords": [
+   "done",
+   "tick",
+   "confirm",
+   "complete"
+  ],
+  "body": "<path d=\"m4.9 12.5 4.7 4.7L19.1 7.4\"/>",
+  "group": "action"
+ },
+ {
+  "name": "close",
+  "pascal": "Close",
+  "keywords": [
+   "x",
+   "dismiss",
+   "cancel",
+   "clear"
+  ],
+  "body": "<path d=\"m6.2 6.2 11.6 11.6\"/><path d=\"m17.8 6.2-11.6 11.6\"/>",
+  "group": "action"
+ },
+ {
+  "name": "external-link",
+  "pascal": "ExternalLink",
+  "keywords": [
+   "buy",
+   "shop",
+   "open",
+   "outbound",
+   "link"
+  ],
+  "body": "<path d=\"M11.9 4.4H7.6A3.2 3.2 0 0 0 4.4 7.6v8.8a3.2 3.2 0 0 0 3.2 3.2h8.8a3.2 3.2 0 0 0 3.2-3.2v-4.3\"/><path d=\"m11.4 12.6 8.2-8.2\"/><path d=\"M15 4.4h4.6v4.6\"/>",
+  "group": "action"
+ },
+ {
+  "name": "share",
+  "pascal": "Share",
+  "keywords": [
+   "send",
+   "network",
+   "refer",
+   "invite"
+  ],
+  "body": "<circle cx=\"17\" cy=\"6.6\" r=\"2.55\"/><circle cx=\"6.9\" cy=\"12\" r=\"2.55\"/><circle cx=\"17\" cy=\"17.4\" r=\"2.55\"/><path d=\"M9.59 10.56 14.31 8.04\"/><path d=\"M9.59 13.44 14.31 15.96\"/>",
+  "group": "action"
+ },
+ {
+  "name": "download",
+  "pascal": "Download",
+  "keywords": [
+   "save",
+   "export",
+   "get",
+   "get-file"
+  ],
+  "body": "<path d=\"M12 3.9v9.9\"/><path d=\"m8.5 10.3 3.5 3.5 3.5-3.5\"/><path d=\"M4.5 15.8v1.9a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-1.9\"/>",
+  "group": "action"
+ },
+ {
+  "name": "upload",
+  "pascal": "Upload",
+  "keywords": [
+   "import",
+   "add",
+   "send",
+   "attach"
+  ],
+  "body": "<path d=\"M12 13.8V3.9\"/><path d=\"m8.5 7.4 3.5-3.5 3.5 3.5\"/><path d=\"M4.5 15.8v1.9a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-1.9\"/>",
+  "group": "action"
+ },
+ {
+  "name": "refresh",
+  "pascal": "Refresh",
+  "keywords": [
+   "reload",
+   "sync",
+   "retry",
+   "update"
+  ],
+  "body": "<path d=\"M4.6 12A7.4 7.4 0 0 1 17.83 7.44l1.08 1.38\"/><path d=\"M18.91 4.72v4.1h-4.1\"/><path d=\"M19.4 12A7.4 7.4 0 0 1 6.17 16.56l-1.08-1.38\"/><path d=\"M5.09 19.28v-4.1h4.1\"/>",
+  "group": "action"
+ },
+ {
+  "name": "grid",
+  "pascal": "Grid",
+  "keywords": [
+   "grid"
+  ],
+  "body": "<rect x=\"3.5\" y=\"3.5\" width=\"6.9\" height=\"6.9\" rx=\"2.1\"/><rect x=\"13.6\" y=\"3.5\" width=\"6.9\" height=\"6.9\" rx=\"2.1\"/><rect x=\"3.5\" y=\"13.6\" width=\"6.9\" height=\"6.9\" rx=\"2.1\"/><rect x=\"13.6\" y=\"13.6\" width=\"6.9\" height=\"6.9\" rx=\"2.1\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "list",
+  "pascal": "List",
+  "keywords": [
+   "list"
+  ],
+  "body": "<line x1=\"3.8\" y1=\"6.6\" x2=\"5.4\" y2=\"6.6\"/><line x1=\"8.6\" y1=\"6.6\" x2=\"20.2\" y2=\"6.6\"/><line x1=\"3.8\" y1=\"12\" x2=\"5.4\" y2=\"12\"/><line x1=\"8.6\" y1=\"12\" x2=\"20.2\" y2=\"12\"/><line x1=\"3.8\" y1=\"17.4\" x2=\"5.4\" y2=\"17.4\"/><line x1=\"8.6\" y1=\"17.4\" x2=\"20.2\" y2=\"17.4\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "eye",
+  "pascal": "Eye",
+  "keywords": [
+   "eye"
+  ],
+  "body": "<path d=\"M3.4 12C3.4 12 6.7 5.8 12 5.8s8.6 6.2 8.6 6.2-3.3 6.2-8.6 6.2S3.4 12 3.4 12Z\"/><circle cx=\"12\" cy=\"12\" r=\"2.8\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "sparkle",
+  "pascal": "Sparkle",
+  "keywords": [
+   "sparkle"
+  ],
+  "body": "<path d=\"M9.65 3.65Q10.65 2.75 11.65 3.65Q12.59 8.86 17.8 9.8Q18.7 10.8 17.8 11.8Q12.59 12.74 11.65 17.95Q10.65 18.85 9.65 17.95Q8.71 12.74 3.5 11.8Q2.6 10.8 3.5 9.8Q8.71 8.86 9.65 3.65Z\"/><path d=\"M17.5 15.27Q18 14.83 18.5 15.27Q19.06 16.99 20.78 17.55Q21.22 18.05 20.78 18.55Q19.06 19.11 18.5 20.83Q18 21.27 17.5 20.83Q16.94 19.11 15.22 18.55Q14.78 18.05 15.22 17.55Q16.94 16.99 17.5 15.27Z\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "calendar",
+  "pascal": "Calendar",
+  "keywords": [
+   "calendar"
+  ],
+  "body": "<rect x=\"3.4\" y=\"5.2\" width=\"17.2\" height=\"15.4\" rx=\"3.4\"/><line x1=\"8.2\" y1=\"3.1\" x2=\"8.2\" y2=\"7.3\"/><line x1=\"15.8\" y1=\"3.1\" x2=\"15.8\" y2=\"7.3\"/><line x1=\"3.4\" y1=\"9.8\" x2=\"20.6\" y2=\"9.8\"/><circle cx=\"12\" cy=\"15.2\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "clock",
+  "pascal": "Clock",
+  "keywords": [
+   "clock"
+  ],
+  "body": "<circle cx=\"12\" cy=\"12\" r=\"8.6\"/><path d=\"M12 7.4V12h3.7\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "chart",
+  "pascal": "Chart",
+  "keywords": [
+   "chart"
+  ],
+  "body": "<line x1=\"3.6\" y1=\"20.4\" x2=\"20.4\" y2=\"20.4\"/><line x1=\"6.9\" y1=\"13.6\" x2=\"6.9\" y2=\"19.4\"/><line x1=\"12\" y1=\"10\" x2=\"12\" y2=\"19.4\"/><line x1=\"17.1\" y1=\"6.4\" x2=\"17.1\" y2=\"19.4\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "palette",
+  "pascal": "Palette",
+  "keywords": [
+   "palette"
+  ],
+  "body": "<path d=\"M3.1 12.2C3.1 7.3 7.2 3.2 12.3 3.2C17.5 3.2 21 6.9 21 11.3C21 14.6 18.5 16.2 16.2 16.2C14.5 16.2 13.6 17.3 14.2 18.5C14.9 20 13.7 21 12 21C7 21 3.1 17.1 3.1 12.2Z\"/><circle cx=\"8\" cy=\"11.4\" r=\"1.25\"/><circle cx=\"12.3\" cy=\"7.7\" r=\"1.25\"/><circle cx=\"16.7\" cy=\"11\" r=\"1.25\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "ruler",
+  "pascal": "Ruler",
+  "keywords": [
+   "ruler"
+  ],
+  "body": "<rect x=\"2.95\" y=\"7.7\" width=\"18.1\" height=\"8.6\" rx=\"2.3\"/><line x1=\"6.6\" y1=\"7.7\" x2=\"6.6\" y2=\"11\"/><line x1=\"10.4\" y1=\"7.7\" x2=\"10.4\" y2=\"12.9\"/><line x1=\"14.2\" y1=\"7.7\" x2=\"14.2\" y2=\"11\"/><line x1=\"18\" y1=\"7.7\" x2=\"18\" y2=\"12.9\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "user",
+  "pascal": "User",
+  "keywords": [
+   "user"
+  ],
+  "body": "<circle cx=\"12\" cy=\"7.9\" r=\"3.85\"/><path d=\"M5 20.5a7.1 7.1 0 0 1 14 0\"/>",
+  "group": "meta"
+ },
+ {
+  "name": "top",
+  "body": "<path d=\"M7.6 5.4 3.6 9.2l2.4 2.6 1.6-1.6v9Q7.6 20.6 9.2 20.6h5.6q1.6 0 1.6-1.6v-9l1.6 1.6 2.4-2.6-4-3.8h-2.1a2.5 2.5 0 0 1-4.6 0Z\"/>",
+  "pascal": "Top",
+  "keywords": [
+   "top",
+   "shirt",
+   "tee",
+   "t-shirt",
+   "tshirt"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "sweater",
+  "body": "<path d=\"M9.4 6.4 5.4 8l-1.1 7.8 2.7.8 1-5.6v8.5h8V11l1 5.6 2.7-.8L18.6 8l-4-1.6a2.6 2.6 0 0 1-5.2 0Z\"/><path d=\"M8 17.6h8\"/>",
+  "pascal": "Sweater",
+  "keywords": [
+   "sweater",
+   "jumper",
+   "hoodie",
+   "knit",
+   "pullover"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "outerwear",
+  "body": "<path d=\"M8.4 6.6 5.2 8.2a1.5 1.5 0 0 0-.8 1.3v9.3q0 1.4 1.4 1.4h12.4q1.4 0 1.4-1.4V9.5a1.5 1.5 0 0 0-.8-1.3l-3.2-1.6Z\"/><path d=\"m8.4 6.6 3.6 4 3.6-4\"/><path d=\"M12 10.6v9.6\"/>",
+  "pascal": "Outerwear",
+  "keywords": [
+   "outerwear",
+   "coat",
+   "jacket",
+   "overcoat"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "dress",
+  "body": "<path d=\"M8.4 4.6a4.6 4.6 0 0 0 7.2 0c-.2 2.2-1 4-1 5.8 0 3.2 2.2 6.4 4.2 8.8-1.4 1-4 1.4-6.8 1.4s-5.4-.4-6.8-1.4c2-2.4 4.2-5.6 4.2-8.8 0-1.8-.8-3.6-1-5.8Z\"/><path d=\"M9.4 10.4h5.2\"/>",
+  "pascal": "Dress",
+  "keywords": [
+   "dress",
+   "gown",
+   "frock"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "pants",
+  "body": "<path d=\"M6.6 4.2h10.8l.6 16.2h-4l-1.3-8.6Q12 10.2 11.3 11.8L10 20.4H6Z\"/><path d=\"M6.6 6.9h10.8\"/>",
+  "pascal": "Pants",
+  "keywords": [
+   "pants",
+   "trousers",
+   "jeans",
+   "bottoms"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "shorts",
+  "body": "<path d=\"M5.8 6.6h12.4l.8 10.8h-4.8l-1.4-5Q12 10.9 11.2 12.4l-1.4 5H5Z\"/><path d=\"M5.7 9.2h12.6\"/>",
+  "pascal": "Shorts",
+  "keywords": [
+   "shorts",
+   "short",
+   "bottoms",
+   "summer"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "shoes",
+  "body": "<path d=\"M3.6 15.6c0-2 1.4-3.1 4-3.5 2.6-.4 4.8-1.4 6.2-3 .8-.9 1.4-1.8 2.6-2 1.6-.3 2.8 1.2 3.2 3.6.3 1.6.6 3.3 1 4.9v.8q0 1.6-1.6 1.6H5.2q-1.6 0-1.6-1.6Z\"/><path d=\"M3.6 15.6h17\"/>",
+  "pascal": "Shoes",
+  "keywords": [
+   "shoes",
+   "sneaker",
+   "footwear",
+   "trainers"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "hat",
+  "body": "<path d=\"M8.6 15.6c0-5.7 2.4-9.6 5.4-9.6s5.4 3.9 5.4 9.6Z\"/><path d=\"M9 15.6c-3.3.2-5 1.1-5 1.9 0 .8 1 1.3 2.7 1.3h8.5c1.5 0 2.2-.9 2.2-3.2\"/>",
+  "pascal": "Hat",
+  "keywords": [
+   "hat",
+   "cap",
+   "headwear"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "sock",
+  "body": "<path d=\"M6.6 3.8H12v8.6c0 1.4.8 2.2 2.2 2.8 2.2.9 3.6 1.9 3.6 3.3s-1.2 2.1-3 2.1h-4c-2.6 0-4.2-1.8-4.2-4.4Z\"/><path d=\"M6.6 6.8H12\"/>",
+  "pascal": "Sock",
+  "keywords": [
+   "sock",
+   "socks",
+   "hosiery"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "bag",
+  "body": "<path d=\"M6.2 10h11.6a1.4 1.4 0 0 1 1.4 1.3l.6 7.1a1.8 1.8 0 0 1-1.8 1.9H6a1.8 1.8 0 0 1-1.8-1.9l.6-7.1A1.4 1.4 0 0 1 6.2 10Z\"/><path d=\"M8.6 10V8.2a3.4 3.4 0 0 1 6.8 0V10\"/>",
+  "pascal": "Bag",
+  "keywords": [
+   "bag",
+   "handbag",
+   "tote",
+   "purse"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "watch",
+  "body": "<circle cx=\"12\" cy=\"12.4\" r=\"4.3\"/><path d=\"m9.9 8.7.2-3.5a1.3 1.3 0 0 1 1.3-1.2h1.2a1.3 1.3 0 0 1 1.3 1.2l.2 3.5\"/><path d=\"m9.9 16.1.2 3.5a1.3 1.3 0 0 0 1.3 1.2h1.2a1.3 1.3 0 0 0 1.3-1.2l.2-3.5\"/><path d=\"M16.5 12.4h1.2\"/><path d=\"M12 10.3v2.1h1.7\"/>",
+  "pascal": "Watch",
+  "keywords": [
+   "watch",
+   "wristwatch",
+   "time",
+   "accessory"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "glasses",
+  "body": "<circle cx=\"7.3\" cy=\"12.9\" r=\"3.4\"/><circle cx=\"16.7\" cy=\"12.9\" r=\"3.4\"/><path d=\"M10.6 12.4c.7-1.1 2.1-1.1 2.8 0\"/><path d=\"M4.4 10.9 3.4 9.6\"/><path d=\"m19.6 10.9 1-1.3\"/>",
+  "pascal": "Glasses",
+  "keywords": [
+   "glasses",
+   "spectacles",
+   "eyewear",
+   "sunglasses"
+  ],
+  "group": "garment"
+ },
+ {
+  "name": "link",
+  "pascal": "Link",
+  "keywords": [
+   "url",
+   "chain",
+   "copy link"
+  ],
+  "body": "<path d=\"M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3.1-3.1a3.6 3.6 0 0 0-5.1-5.1l-1.4 1.4\"/><path d=\"M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3.1 3.1a3.6 3.6 0 0 0 5.1 5.1l1.4-1.4\"/>",
+  "group": "share"
+ },
+ {
+  "name": "mail",
+  "pascal": "Mail",
+  "keywords": [
+   "email",
+   "envelope",
+   "message"
+  ],
+  "body": "<rect x=\"3.2\" y=\"5.4\" width=\"17.6\" height=\"13.2\" rx=\"3.2\"/><path d=\"m4.6 8.2 6.1 4.3a2.2 2.2 0 0 0 2.6 0l6.1-4.3\"/>",
+  "group": "share"
+ },
+ {
+  "name": "storefront",
+  "pascal": "Storefront",
+  "keywords": [
+   "shop",
+   "marketplace",
+   "store",
+   "sell"
+  ],
+  "body": "<path d=\"M4.4 9.8h15.2v8.4a1.8 1.8 0 0 1-1.8 1.8H6.2a1.8 1.8 0 0 1-1.8-1.8Z\"/><path d=\"M5.6 4.4h12.8l1.6 5.4H4Z\"/><path d=\"M9.6 20v-4.6h4.8V20\"/>",
+  "group": "share"
+ },
+ {
+  "name": "brand-x",
+  "pascal": "BrandX",
+  "keywords": [
+   "twitter",
+   "x",
+   "tweet"
+  ],
+  "body": "<rect x=\"3.2\" y=\"3.2\" width=\"17.6\" height=\"17.6\" rx=\"4.6\"/><path d=\"m8 8 8 8\"/><path d=\"m16 8-8 8\"/>",
+  "group": "share"
+ },
+ {
+  "name": "brand-facebook",
+  "pascal": "BrandFacebook",
+  "keywords": [
+   "facebook",
+   "meta",
+   "fb"
+  ],
+  "body": "<rect x=\"3.2\" y=\"3.2\" width=\"17.6\" height=\"17.6\" rx=\"4.6\"/><path d=\"M14.6 8.2h-1.3a1.9 1.9 0 0 0-1.9 1.9v7.7\"/><path d=\"M9.8 12.4h4.2\"/>",
+  "group": "share"
+ },
+ {
+  "name": "brand-pinterest",
+  "pascal": "BrandPinterest",
+  "keywords": [
+   "pinterest",
+   "pin"
+  ],
+  "body": "<rect x=\"3.2\" y=\"3.2\" width=\"17.6\" height=\"17.6\" rx=\"4.6\"/><path d=\"M10.4 17.8 12.6 8.4\"/><path d=\"M9.9 11.7a3.1 3.1 0 1 1 5.9 1.9c-.6 1.5-2.4 2-3.4 1\"/>",
+  "group": "share"
+ },
+ {
+  "name": "brand-whatsapp",
+  "pascal": "BrandWhatsapp",
+  "keywords": [
+   "whatsapp",
+   "chat",
+   "message"
+  ],
+  "body": "<path d=\"M4.3 19.7 5.5 16a7.7 7.7 0 1 1 2.9 2.8Z\"/><path d=\"M9.6 9.6c-.5 1.3.2 2.7 1.3 3.7 1 1 2.4 1.7 3.6 1.2l.7-1.5-1.7-.9-.8.8a5 5 0 0 1-1.4-1.4l.8-.8-.9-1.7Z\"/>",
+  "group": "share"
+ },
+ {
+  "name": "brand-reddit",
+  "pascal": "BrandReddit",
+  "keywords": [
+   "reddit",
+   "snoo",
+   "forum"
+  ],
+  "body": "<circle cx=\"12\" cy=\"14\" r=\"6.6\"/><circle cx=\"9.7\" cy=\"13.6\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"14.3\" cy=\"13.6\" r=\".85\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M9.6 16.8a4.1 4.1 0 0 0 4.8 0\"/><path d=\"M12 7.4v-2a1.3 1.3 0 0 1 1.3-1.3h1.4\"/><circle cx=\"16.1\" cy=\"4.1\" r=\"1.35\"/>",
+  "group": "share"
+ }
+]
