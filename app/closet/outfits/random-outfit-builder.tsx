@@ -74,7 +74,7 @@ const FRAME_HEIGHT = 960;
  * Space kept below the canvas when fitting it to the viewport. Covers the
  * page's own bottom padding (py-12) so the whole studio lands inside the fold.
  */
-const FRAME_GUTTER = 48;
+const FRAME_GUTTER = 24;
 const SLOT_ICON_SIZE = 72;
 
 export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }: Props) {
@@ -483,11 +483,31 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
+  // Pieces currently placed on the frame, plus their combined color palette —
+  // shown beside the mannequin so the outfit reads at a glance.
+  const placedPieces = slots
+    .filter((s) => s.itemId)
+    .map((s) => ({ slot: s, item: itemsById.get(s.itemId!) }))
+    .filter((p): p is { slot: CanvasSlot; item: RandomOutfitItem } => !!p.item);
+  const paletteColors: Color[] = (() => {
+    const seen = new Set<string>();
+    const out: Color[] = [];
+    for (const { item } of placedPieces) {
+      for (const c of item.colors) {
+        const key = c.name.trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(c);
+      }
+    }
+    return out;
+  })();
+
   return (
     <div className="flex flex-col items-start gap-8 md:flex-row">
       <section className="w-full md:flex-1 md:min-w-0">
         <div className="flex flex-col items-center gap-5 md:flex-row md:items-center md:justify-center md:gap-6">
-        <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:flex-col md:items-stretch md:w-[132px]">
+        <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:flex-col md:items-stretch md:w-[224px]">
           <button
             type="button"
             onClick={() => void spin()}
@@ -528,6 +548,64 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
               {spinHint}
             </p>
           )}
+          {placedPieces.length > 0 && (
+            <div className="w-full space-y-2.5 pt-1">
+              {paletteColors.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {paletteColors.map((c) => (
+                    <span
+                      key={c.name}
+                      title={c.name}
+                      className="h-4 w-4 rounded-full border border-ink/15"
+                      style={{ backgroundColor: c.hex }}
+                    />
+                  ))}
+                </div>
+              )}
+              <ul className="space-y-1.5 md:max-h-[440px] md:overflow-auto md:pr-1">
+                {placedPieces.map(({ slot, item }) => (
+                  <li
+                    key={slot.id}
+                    className="flex items-center gap-2 rounded-lg border border-ink/10 bg-white p-1.5"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={processedImageUrls[item.id] ?? imageUrl(item.imagePath)}
+                      alt=""
+                      className="h-9 w-9 shrink-0 rounded object-cover bg-paper-warm"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs">{item.name}</p>
+                      <p className="truncate text-[10px] capitalize text-ink-muted">{item.category}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleSlotLock(slot.id)}
+                      aria-label={slot.locked ? "Unlock piece" : "Lock piece"}
+                      title={slot.locked ? "Locked — kept when you spin again" : "Lock this piece"}
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition ${
+                        slot.locked
+                          ? "border-accent bg-accent text-white"
+                          : "border-ink/15 text-ink-muted hover:border-ink/30"
+                      }`}
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        aria-hidden
+                      >
+                        <rect x="3.25" y="7" width="9.5" height="6.25" rx="1.5" />
+                        <path d={slot.locked ? "M5.5 7V5.25a2.5 2.5 0 015 0V7" : "M5.5 7V5.25a2.5 2.5 0 014.9-.7"} />
+                      </svg>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         {/* Reserves the on-screen footprint of the scaled canvas so the page
             doesn't leave a gap the size of the unscaled frame. */}
@@ -554,11 +632,14 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
           onPointerLeave={handleFramePointerUp}
         >
           <div className="absolute inset-0 bg-gradient-to-b from-paper-warm to-paper" />
-          {/* Mannequin silhouette (head + body) so the empty frame reads as a figure. */}
-          <div className="pointer-events-none absolute inset-x-0 top-12 bottom-10 flex flex-col items-center">
-            <div className="h-28 w-28 rounded-full bg-ink/[0.07] ring-1 ring-ink/15" />
-            <div className="mt-4 w-48 flex-1 rounded-[90px] bg-ink/[0.06] ring-1 ring-ink/15" />
-          </div>
+          {/* Mannequin silhouette (head + body) — only while the frame is empty,
+              so a generated outfit sits on a clean backdrop with no outline. */}
+          {!slots.some((s) => s.itemId) && (
+            <div className="pointer-events-none absolute inset-x-0 top-12 bottom-10 flex flex-col items-center">
+              <div className="h-28 w-28 rounded-full bg-ink/[0.07] ring-1 ring-ink/15" />
+              <div className="mt-4 w-48 flex-1 rounded-[90px] bg-ink/[0.06] ring-1 ring-ink/15" />
+            </div>
+          )}
           {slots
             .slice()
             .sort((a, b) => a.z - b.z)
