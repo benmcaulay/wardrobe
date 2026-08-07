@@ -486,6 +486,47 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   return (
     <div className="flex flex-col items-start gap-8 md:flex-row">
       <section className="w-full shrink-0 md:w-auto">
+        <div className="mb-4 flex flex-wrap items-center gap-5 justify-center">
+          <button
+            type="button"
+            onClick={() => void spin()}
+            disabled={!readyToSpin || spinning}
+            aria-label={spinning ? "Spinning…" : "Spin outfit"}
+            className="group relative flex h-[104px] w-[104px] items-center justify-center rounded-full border-2 border-dashed border-ink/30 bg-white text-ink transition hover:border-ink/50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute inset-0 rounded-full ${
+                spinning
+                  ? "animate-spin"
+                  : "group-hover:animate-spin motion-reduce:group-hover:animate-none"
+              }`}
+            >
+              <span className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
+            </span>
+            <span className="text-sm font-medium tracking-wide">
+              {spinning ? "Spinning…" : "Spin"}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={clearItems}
+            disabled={!slots.some((s) => s.itemId)}
+            className="rounded-full border border-ink/15 px-5 py-2 text-sm hover:bg-paper-warm transition disabled:opacity-40"
+          >
+            Clear items
+          </button>
+        </div>
+        {spinError && (
+          <p role="alert" className="text-sm text-red-700 text-center mb-2">
+            {spinError}
+          </p>
+        )}
+        {spinHint && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-center mb-3">
+            {spinHint}
+          </p>
+        )}
         {/* Reserves the on-screen footprint of the scaled canvas so the page
             doesn't leave a gap the size of the unscaled frame. */}
         <div
@@ -557,49 +598,6 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             })}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-5 justify-center">
-          <button
-            type="button"
-            onClick={() => void spin()}
-            disabled={!readyToSpin || spinning}
-            aria-label={spinning ? "Spinning…" : "Spin outfit"}
-            className="group relative flex h-[104px] w-[104px] items-center justify-center rounded-full border-2 border-dashed border-ink/30 bg-white text-ink transition hover:border-ink/50 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span
-              aria-hidden
-              className={`pointer-events-none absolute inset-0 rounded-full ${
-                spinning
-                  ? "animate-spin"
-                  : "group-hover:animate-spin motion-reduce:group-hover:animate-none"
-              }`}
-            >
-              <span className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
-            </span>
-            <span className="flex flex-col items-center gap-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/icons/outfits.png" alt="" aria-hidden className="h-6 w-6 object-contain" />
-              <span className="text-xs tracking-wide">{spinning ? "Spinning…" : "Spin"}</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={clearItems}
-            disabled={!slots.some((s) => s.itemId)}
-            className="rounded-full border border-ink/15 px-5 py-2 text-sm hover:bg-paper-warm transition disabled:opacity-40"
-          >
-            Clear items
-          </button>
-        </div>
-        {spinError && (
-          <p role="alert" className="text-sm text-red-700 text-center mt-2">
-            {spinError}
-          </p>
-        )}
-        {spinHint && (
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-center mt-2">
-            {spinHint}
-          </p>
-        )}
         </div>
       </section>
 
