@@ -156,6 +156,20 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
       observer.disconnect();
     };
   }, []);
+
+  // Clicking anywhere that isn't a placed piece (or a control that acts on the
+  // selection) clears it, so the selection outline doesn't linger on the frame.
+  useEffect(() => {
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-outfit-slot]") || target.closest("[data-keep-selection]")) return;
+      setSelectedSlotId(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
   const spinLockRef = useRef(false);
   const spinSeqRef = useRef(0);
 
@@ -504,10 +518,8 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   })();
 
   return (
-    <div className="flex flex-col items-start gap-8 md:flex-row">
-      <section className="w-full md:flex-1 md:min-w-0">
-        <div className="flex flex-col items-center gap-5 md:flex-row md:items-center md:justify-center md:gap-6">
-        <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:flex-col md:items-stretch md:w-[224px]">
+    <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-center md:gap-8">
+        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 md:w-[240px] md:shrink-0 md:flex-col md:items-stretch">
           <button
             type="button"
             onClick={() => void spin()}
@@ -607,6 +619,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             </div>
           )}
         </div>
+        <section className="w-full md:flex-1 md:min-w-0 md:flex md:justify-center">
         {/* Reserves the on-screen footprint of the scaled canvas so the page
             doesn't leave a gap the size of the unscaled frame. */}
         <div
@@ -683,10 +696,10 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
         </div>
 
         </div>
-        </div>
       </section>
 
       <aside
+        data-keep-selection
         className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[380px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
