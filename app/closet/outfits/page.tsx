@@ -83,7 +83,7 @@ export default async function OutfitsPage() {
   }));
 
   return (
-    <main className="max-w-6xl mx-auto px-6 py-12">
+    <main className="max-w-[1800px] mx-auto px-6 py-12">
       <nav className="text-xs text-ink-muted mb-6">
         <Link href="/closet" className="hover:text-ink">
           ← Closet

@@ -485,7 +485,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
   return (
     <div className="flex flex-col items-start gap-8 md:flex-row">
-      <section className="w-full shrink-0 md:w-auto">
+      <section className="w-full md:flex-1 md:min-w-0 md:flex md:flex-col md:items-center">
         <div className="mb-4 flex flex-wrap items-center gap-5 justify-center">
           <button
             type="button"
@@ -602,7 +602,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
       </section>
 
       <aside
-        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:max-w-[300px] md:overflow-y-auto md:pr-1"
+        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[320px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
