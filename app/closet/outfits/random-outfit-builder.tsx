@@ -486,8 +486,8 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   return (
     <div className="flex flex-col items-start gap-8 md:flex-row">
       <section className="w-full md:flex-1 md:min-w-0">
-        <div className="flex flex-col items-center gap-5 md:flex-row md:items-start md:justify-center md:gap-6">
-        <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:flex-col md:items-stretch md:w-[132px] md:pt-1">
+        <div className="flex flex-col items-center gap-5 md:flex-row md:items-center md:justify-center md:gap-6">
+        <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:flex-col md:items-stretch md:w-[132px]">
           <button
             type="button"
             onClick={() => void spin()}
@@ -509,14 +509,15 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
               {spinning ? "Spinning…" : "Spin"}
             </span>
           </button>
-          <button
-            type="button"
-            onClick={clearItems}
-            disabled={!slots.some((s) => s.itemId)}
-            className="rounded-full border border-ink/15 px-5 py-2 text-sm hover:bg-paper-warm transition disabled:opacity-40"
-          >
-            Clear items
-          </button>
+          {slots.some((s) => s.itemId) && (
+            <button
+              type="button"
+              onClick={clearItems}
+              className="rounded-full border border-ink/15 px-5 py-2 text-sm hover:bg-paper-warm transition"
+            >
+              Clear items
+            </button>
+          )}
           {spinError && (
             <p role="alert" className="text-xs text-red-700 text-center">
               {spinError}
@@ -552,11 +553,12 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
           onPointerUp={handleFramePointerUp}
           onPointerLeave={handleFramePointerUp}
         >
-          <div className="absolute inset-0 bg-gradient-to-b from-paper-warm/70 to-white" />
-          <div
-            className="absolute left-1/2 -translate-x-1/2 bottom-8 w-40 rounded-full border border-ink/10 bg-paper/70 pointer-events-none"
-            style={{ height: Math.max(220, FRAME_HEIGHT * 0.7) }}
-          />
+          <div className="absolute inset-0 bg-gradient-to-b from-paper-warm to-paper" />
+          {/* Mannequin silhouette (head + body) so the empty frame reads as a figure. */}
+          <div className="pointer-events-none absolute inset-x-0 top-12 bottom-10 flex flex-col items-center">
+            <div className="h-28 w-28 rounded-full bg-ink/[0.07] ring-1 ring-ink/15" />
+            <div className="mt-4 w-48 flex-1 rounded-[90px] bg-ink/[0.06] ring-1 ring-ink/15" />
+          </div>
           {slots
             .slice()
             .sort((a, b) => a.z - b.z)
