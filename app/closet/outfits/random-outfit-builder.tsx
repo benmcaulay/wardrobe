@@ -123,11 +123,13 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
       if (!slot) return;
       const top = slot.getBoundingClientRect().top + window.scrollY;
       const available = window.innerHeight - top - FRAME_GUTTER;
+      // Scale the mannequin to fill its column WIDTH (not the viewport height),
+      // so it renders large and can extend past the fold — you scroll to see it.
       setFrameScale(
         computeFrameScale({
           frameWidth: FRAME_WIDTH,
           frameHeight: FRAME_HEIGHT,
-          availableHeight: available,
+          availableHeight: Number.POSITIVE_INFINITY,
           availableWidth: slot.parentElement?.clientWidth ?? 0,
         }),
       );
@@ -518,8 +520,8 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   })();
 
   return (
-    <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-center md:gap-8">
-        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 md:w-[240px] md:shrink-0 md:flex-col md:items-stretch">
+    <div className="flex flex-col gap-8 md:flex-row md:flex-wrap md:items-start md:justify-evenly md:gap-y-8 md:gap-x-0">
+        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 md:w-[240px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
           <button
             type="button"
             onClick={() => void spin()}
@@ -619,7 +621,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             </div>
           )}
         </div>
-        <section className="w-full md:flex-1 md:min-w-0 md:flex md:justify-center">
+        <section className="w-full md:w-[520px] xl:w-[560px] md:shrink-0 md:flex md:justify-center">
         {/* Reserves the on-screen footprint of the scaled canvas so the page
             doesn't leave a gap the size of the unscaled frame. */}
         <div

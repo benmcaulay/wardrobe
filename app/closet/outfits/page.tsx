@@ -89,12 +89,6 @@ export default async function OutfitsPage() {
           ← Closet
         </Link>
       </nav>
-      <header className="mb-8">
-        <h1 className="font-serif text-4xl tracking-tight">Outfits</h1>
-        <p className="text-ink-muted mt-2">
-          Spin random outfits from rules, place category slots on the frame, or compose manually.
-        </p>
-      </header>
       <OutfitStudio
         items={closetItems}
         colorOptions={colorOptions}
