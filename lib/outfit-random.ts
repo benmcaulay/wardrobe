@@ -19,6 +19,33 @@ export type ColorRule = {
   count: number;
 };
 
+/** Clean persisted category rules (for restoring the selection on startup). */
+export function sanitizeCategoryRules(raw: unknown): CategoryRule[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CategoryRule[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const rawCats = (r as { categories?: unknown }).categories;
+    const cats = Array.isArray(rawCats)
+      ? [
+          ...new Set(
+            rawCats
+              .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
+              .map((c) => c.trim()),
+          ),
+        ]
+      : [];
+    if (cats.length === 0) continue;
+    const rawCount = (r as { count?: unknown }).count;
+    const count =
+      typeof rawCount === "number" && Number.isFinite(rawCount)
+        ? Math.max(1, Math.min(9, Math.floor(rawCount)))
+        : 1;
+    out.push({ categories: cats, count });
+  }
+  return out;
+}
+
 export type OutfitSlotInput = {
   id: string;
   categories: string[];

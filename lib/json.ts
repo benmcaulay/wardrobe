@@ -54,6 +54,10 @@ export type StylePrefs = {
   outfitComboLayouts?: Record<string, { x?: number; y?: number; scale?: number }>;
   /** Locked left→right order per same-layer combination (setKey → categories). */
   outfitLayerArrangements?: Record<string, string[]>;
+  /** When true, restore the saved category rules on startup. */
+  outfitAutoPopulateRules?: boolean;
+  /** Category rules to restore on startup when auto-populate is on. */
+  outfitStartupRules?: { categories: string[]; count: number }[];
 };
 
 export function encode<T>(value: T): string {

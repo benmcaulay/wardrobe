@@ -26,6 +26,7 @@ import {
   saveOutfitComboLayout,
   saveOutfitLayerArrangement,
   saveOutfitLayerOrder,
+  saveOutfitStartupRules,
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
 import {
@@ -80,6 +81,8 @@ type Props = {
   initialVisualLayers: string[][];
   initialComboLayouts: Record<string, ComboLayout>;
   initialLayerArrangements: Record<string, string[]>;
+  initialAutoPopulateRules: boolean;
+  initialStartupRules: CategoryRule[];
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -100,13 +103,18 @@ export function RandomOutfitBuilder({
   initialVisualLayers,
   initialComboLayouts,
   initialLayerArrangements,
+  initialAutoPopulateRules,
+  initialStartupRules,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
     [items],
   );
 
-  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>([]);
+  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>(
+    initialAutoPopulateRules ? initialStartupRules : [],
+  );
+  const [autoPopulateRules, setAutoPopulateRules] = useState(initialAutoPopulateRules);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
   const [multiSelect, setMultiSelect] = useState(false);
   const [draftCats, setDraftCats] = useState<string[]>([]);
@@ -272,6 +280,17 @@ export function RandomOutfitBuilder({
     setArrangements((prev) => ({ ...prev, ...toSave }));
     for (const [k, v] of Object.entries(toSave)) void saveOutfitLayerArrangement(k, v);
   }, [slots, visualLayers]);
+
+  // Persist the startup toggle and (while on) the current category rules, so the
+  // selection comes back on next load. Skip the initial render.
+  const startupSkipRef = useRef(true);
+  useEffect(() => {
+    if (startupSkipRef.current) {
+      startupSkipRef.current = false;
+      return;
+    }
+    void saveOutfitStartupRules(autoPopulateRules, autoPopulateRules ? categoryRules : []);
+  }, [autoPopulateRules, categoryRules]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -1107,6 +1126,16 @@ export function RandomOutfitBuilder({
               </div>
             </div>
           )}
+
+          <label className="flex items-center justify-end gap-1.5 pt-1 text-[11px] text-ink-muted cursor-pointer select-none">
+            Auto-populate on startup
+            <input
+              type="checkbox"
+              checked={autoPopulateRules}
+              onChange={(e) => setAutoPopulateRules(e.target.checked)}
+              className="accent-ink"
+            />
+          </label>
         </div>
 
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">

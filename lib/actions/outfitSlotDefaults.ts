@@ -14,6 +14,36 @@ import {
   type ComboLayout,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
+import { sanitizeCategoryRules, type CategoryRule } from "@/lib/outfit-random";
+
+/** Persist whether to restore category rules on startup, and which rules. */
+export async function saveOutfitStartupRules(
+  enabled: boolean,
+  rules: CategoryRule[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = sanitizeCategoryRules(rules);
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      stylePrefs: encode({
+        ...prefs,
+        outfitAutoPopulateRules: !!enabled,
+        outfitStartupRules: enabled ? clean : [],
+      }),
+    },
+  });
+
+  revalidatePath("/closet/outfits");
+  return { ok: true };
+}
 
 /** Lock the left→right order of one same-layer combination. */
 export async function saveOutfitLayerArrangement(

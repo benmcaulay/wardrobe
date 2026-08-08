@@ -4,6 +4,7 @@ import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { readItemTileMeta } from "@/lib/item-tile-meta";
 import { parseColors, parseStylePrefs } from "@/lib/json";
+import { sanitizeCategoryRules } from "@/lib/outfit-random";
 import {
   sanitizeComboLayouts,
   sanitizeLayerArrangements,
@@ -64,6 +65,10 @@ export default async function OutfitsPage() {
   const outfitVisualLayers = sanitizeVisualLayers(prefs.outfitVisualLayers);
   const outfitComboLayouts = sanitizeComboLayouts(prefs.outfitComboLayouts);
   const outfitLayerArrangements = sanitizeLayerArrangements(prefs.outfitLayerArrangements);
+  const outfitAutoPopulateRules = !!prefs.outfitAutoPopulateRules;
+  const outfitStartupRules = outfitAutoPopulateRules
+    ? sanitizeCategoryRules(prefs.outfitStartupRules)
+    : [];
 
   const closetItems: RandomOutfitItem[] = items.map((item) => {
     const tile = readItemTileMeta(item);
@@ -108,6 +113,8 @@ export default async function OutfitsPage() {
         outfitVisualLayers={outfitVisualLayers}
         outfitComboLayouts={outfitComboLayouts}
         outfitLayerArrangements={outfitLayerArrangements}
+        outfitAutoPopulateRules={outfitAutoPopulateRules}
+        outfitStartupRules={outfitStartupRules}
       />
     </main>
   );

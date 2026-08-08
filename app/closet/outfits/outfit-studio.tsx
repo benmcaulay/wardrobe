@@ -5,6 +5,7 @@ import { OutfitBuilder, type SavedOutfit } from "./outfit-builder";
 import { RandomOutfitBuilder, type RandomOutfitItem } from "./random-outfit-builder";
 import type { Color } from "@/lib/json";
 import type { OutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
+import type { CategoryRule } from "@/lib/outfit-random";
 
 type Tab = "random" | "compose";
 
@@ -17,6 +18,8 @@ type Props = {
   outfitVisualLayers: string[][];
   outfitComboLayouts: Record<string, { x?: number; y?: number; scale?: number }>;
   outfitLayerArrangements: Record<string, string[]>;
+  outfitAutoPopulateRules: boolean;
+  outfitStartupRules: CategoryRule[];
 };
 
 export function OutfitStudio({
@@ -28,6 +31,8 @@ export function OutfitStudio({
   outfitVisualLayers,
   outfitComboLayouts,
   outfitLayerArrangements,
+  outfitAutoPopulateRules,
+  outfitStartupRules,
 }: Props) {
   const [tab, setTab] = useState<Tab>("random");
 
@@ -59,6 +64,8 @@ export function OutfitStudio({
           initialVisualLayers={outfitVisualLayers}
           initialComboLayouts={outfitComboLayouts}
           initialLayerArrangements={outfitLayerArrangements}
+          initialAutoPopulateRules={outfitAutoPopulateRules}
+          initialStartupRules={outfitStartupRules}
         />
       ) : (
         <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />
