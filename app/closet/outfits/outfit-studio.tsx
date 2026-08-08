@@ -16,6 +16,7 @@ type Props = {
   outfitLayerOrder: string[];
   outfitVisualLayers: string[][];
   outfitCategoryScales: Record<string, number>;
+  outfitLayerPositions: Record<string, { x: number; y: number }>;
 };
 
 export function OutfitStudio({
@@ -26,6 +27,7 @@ export function OutfitStudio({
   outfitLayerOrder,
   outfitVisualLayers,
   outfitCategoryScales,
+  outfitLayerPositions,
 }: Props) {
   const [tab, setTab] = useState<Tab>("random");
 
@@ -56,6 +58,7 @@ export function OutfitStudio({
           initialLayerOrder={outfitLayerOrder}
           initialVisualLayers={outfitVisualLayers}
           initialCategoryScales={outfitCategoryScales}
+          initialLayerPositions={outfitLayerPositions}
         />
       ) : (
         <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />

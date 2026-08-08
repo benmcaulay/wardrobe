@@ -9,10 +9,41 @@ import {
   outfitSlotDefaultKey,
   sanitizeCategoryScales,
   sanitizeLayerOrder,
+  sanitizeLayerPositions,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
+
+/** Remember a piece's dragged position for its slot + visual-layer combination. */
+export async function saveOutfitLayerPosition(
+  key: string,
+  pos: { x: number; y: number },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const k = key.trim();
+  if (!k) return { ok: false, error: "Missing position key." };
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+  const existing = sanitizeLayerPositions(prefs.outfitLayerPositions);
+  const clean = sanitizeLayerPositions({ [k]: pos });
+  const entry = clean[k];
+  if (!entry) return { ok: false, error: "Invalid position." };
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      stylePrefs: encode({ ...prefs, outfitLayerPositions: { ...existing, [k]: entry } }),
+    },
+  });
+
+  revalidatePath("/closet/outfits");
+  return { ok: true };
+}
 
 /** Persist the size multiplier for one category (all pieces of that type). */
 export async function saveOutfitCategoryScale(

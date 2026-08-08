@@ -25,6 +25,7 @@ import {
 import {
   saveOutfitCategoryScale,
   saveOutfitLayerOrder,
+  saveOutfitLayerPosition,
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
 import {
@@ -33,6 +34,7 @@ import {
   MIN_ITEM_SCALE,
   orderSlotsByLayer,
   resolveSlotLayout,
+  slotPositionKey,
   spreadOverlappingSlots,
   visualLayerYFor,
   type OutfitSlotDefaults,
@@ -75,6 +77,7 @@ type Props = {
   initialLayerOrder: string[];
   initialVisualLayers: string[][];
   initialCategoryScales: Record<string, number>;
+  initialLayerPositions: Record<string, { x: number; y: number }>;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -94,6 +97,7 @@ export function RandomOutfitBuilder({
   initialLayerOrder,
   initialVisualLayers,
   initialCategoryScales,
+  initialLayerPositions,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
@@ -106,12 +110,16 @@ export function RandomOutfitBuilder({
   const [draftCats, setDraftCats] = useState<string[]>([]);
   const [draftCount, setDraftCount] = useState(1);
   const [slots, setSlots] = useState<CanvasSlot[]>([]);
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<{
     kind: "canvas";
     slotId: string;
     dx: number;
     dy: number;
+    startX: number;
+    startY: number;
   } | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [spinError, setSpinError] = useState<string | null>(null);
@@ -130,6 +138,10 @@ export function RandomOutfitBuilder({
     useState<Record<string, number>>(initialCategoryScales);
   const categoryScalesRef = useRef(categoryScales);
   categoryScalesRef.current = categoryScales;
+  const [layerPositions, setLayerPositions] =
+    useState<Record<string, { x: number; y: number }>>(initialLayerPositions);
+  const layerPositionsRef = useRef(layerPositions);
+  layerPositionsRef.current = layerPositions;
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -233,6 +245,7 @@ export function RandomOutfitBuilder({
         layerOrderRef.current,
         visualLayers.filter((l) => l.length > 0),
         categoryScalesRef.current,
+        layerPositionsRef.current,
       ),
     );
   }, [categoryRules, slotDefaults, visualLayers]);
@@ -583,7 +596,17 @@ export function RandomOutfitBuilder({
   }
 
   function handleFramePointerUp() {
-    if (dragState) setDragState(null);
+    if (!dragState) return;
+    const { slotId, startX, startY } = dragState;
+    setDragState(null);
+    const slot = slotsRef.current.find((s) => s.id === slotId);
+    // Only remember a genuine drag, not a click that happened to select a slot.
+    if (!slot || (Math.abs(slot.x - startX) < 2 && Math.abs(slot.y - startY) < 2)) return;
+    const layers = visualLayersRef.current.filter((l) => l.length > 0);
+    const key = slotPositionKey(slot.categories, layers);
+    const pos = { x: slot.x, y: slot.y };
+    setLayerPositions((prev) => ({ ...prev, [key]: pos }));
+    void saveOutfitLayerPosition(key, pos);
   }
 
   function handleFrameBackgroundPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -602,6 +625,8 @@ export function RandomOutfitBuilder({
       slotId: slot.id,
       dx: localDown.x - slot.x,
       dy: localDown.y - slot.y,
+      startX: slot.x,
+      startY: slot.y,
     });
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -1370,6 +1395,7 @@ function syncSlotsWithRules(
   layerOrder: string[],
   visualLayers: string[][],
   categoryScales: Record<string, number>,
+  layerPositions: Record<string, { x: number; y: number }>,
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1417,11 +1443,22 @@ function syncSlotsWithRules(
     usedBySig.set(req.sig, used + 1);
   }
 
-  const positioned = spreadOverlappingSlots(
-    synced.map((slot, i) => ({ ...slot, z: i + 1 })),
+  // Apply remembered drag positions for this exact slot + visual-layer combo.
+  // A hand-placed piece is pinned there and left out of the auto-spread.
+  const pinnedIds = new Set<string>();
+  const zStamped = synced.map((slot, i) => {
+    const saved = layerPositions[slotPositionKey(slot.categories, visualLayers)];
+    if (!saved) return { ...slot, z: i + 1 };
+    pinnedIds.add(slot.id);
+    return { ...slot, x: saved.x, y: saved.y, z: i + 1 };
+  });
+  const spread = spreadOverlappingSlots(
+    zStamped.filter((s) => !pinnedIds.has(s.id)),
     FRAME_WIDTH,
     visualLayers,
   );
+  const spreadById = new Map(spread.map((s) => [s.id, s]));
+  const positioned = zStamped.map((s) => spreadById.get(s.id) ?? s);
   // Layer by the saved stack order: frontmost signature gets the highest z.
   const frontToBack = orderSlotsByLayer(positioned, layerOrder);
   const total = frontToBack.length;

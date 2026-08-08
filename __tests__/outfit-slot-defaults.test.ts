@@ -3,10 +3,13 @@ import {
   builtinCategoryScale,
   builtinSlotLayout,
   clampItemScale,
+  layerMembership,
   outfitSlotDefaultKey,
   resolveSlotLayout,
   sanitizeCategoryScales,
+  sanitizeLayerPositions,
   sanitizeOutfitSlotDefaults,
+  slotPositionKey,
 } from "../lib/outfit-slot-defaults";
 
 describe("outfitSlotDefaultKey", () => {
@@ -61,5 +64,41 @@ describe("category scales", () => {
     expect(builtinCategoryScale(["shirt"])).toBe(1);
     expect(builtinCategoryScale(["hat"])).toBe(1);
     expect(builtinCategoryScale(["shorts"])).toBe(1);
+  });
+});
+
+describe("slotPositionKey", () => {
+  it("differs by what else shares the piece's visual layer", () => {
+    const alone = slotPositionKey(["shirt"], [["shirt"]]);
+    const withJacket = slotPositionKey(["shirt"], [["jacket", "shirt"]]);
+    expect(alone).not.toBe(withJacket);
+  });
+
+  it("is stable regardless of the layer's category order", () => {
+    expect(slotPositionKey(["shirt"], [["jacket", "shirt"]])).toBe(
+      slotPositionKey(["shirt"], [["shirt", "jacket"]]),
+    );
+  });
+
+  it("is unaffected by other, unrelated layers", () => {
+    const a = slotPositionKey(["shirt"], [["shirt"], ["pants"]]);
+    const b = slotPositionKey(["shirt"], [["shirt"], ["shoes"]]);
+    expect(a).toBe(b);
+  });
+
+  it("falls back to an empty membership when the category isn't in a layer", () => {
+    expect(layerMembership(["shirt"], [["pants"]])).toEqual([]);
+    expect(slotPositionKey(["shirt"], [])).toBe(slotPositionKey(["shirt"], [["pants"]]));
+  });
+});
+
+describe("sanitizeLayerPositions", () => {
+  it("clamps coordinates to the frame and drops malformed entries", () => {
+    const out = sanitizeLayerPositions({
+      "shirt@shirt": { x: -5, y: 9999 },
+      bad: { x: "z", y: 1 },
+      alsoBad: 3,
+    });
+    expect(out).toEqual({ "shirt@shirt": { x: 0, y: 960 } });
   });
 });

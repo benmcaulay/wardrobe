@@ -52,6 +52,8 @@ export type StylePrefs = {
   outfitVisualLayers?: string[][];
   /** Per-category size multiplier for placed pieces (category signature → scale). */
   outfitCategoryScales?: Record<string, number>;
+  /** Remembered drag positions keyed by slot + visual-layer configuration. */
+  outfitLayerPositions?: Record<string, { x: number; y: number }>;
 };
 
 export function encode<T>(value: T): string {

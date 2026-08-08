@@ -213,6 +213,52 @@ export function sanitizeCategoryScales(raw: unknown): Record<string, number> {
   return out;
 }
 
+/**
+ * The sorted, normalized categories that share a visual layer with this slot's
+ * category (the category itself included). Empty when it isn't in any layer.
+ */
+export function layerMembership(
+  categories: readonly string[],
+  layers: readonly string[][],
+): string[] {
+  const key = normalizeCategoryName(categories[0] ?? "");
+  if (!key) return [];
+  const layer = layers.find((l) => l.some((c) => normalizeCategoryName(c) === key));
+  if (!layer) return [];
+  return [...new Set(layer.map((c) => normalizeCategoryName(c)).filter(Boolean))].sort();
+}
+
+/**
+ * Key for a remembered drag position: the slot's own category rule plus the
+ * exact set of categories sharing its visual layer. A shirt alone in a layer and
+ * a shirt beside a jacket get different keys, so each layout is remembered
+ * separately and unseen combinations fall back to the default placement.
+ */
+export function slotPositionKey(
+  categories: readonly string[],
+  layers: readonly string[][],
+): string {
+  return `${categoryListSignature(categories)}@${layerMembership(categories, layers).join(",")}`;
+}
+
+/** Clean persisted per-configuration drag positions (key → {x, y}). */
+export function sanitizeLayerPositions(raw: unknown): Record<string, { x: number; y: number }> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, { x: number; y: number }> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || typeof value !== "object" || value == null) continue;
+    const v = value as Record<string, unknown>;
+    const x = typeof v.x === "number" && Number.isFinite(v.x) ? v.x : null;
+    const y = typeof v.y === "number" && Number.isFinite(v.y) ? v.y : null;
+    if (x == null || y == null) continue;
+    out[key] = {
+      x: Math.min(FRAME_WIDTH, Math.max(0, x)),
+      y: Math.min(FRAME_HEIGHT, Math.max(0, y)),
+    };
+  }
+  return out;
+}
+
 /** Clean a persisted layer order — a list of category signatures, frontmost first. */
 export function sanitizeLayerOrder(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];

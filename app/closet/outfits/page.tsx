@@ -7,6 +7,7 @@ import { parseColors, parseStylePrefs } from "@/lib/json";
 import {
   sanitizeCategoryScales,
   sanitizeLayerOrder,
+  sanitizeLayerPositions,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
 } from "@/lib/outfit-slot-defaults";
@@ -62,6 +63,7 @@ export default async function OutfitsPage() {
   const outfitLayerOrder = sanitizeLayerOrder(prefs.outfitLayerOrder);
   const outfitVisualLayers = sanitizeVisualLayers(prefs.outfitVisualLayers);
   const outfitCategoryScales = sanitizeCategoryScales(prefs.outfitCategoryScales);
+  const outfitLayerPositions = sanitizeLayerPositions(prefs.outfitLayerPositions);
 
   const closetItems: RandomOutfitItem[] = items.map((item) => {
     const tile = readItemTileMeta(item);
@@ -105,6 +107,7 @@ export default async function OutfitsPage() {
         outfitLayerOrder={outfitLayerOrder}
         outfitVisualLayers={outfitVisualLayers}
         outfitCategoryScales={outfitCategoryScales}
+        outfitLayerPositions={outfitLayerPositions}
       />
     </main>
   );
