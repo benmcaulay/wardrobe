@@ -672,9 +672,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                   onPointerDown={(e) => startCanvasDrag(e, slot)}
                   className={`absolute -translate-x-1/2 -translate-y-1/2 touch-none overflow-hidden rounded-xl outline-none focus:outline-none ${
                     isSelected ? "ring-2 ring-ink" : ""
-                  } ${item ? "" : "border-2 border-dashed border-ink/20 bg-white/80"} ${
-                    slot.locked ? "ring-2 ring-accent" : ""
-                  }`}
+                  } ${item ? "" : "border-2 border-dashed border-ink/20 bg-white/80"}`}
                   style={{ left: slot.x, top: slot.y, zIndex: slot.z, width: size, height: size }}
                 >
                   {item ? (
