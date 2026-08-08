@@ -712,13 +712,13 @@ export function RandomOutfitBuilder({
   return (
     <>
     <div className="flex flex-col gap-8 md:flex-row md:flex-wrap md:items-start md:justify-evenly md:gap-y-8 md:gap-x-0">
-        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[300px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
+        <div data-keep-selection className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[300px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
           <button
             type="button"
             onClick={() => void spin()}
             disabled={!readyToSpin || spinning}
             aria-label={spinning ? "Spinning…" : "Spin outfit"}
-            className="group relative mx-auto flex h-[104px] w-[104px] items-center justify-center rounded-full border-2 border-dashed border-ink/30 bg-white text-ink transition hover:border-ink/50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="group relative mx-auto flex h-[156px] w-[156px] items-center justify-center rounded-full border-[1.5px] border-accent-soft bg-white text-ink transition hover:border-accent disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <span
               aria-hidden
@@ -728,9 +728,34 @@ export function RandomOutfitBuilder({
                   : "group-hover:animate-spin motion-reduce:group-hover:animate-none"
               }`}
             >
-              <span className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
+              {/* Comet trail — only while hovering (or spinning); a single dot at rest. */}
+              <span
+                className={`absolute inset-0 rounded-full transition-opacity duration-200 ${
+                  spinning
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 motion-reduce:group-hover:opacity-0"
+                }`}
+              >
+                <span
+                  className="absolute left-1/2 top-1/2 h-1.5 w-1.5 rounded-full bg-accent"
+                  style={{ transform: "translate(-50%,-50%) rotate(-42deg) translateY(-78px)", opacity: 0.2 }}
+                />
+                <span
+                  className="absolute left-1/2 top-1/2 h-2 w-2 rounded-full bg-accent"
+                  style={{ transform: "translate(-50%,-50%) rotate(-30deg) translateY(-78px)", opacity: 0.35 }}
+                />
+                <span
+                  className="absolute left-1/2 top-1/2 h-2.5 w-2.5 rounded-full bg-accent"
+                  style={{ transform: "translate(-50%,-50%) rotate(-18deg) translateY(-78px)", opacity: 0.6 }}
+                />
+              </span>
+              {/* Head dot — always visible. */}
+              <span
+                className="absolute left-1/2 top-1/2 h-[15px] w-[15px] rounded-full bg-accent"
+                style={{ transform: "translate(-50%,-50%) translateY(-78px)" }}
+              />
             </span>
-            <span className="text-sm font-medium tracking-wide">
+            <span className="text-base font-medium tracking-wide">
               {spinning ? "Spinning…" : "Spin"}
             </span>
           </button>
