@@ -1129,6 +1129,8 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
           )}
           <a
             href={`/closet/${previewItem.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
             className="mt-5 inline-flex items-center gap-1 text-sm text-ink underline underline-offset-2 hover:text-ink-soft"
           >
             Open full details ↗
