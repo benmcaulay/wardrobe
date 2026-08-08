@@ -56,6 +56,50 @@ export function resolveSlotLayout(
   return builtinSlotLayout(categories, index, frameWidth, frameHeight);
 }
 
+/** Which body region a slot's category occupies — used to spread same-region pieces. */
+export function outfitRegion(categories: readonly string[]): string {
+  const c = (categories[0] ?? "").trim().toLowerCase();
+  if (/(hat|cap|beanie)/.test(c)) return "head";
+  if (/(shoe|boot|sneaker|sandal|heel|loafer)/.test(c)) return "feet";
+  if (/(bottom|pant|short|skirt|jean|trouser|legging|chino|jogger|sweatpant)/.test(c)) return "bottom";
+  if (/dress/.test(c)) return "dress";
+  if (/(top|shirt|tee|polo|sweater|hoodie|jacket|outer|blouse|cardigan|vest|coat)/.test(c)) return "top";
+  return "other";
+}
+
+/**
+ * Offset slots that share a body region (e.g. shirt + jacket + sweater, or two
+ * of the same category) so they sit beside each other instead of stacking
+ * directly on top. Same-region pieces become a centered horizontal row.
+ */
+export function spreadOverlappingSlots<
+  T extends { id: string; categories: string[]; x: number; y: number },
+>(slots: T[], frameWidth = FRAME_WIDTH): T[] {
+  const byRegion = new Map<string, T[]>();
+  for (const s of slots) {
+    const region = outfitRegion(s.categories);
+    const list = byRegion.get(region) ?? [];
+    list.push(s);
+    byRegion.set(region, list);
+  }
+
+  const centerX = frameWidth / 2;
+  const overrides = new Map<string, { x: number; y: number }>();
+  for (const [region, group] of byRegion) {
+    if (region === "other" || group.length < 2) continue;
+    const n = group.length;
+    const step = Math.min(190, (frameWidth - 80) / n);
+    const avgY = group.reduce((sum, s) => sum + s.y, 0) / n;
+    group.forEach((s, i) => {
+      const x = centerX + (i - (n - 1) / 2) * step;
+      overrides.set(s.id, { x: Math.min(frameWidth - 90, Math.max(90, x)), y: avgY });
+    });
+  }
+
+  if (overrides.size === 0) return slots;
+  return slots.map((s) => (overrides.has(s.id) ? { ...s, ...overrides.get(s.id)! } : s));
+}
+
 export function sanitizeOutfitSlotDefaults(raw: unknown): OutfitSlotDefaults {
   if (!raw || typeof raw !== "object") return {};
   const out: OutfitSlotDefaults = {};

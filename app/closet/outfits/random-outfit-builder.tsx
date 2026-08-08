@@ -27,6 +27,7 @@ import { saveOutfitSlotDefault } from "@/lib/actions/outfitSlotDefaults";
 import {
   resolveSlotLayout,
   slotCategoryLabel,
+  spreadOverlappingSlots,
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
 import { saveOutfitLayout } from "./actions";
@@ -521,7 +522,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
   return (
     <div className="flex flex-col gap-8 md:flex-row md:flex-wrap md:items-start md:justify-evenly md:gap-y-8 md:gap-x-0">
-        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 md:w-[240px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
+        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[240px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
           <button
             type="button"
             onClick={() => void spin()}
@@ -1096,7 +1097,7 @@ function syncSlotsWithRules(
     usedBySig.set(req.sig, used + 1);
   }
 
-  return synced.map((slot, i) => ({ ...slot, z: i + 1 }));
+  return spreadOverlappingSlots(synced.map((slot, i) => ({ ...slot, z: i + 1 })));
 }
 
 function formatFillIssue(issue: OutfitFillIssue): string {
