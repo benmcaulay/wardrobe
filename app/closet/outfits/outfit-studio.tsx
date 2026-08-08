@@ -13,9 +13,16 @@ type Props = {
   colorOptions: Color[];
   initialOutfits: SavedOutfit[];
   outfitSlotDefaults: OutfitSlotDefaults;
+  outfitLayerOrder: string[];
 };
 
-export function OutfitStudio({ items, colorOptions, initialOutfits, outfitSlotDefaults }: Props) {
+export function OutfitStudio({
+  items,
+  colorOptions,
+  initialOutfits,
+  outfitSlotDefaults,
+  outfitLayerOrder,
+}: Props) {
   const [tab, setTab] = useState<Tab>("random");
 
   return (
@@ -42,6 +49,7 @@ export function OutfitStudio({ items, colorOptions, initialOutfits, outfitSlotDe
           items={items}
           colorOptions={colorOptions}
           initialSlotDefaults={outfitSlotDefaults}
+          initialLayerOrder={outfitLayerOrder}
         />
       ) : (
         <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />

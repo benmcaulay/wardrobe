@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { outfitRegion, spreadOverlappingSlots } from "../lib/outfit-slot-defaults";
+import {
+  orderSlotsByLayer,
+  outfitRegion,
+  sanitizeLayerOrder,
+  spreadOverlappingSlots,
+} from "../lib/outfit-slot-defaults";
 
 type Slot = { id: string; categories: string[]; x: number; y: number };
 const slot = (id: string, cat: string, x = 280, y = 300): Slot => ({ id, categories: [cat], x, y });
@@ -59,5 +64,30 @@ describe("spreadOverlappingSlots", () => {
       expect(s.x).toBeGreaterThanOrEqual(90);
       expect(s.x).toBeLessThanOrEqual(560 - 90);
     }
+  });
+});
+
+describe("outfit layer order", () => {
+  it("sanitizes to unique non-empty strings", () => {
+    expect(sanitizeLayerOrder(["a", "a", "", "b", 3, null])).toEqual(["a", "b"]);
+    expect(sanitizeLayerOrder("nope")).toEqual([]);
+  });
+
+  it("orders slots frontmost-first by saved signature order", () => {
+    const slots = [
+      { id: "1", categories: ["shirt"] },
+      { id: "2", categories: ["jacket"] },
+      { id: "3", categories: ["pants"] },
+    ];
+    const out = orderSlotsByLayer(slots, ["jacket", "shirt"]);
+    expect(out.map((s) => s.id)).toEqual(["2", "1", "3"]); // jacket, shirt (ranked), then pants
+  });
+
+  it("keeps original order for signatures with no saved position", () => {
+    const slots = [
+      { id: "1", categories: ["shirt"] },
+      { id: "2", categories: ["pants"] },
+    ];
+    expect(orderSlotsByLayer(slots, []).map((s) => s.id)).toEqual(["1", "2"]);
   });
 });

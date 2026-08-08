@@ -4,7 +4,7 @@ import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { readItemTileMeta } from "@/lib/item-tile-meta";
 import { parseColors, parseStylePrefs } from "@/lib/json";
-import { sanitizeOutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
+import { sanitizeLayerOrder, sanitizeOutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
 import { OutfitStudio } from "./outfit-studio";
 import type { SavedOutfit } from "./outfit-builder";
 import type { RandomOutfitItem } from "./random-outfit-builder";
@@ -54,6 +54,7 @@ export default async function OutfitsPage() {
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const colorOptions = getColorsListFromPrefs(prefs);
   const outfitSlotDefaults = sanitizeOutfitSlotDefaults(prefs.outfitSlotDefaults);
+  const outfitLayerOrder = sanitizeLayerOrder(prefs.outfitLayerOrder);
 
   const closetItems: RandomOutfitItem[] = items.map((item) => {
     const tile = readItemTileMeta(item);
@@ -94,6 +95,7 @@ export default async function OutfitsPage() {
         colorOptions={colorOptions}
         initialOutfits={savedOutfits}
         outfitSlotDefaults={outfitSlotDefaults}
+        outfitLayerOrder={outfitLayerOrder}
       />
     </main>
   );

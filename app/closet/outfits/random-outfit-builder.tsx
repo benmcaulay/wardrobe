@@ -23,8 +23,9 @@ import {
   computeFrameScale,
   toFrameSpace,
 } from "@/lib/outfit-frame-scale";
-import { saveOutfitSlotDefault } from "@/lib/actions/outfitSlotDefaults";
+import { saveOutfitLayerOrder, saveOutfitSlotDefault } from "@/lib/actions/outfitSlotDefaults";
 import {
+  orderSlotsByLayer,
   resolveSlotLayout,
   slotCategoryLabel,
   spreadOverlappingSlots,
@@ -66,6 +67,7 @@ type Props = {
   items: RandomOutfitItem[];
   colorOptions: Color[];
   initialSlotDefaults: OutfitSlotDefaults;
+  initialLayerOrder: string[];
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -78,7 +80,12 @@ const FRAME_HEIGHT = 960;
 const FRAME_GUTTER = 24;
 const SLOT_ICON_SIZE = 72;
 
-export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }: Props) {
+export function RandomOutfitBuilder({
+  items,
+  colorOptions,
+  initialSlotDefaults,
+  initialLayerOrder,
+}: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
     [items],
@@ -100,6 +107,10 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   const [spinning, setSpinning] = useState(false);
   const [spinError, setSpinError] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<RandomOutfitItem | null>(null);
+  const [layerOrder, setLayerOrder] = useState<string[]>(initialLayerOrder);
+  const layerOrderRef = useRef(layerOrder);
+  layerOrderRef.current = layerOrder;
+  const [dragStackIndex, setDragStackIndex] = useState<number | null>(null);
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -197,7 +208,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   }, [initialSlotDefaults]);
 
   useEffect(() => {
-    setSlots((prev) => syncSlotsWithRules(prev, categoryRules, slotDefaults));
+    setSlots((prev) => syncSlotsWithRules(prev, categoryRules, slotDefaults, layerOrderRef.current));
   }, [categoryRules, slotDefaults]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
@@ -448,6 +459,33 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
     setSlots((prev) => swapLayerOrder(prev, selected.id, dir) ?? prev);
   }
 
+  // Drag-reorder the piece list (frontmost first). Reassigns z so the top of the
+  // list is the frontmost image, then persists the category stack order.
+  function reorderStack(from: number, to: number) {
+    if (from === to) return;
+    const ordered = slots.filter((s) => s.itemId).sort((a, b) => b.z - a.z);
+    const ids = ordered.map((s) => s.id);
+    const [moved] = ids.splice(from, 1);
+    if (moved === undefined) return;
+    ids.splice(to, 0, moved);
+
+    const n = ids.length;
+    const zById = new Map(ids.map((id, i) => [id, n - i])); // index 0 = frontmost = highest z
+    setSlots((prev) => prev.map((s) => (zById.has(s.id) ? { ...s, z: zById.get(s.id)! } : s)));
+
+    const byId = new Map(ordered.map((s) => [s.id, s]));
+    const sigs: string[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      const sig = categoryListSignature(byId.get(id)?.categories ?? []);
+      if (!sig || seen.has(sig)) continue;
+      seen.add(sig);
+      sigs.push(sig);
+    }
+    setLayerOrder(sigs);
+    void saveOutfitLayerOrder(sigs);
+  }
+
   function saveOutfit() {
     const name = outfitName.trim();
     const filled = slots.filter((s) => s.itemId);
@@ -512,8 +550,10 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
   // Pieces currently placed on the frame, plus their combined color palette —
   // shown beside the mannequin so the outfit reads at a glance.
+  // Frontmost first (highest z at the top of the list).
   const placedPieces = slots
     .filter((s) => s.itemId)
+    .sort((a, b) => b.z - a.z)
     .map((s) => ({ slot: s, item: itemsById.get(s.itemId!) }))
     .filter((p): p is { slot: CanvasSlot; item: RandomOutfitItem } => !!p.item);
   const paletteColors: Color[] = (() => {
@@ -589,11 +629,32 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                 </div>
               )}
               <ul className="space-y-1.5 md:max-h-[440px] md:overflow-auto md:pr-1">
-                {placedPieces.map(({ slot, item }) => (
+                {placedPieces.map(({ slot, item }, index) => (
                   <li
                     key={slot.id}
-                    className="flex items-center gap-2 rounded-lg border border-ink/10 bg-white p-1.5"
+                    onDragOver={(e) => {
+                      if (dragStackIndex !== null) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragStackIndex !== null) reorderStack(dragStackIndex, index);
+                      setDragStackIndex(null);
+                    }}
+                    className={`flex items-center gap-1.5 rounded-lg border border-ink/10 bg-white p-1.5 transition ${
+                      dragStackIndex === index ? "opacity-40" : ""
+                    }`}
                   >
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={() => setDragStackIndex(index)}
+                      onDragEnd={() => setDragStackIndex(null)}
+                      aria-label="Drag to reorder layer"
+                      title="Drag to reorder — top is frontmost"
+                      className="shrink-0 flex h-7 w-5 items-center justify-center rounded text-ink-muted hover:bg-paper-warm cursor-grab active:cursor-grabbing touch-none select-none"
+                    >
+                      ⋮⋮
+                    </button>
                     <button
                       type="button"
                       onClick={() => setPreviewItem(item)}
@@ -1155,6 +1216,7 @@ function syncSlotsWithRules(
   slots: CanvasSlot[],
   rules: CategoryRule[],
   defaults: OutfitSlotDefaults,
+  layerOrder: string[],
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1197,7 +1259,11 @@ function syncSlotsWithRules(
     usedBySig.set(req.sig, used + 1);
   }
 
-  return spreadOverlappingSlots(synced.map((slot, i) => ({ ...slot, z: i + 1 })));
+  const positioned = spreadOverlappingSlots(synced.map((slot, i) => ({ ...slot, z: i + 1 })));
+  // Layer by the saved stack order: frontmost signature gets the highest z.
+  const frontToBack = orderSlotsByLayer(positioned, layerOrder);
+  const total = frontToBack.length;
+  return frontToBack.map((slot, i) => ({ ...slot, z: total - i }));
 }
 
 function formatFillIssue(issue: OutfitFillIssue): string {

@@ -6,9 +6,32 @@ import { prisma } from "@/lib/db";
 import { decode, encode, type StylePrefs } from "@/lib/json";
 import {
   outfitSlotDefaultKey,
+  sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
+
+/** Persist the outfit stack order (category signatures, frontmost first). */
+export async function saveOutfitLayerOrder(
+  order: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = sanitizeLayerOrder(order);
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stylePrefs: encode({ ...prefs, outfitLayerOrder: clean }) },
+  });
+
+  revalidatePath("/closet/outfits");
+  return { ok: true };
+}
 
 export async function saveOutfitSlotDefault(
   categories: string[],

@@ -46,6 +46,8 @@ export type StylePrefs = {
   closetGroupOrders?: Record<string, string[]>;
   /** Default canvas placement per outfit slot category rule (signature → layout). */
   outfitSlotDefaults?: Record<string, { x: number; y: number; scale: number }>;
+  /** Outfit layer order — category signatures, frontmost first (drag to reorder the stack). */
+  outfitLayerOrder?: string[];
 };
 
 export function encode<T>(value: T): string {

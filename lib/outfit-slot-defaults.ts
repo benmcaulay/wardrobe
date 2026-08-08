@@ -119,6 +119,41 @@ export function sanitizeOutfitSlotDefaults(raw: unknown): OutfitSlotDefaults {
   return out;
 }
 
+/** Clean a persisted layer order — a list of category signatures, frontmost first. */
+export function sanitizeLayerOrder(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const s = v.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Sort slots frontmost → backmost by their category signature's position in the
+ * saved layer order. Signatures without a saved position keep their relative
+ * order at the back.
+ */
+export function orderSlotsByLayer<T extends { categories: string[] }>(
+  slots: readonly T[],
+  layerOrder: readonly string[],
+): T[] {
+  const rank = new Map(layerOrder.map((sig, i) => [sig, i]));
+  return slots
+    .map((slot, i) => ({ slot, i }))
+    .sort((a, b) => {
+      const ra = rank.get(categoryListSignature(a.slot.categories)) ?? Number.POSITIVE_INFINITY;
+      const rb = rank.get(categoryListSignature(b.slot.categories)) ?? Number.POSITIVE_INFINITY;
+      return ra - rb || a.i - b.i;
+    })
+    .map((e) => e.slot);
+}
+
 /** Human label for a slot's categories (first category when single). */
 export function slotCategoryLabel(categories: readonly string[]): string {
   const trimmed = categories.map((c) => c.trim()).filter(Boolean);
