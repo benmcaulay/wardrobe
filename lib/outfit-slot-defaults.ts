@@ -192,6 +192,16 @@ export function clampItemScale(raw: unknown): number {
   return Math.min(MAX_ITEM_SCALE, Math.max(MIN_ITEM_SCALE, raw));
 }
 
+/**
+ * Built-in size multiplier for a category before any user override. Jackets and
+ * pants are large garments that read better rendered twice as big by default.
+ */
+export function builtinCategoryScale(categories: readonly string[]): number {
+  const c = (categories[0] ?? "").trim().toLowerCase();
+  if (c.includes("jacket") || c.includes("pant")) return 2;
+  return DEFAULT_ITEM_SCALE;
+}
+
 /** Clean a persisted per-category scale map (category signature → multiplier). */
 export function sanitizeCategoryScales(raw: unknown): Record<string, number> {
   if (!raw || typeof raw !== "object") return {};

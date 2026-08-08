@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  builtinCategoryScale,
   builtinSlotLayout,
   clampItemScale,
   outfitSlotDefaultKey,
@@ -52,5 +53,13 @@ describe("category scales", () => {
       hat: 2.2,
     });
     expect(sanitizeCategoryScales(null)).toEqual({});
+  });
+
+  it("defaults jackets and pants to 2x, everything else to 1x", () => {
+    expect(builtinCategoryScale(["jacket"])).toBe(2);
+    expect(builtinCategoryScale(["pants"])).toBe(2);
+    expect(builtinCategoryScale(["shirt"])).toBe(1);
+    expect(builtinCategoryScale(["hat"])).toBe(1);
+    expect(builtinCategoryScale(["shorts"])).toBe(1);
   });
 });

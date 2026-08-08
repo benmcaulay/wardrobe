@@ -29,6 +29,7 @@ import {
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
 import {
+  builtinCategoryScale,
   MAX_ITEM_SCALE,
   MIN_ITEM_SCALE,
   orderSlotsByLayer,
@@ -280,6 +281,9 @@ export function RandomOutfitBuilder({
   const spinHint = fillIssue && fillIssue.kind !== "no_combo" ? formatFillIssue(fillIssue) : null;
   const selected = slots.find((s) => s.id === selectedSlotId) ?? null;
   const selectedSig = selected ? categoryListSignature(selected.categories) : "";
+  const selectedScale = selected
+    ? categoryScales[selectedSig] ?? builtinCategoryScale(selected.categories)
+    : 1;
 
   const assignableItems = useMemo(() => {
     if (!selected) return items;
@@ -1261,7 +1265,7 @@ export function RandomOutfitBuilder({
                 min={MIN_ITEM_SCALE}
                 max={MAX_ITEM_SCALE}
                 step={0.05}
-                value={categoryScales[selectedSig] ?? 1}
+                value={selectedScale}
                 aria-label="Size for selected type"
                 onChange={(e) => resizeCategory(selectedSig, Number(e.target.value))}
                 onPointerUp={() => commitCategoryScale(selectedSig)}
@@ -1270,7 +1274,7 @@ export function RandomOutfitBuilder({
                 className="w-full accent-ink"
               />
               <span className="text-[11px] text-ink-muted tabular-nums shrink-0">
-                {Math.round((categoryScales[selectedSig] ?? 1) * 100)}%
+                {Math.round(selectedScale * 100)}%
               </span>
             </div>
             <p className="text-xs text-ink-muted">Sizes every piece of this category.</p>
@@ -1453,10 +1457,11 @@ function syncSlotsWithRules(
   // Layer by the saved stack order: frontmost signature gets the highest z.
   const frontToBack = orderSlotsByLayer(positioned, layerOrder);
   const total = frontToBack.length;
-  // Every piece of a category renders at that category's saved size.
+  // Every piece of a category renders at that category's saved size, or its
+  // built-in default (jackets and pants default to 2x).
   return frontToBack.map((slot, i) => {
     const sig = categoryListSignature(slot.categories);
-    return { ...slot, z: total - i, scale: categoryScales[sig] ?? slot.scale };
+    return { ...slot, z: total - i, scale: categoryScales[sig] ?? builtinCategoryScale(slot.categories) };
   });
 }
 
