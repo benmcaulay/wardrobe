@@ -99,6 +99,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   } | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [spinError, setSpinError] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<RandomOutfitItem | null>(null);
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -171,6 +172,15 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  // Close the item preview popup on Escape.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setPreviewItem(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, []);
 
   const spinLockRef = useRef(false);
@@ -521,6 +531,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
   })();
 
   return (
+    <>
     <div className="flex flex-col gap-8 md:flex-row md:flex-wrap md:items-start md:justify-evenly md:gap-y-8 md:gap-x-0">
         <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[300px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
           <button
@@ -583,16 +594,23 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                     key={slot.id}
                     className="flex items-center gap-2 rounded-lg border border-ink/10 bg-white p-1.5"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={processedImageUrls[item.id] ?? imageUrl(item.imagePath)}
-                      alt=""
-                      className="h-9 w-9 shrink-0 rounded object-cover bg-paper-warm"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{item.name}</p>
-                      <p className="truncate text-xs capitalize text-ink-muted">{item.category}</p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewItem(item)}
+                      title={`Preview ${item.name}`}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left rounded-md hover:bg-paper-warm/60 transition"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={processedImageUrls[item.id] ?? imageUrl(item.imagePath)}
+                        alt=""
+                        className="h-9 w-9 shrink-0 rounded object-cover bg-paper-warm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{item.name}</p>
+                        <p className="truncate text-xs capitalize text-ink-muted">{item.category}</p>
+                      </div>
+                    </button>
                     <button
                       type="button"
                       onClick={() => toggleSlotLock(slot.id)}
@@ -1047,6 +1065,86 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
           {saveError && <p className="text-[11px] text-red-700">{saveError}</p>}
         </div>
       </aside>
+    </div>
+
+    {previewItem && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${previewItem.name} preview`}
+        onClick={() => setPreviewItem(null)}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-ink/10 bg-paper p-5 shadow-tile"
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewItem(null)}
+            aria-label="Close preview"
+            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 bg-white text-ink-muted hover:text-ink hover:border-ink/30 transition"
+          >
+            ×
+          </button>
+          <div className="mx-auto aspect-square w-full max-w-[320px] overflow-hidden rounded-xl bg-paper-warm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={processedImageUrls[previewItem.id] ?? imageUrl(previewItem.imagePath)}
+              alt={previewItem.name}
+              className="h-full w-full object-contain"
+              style={{
+                transform: itemTileImageTransform({
+                  thumbZoom: previewItem.thumbZoom,
+                  mirror: previewItem.mirror,
+                }),
+              }}
+            />
+          </div>
+          <div className="mt-4 space-y-1">
+            <h2 className="font-serif text-2xl tracking-tight">{previewItem.name}</h2>
+            {previewItem.brand && <p className="text-sm text-ink-muted">{previewItem.brand}</p>}
+          </div>
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <Detail label="Category" value={previewItem.category} />
+            {previewItem.subcategory && <Detail label="Subcategory" value={previewItem.subcategory} />}
+            {previewItem.material && <Detail label="Material" value={previewItem.material} />}
+            {previewItem.pattern && <Detail label="Pattern" value={previewItem.pattern} />}
+          </dl>
+          {previewItem.colors.length > 0 && (
+            <div className="mt-3">
+              <span className="text-xs uppercase tracking-wide text-ink-muted">Colors</span>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {previewItem.colors.map((c) => (
+                  <span key={c.name} className="inline-flex items-center gap-1.5 text-sm capitalize">
+                    <span
+                      className="h-4 w-4 rounded-full border border-ink/15"
+                      style={{ backgroundColor: c.hex }}
+                    />
+                    {c.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          <a
+            href={`/closet/${previewItem.id}`}
+            className="mt-5 inline-flex items-center gap-1 text-sm text-ink underline underline-offset-2 hover:text-ink-soft"
+          >
+            Open full details ↗
+          </a>
+        </div>
+      </div>
+    )}
+    </>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wide text-ink-muted">{label}</dt>
+      <dd className="capitalize">{value}</dd>
     </div>
   );
 }
