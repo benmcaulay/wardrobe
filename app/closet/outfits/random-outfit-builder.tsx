@@ -749,7 +749,7 @@ export function RandomOutfitBuilder({
                 ? `Tap a piece to fill this slot (${formatCategoryList(selected.categories)}).`
                 : "Select a slot on the frame, then tap a piece to assign it."}
             </p>
-            <ul className="space-y-1 max-h-72 overflow-auto pr-1">
+            <ul className="space-y-1 max-h-36 overflow-auto pr-1">
               {searchedAssignable.map((item) => (
                 <li key={item.id}>
                   <button
