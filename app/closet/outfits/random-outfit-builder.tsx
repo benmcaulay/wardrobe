@@ -23,20 +23,20 @@ import {
   toFrameSpace,
 } from "@/lib/outfit-frame-scale";
 import {
-  saveOutfitCategoryScale,
+  saveOutfitComboLayout,
   saveOutfitLayerOrder,
-  saveOutfitLayerPosition,
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
 import {
   builtinCategoryScale,
+  combinationKey,
+  layerIndexForCategories,
   MAX_ITEM_SCALE,
   MIN_ITEM_SCALE,
   orderSlotsByLayer,
   resolveSlotLayout,
-  slotPositionKey,
   spreadOverlappingSlots,
-  visualLayerYFor,
+  type ComboLayout,
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
 import { saveOutfitLayout } from "./actions";
@@ -76,8 +76,7 @@ type Props = {
   initialSlotDefaults: OutfitSlotDefaults;
   initialLayerOrder: string[];
   initialVisualLayers: string[][];
-  initialCategoryScales: Record<string, number>;
-  initialLayerPositions: Record<string, { x: number; y: number }>;
+  initialComboLayouts: Record<string, ComboLayout>;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -96,8 +95,7 @@ export function RandomOutfitBuilder({
   initialSlotDefaults,
   initialLayerOrder,
   initialVisualLayers,
-  initialCategoryScales,
-  initialLayerPositions,
+  initialComboLayouts,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
@@ -134,14 +132,10 @@ export function RandomOutfitBuilder({
   const [closetSearch, setClosetSearch] = useState("");
   const [dragCategory, setDragCategory] = useState<string | null>(null);
   const [visualLayersOpen, setVisualLayersOpen] = useState(false);
-  const [categoryScales, setCategoryScales] =
-    useState<Record<string, number>>(initialCategoryScales);
-  const categoryScalesRef = useRef(categoryScales);
-  categoryScalesRef.current = categoryScales;
-  const [layerPositions, setLayerPositions] =
-    useState<Record<string, { x: number; y: number }>>(initialLayerPositions);
-  const layerPositionsRef = useRef(layerPositions);
-  layerPositionsRef.current = layerPositions;
+  const [comboLayouts, setComboLayouts] =
+    useState<Record<string, ComboLayout>>(initialComboLayouts);
+  const comboLayoutsRef = useRef(comboLayouts);
+  comboLayoutsRef.current = comboLayouts;
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -244,8 +238,7 @@ export function RandomOutfitBuilder({
         slotDefaults,
         layerOrderRef.current,
         visualLayers.filter((l) => l.length > 0),
-        categoryScalesRef.current,
-        layerPositionsRef.current,
+        comboLayoutsRef.current,
       ),
     );
   }, [categoryRules, slotDefaults, visualLayers]);
@@ -291,10 +284,11 @@ export function RandomOutfitBuilder({
 
   const readyToSpin = fillIssue === null;
   const spinHint = fillIssue && fillIssue.kind !== "no_combo" ? formatFillIssue(fillIssue) : null;
+  const activeLayers = visualLayers.filter((l) => l.length > 0);
   const selected = slots.find((s) => s.id === selectedSlotId) ?? null;
-  const selectedSig = selected ? categoryListSignature(selected.categories) : "";
+  const selectedComboKey = selected ? comboKeyForSlot(selected, slots, activeLayers) : "";
   const selectedScale = selected
-    ? categoryScales[selectedSig] ?? builtinCategoryScale(selected.categories)
+    ? comboLayouts[selectedComboKey]?.scale ?? builtinCategoryScale(selected.categories)
     : 1;
 
   const assignableItems = useMemo(() => {
@@ -512,19 +506,22 @@ export function RandomOutfitBuilder({
     void saveOutfitLayerOrder(sigs);
   }
 
-  // Size every piece of a category (by its signature) together, live.
-  function resizeCategory(sig: string, scale: number) {
-    if (!sig) return;
-    setCategoryScales((prev) => ({ ...prev, [sig]: scale }));
+  // Size the selected piece for its current combination, live. Only pieces that
+  // share the same combination key (normally just this one) resize.
+  function resizeCombo(comboKey: string, scale: number) {
+    if (!comboKey) return;
+    setComboLayouts((prev) => ({ ...prev, [comboKey]: { ...prev[comboKey], scale } }));
+    const layers = visualLayersRef.current.filter((l) => l.length > 0);
     setSlots((prev) =>
-      prev.map((s) => (categoryListSignature(s.categories) === sig ? { ...s, scale } : s)),
+      prev.map((s) => (comboKeyForSlot(s, prev, layers) === comboKey ? { ...s, scale } : s)),
     );
   }
 
-  // Persist a category's size once the user finishes dragging the slider.
-  function commitCategoryScale(sig: string) {
-    if (!sig) return;
-    void saveOutfitCategoryScale(sig, categoryScalesRef.current[sig] ?? 1);
+  // Persist the combination's size once the user finishes dragging the slider.
+  function commitComboScale(comboKey: string) {
+    if (!comboKey) return;
+    const scale = comboLayoutsRef.current[comboKey]?.scale;
+    if (scale != null) void saveOutfitComboLayout(comboKey, { scale });
   }
 
   // --- Visual layers (vertical bands) -------------------------------------
@@ -603,10 +600,10 @@ export function RandomOutfitBuilder({
     // Only remember a genuine drag, not a click that happened to select a slot.
     if (!slot || (Math.abs(slot.x - startX) < 2 && Math.abs(slot.y - startY) < 2)) return;
     const layers = visualLayersRef.current.filter((l) => l.length > 0);
-    const key = slotPositionKey(slot.categories, layers);
+    const key = comboKeyForSlot(slot, slotsRef.current, layers);
     const pos = { x: slot.x, y: slot.y };
-    setLayerPositions((prev) => ({ ...prev, [key]: pos }));
-    void saveOutfitLayerPosition(key, pos);
+    setComboLayouts((prev) => ({ ...prev, [key]: { ...prev[key], ...pos } }));
+    void saveOutfitComboLayout(key, pos);
   }
 
   function handleFrameBackgroundPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -1276,17 +1273,19 @@ export function RandomOutfitBuilder({
                 step={0.05}
                 value={selectedScale}
                 aria-label="Size for selected type"
-                onChange={(e) => resizeCategory(selectedSig, Number(e.target.value))}
-                onPointerUp={() => commitCategoryScale(selectedSig)}
-                onKeyUp={() => commitCategoryScale(selectedSig)}
-                onBlur={() => commitCategoryScale(selectedSig)}
+                onChange={(e) => resizeCombo(selectedComboKey, Number(e.target.value))}
+                onPointerUp={() => commitComboScale(selectedComboKey)}
+                onKeyUp={() => commitComboScale(selectedComboKey)}
+                onBlur={() => commitComboScale(selectedComboKey)}
                 className="w-full accent-ink"
               />
               <span className="text-[11px] text-ink-muted tabular-nums shrink-0">
                 {Math.round(selectedScale * 100)}%
               </span>
             </div>
-            <p className="text-xs text-ink-muted">Sizes every piece of this category.</p>
+            <p className="text-xs text-ink-muted">
+              Saved for this exact combination of pieces.
+            </p>
             <p className="text-xs text-ink-muted">
               Set vertical placement with the Visual layers box, layering by dragging the piece list;
               drag on the frame for fine tweaks.
@@ -1388,14 +1387,29 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** The combination key for a slot given every slot currently in the outfit. */
+function comboKeyForSlot(
+  slot: { categories: string[] },
+  allSlots: readonly { categories: string[] }[],
+  layers: string[][],
+): string {
+  const idx = layerIndexForCategories(slot.categories, layers);
+  const present =
+    idx < 0
+      ? [slot.categories[0] ?? ""]
+      : allSlots
+          .filter((s) => layerIndexForCategories(s.categories, layers) === idx)
+          .map((s) => s.categories[0] ?? "");
+  return combinationKey(slot.categories, present);
+}
+
 function syncSlotsWithRules(
   slots: CanvasSlot[],
   rules: CategoryRule[],
   defaults: OutfitSlotDefaults,
   layerOrder: string[],
   visualLayers: string[][],
-  categoryScales: Record<string, number>,
-  layerPositions: Record<string, { x: number; y: number }>,
+  comboLayouts: Record<string, ComboLayout>,
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1423,12 +1437,12 @@ function syncSlotsWithRules(
     const used = usedBySig.get(req.sig) ?? 0;
     const pool = poolBySig.get(req.sig) ?? [];
     if (used < pool.length) {
-      // Reuse the existing slot, but let the visual layers keep owning its
-      // vertical band — otherwise moving a category to a new layer wouldn't move
-      // an already-placed piece.
+      // Reuse the existing slot's item/lock, but recompute its position from the
+      // default so an unpinned piece reverts when the combination changes; a
+      // saved combo layout re-pins it below.
       const existing = pool[used]!;
-      const bandY = visualLayerYFor(existing.categories, visualLayers);
-      synced.push(bandY == null ? existing : { ...existing, y: bandY });
+      const layout = resolveSlotLayout(existing.categories, used, defaults, visualLayers);
+      synced.push({ ...existing, x: layout.x, y: layout.y });
     } else {
       const layout = resolveSlotLayout(req.categories, used, defaults, visualLayers);
       synced.push({
@@ -1443,14 +1457,19 @@ function syncSlotsWithRules(
     usedBySig.set(req.sig, used + 1);
   }
 
-  // Apply remembered drag positions for this exact slot + visual-layer combo.
-  // A hand-placed piece is pinned there and left out of the auto-spread.
+  // Position + size are remembered per placed-together combination: the piece's
+  // category plus the exact set of categories sharing its visual layer. Removing
+  // a piece re-keys the survivors, so they revert to that smaller combination's
+  // saved layout. A hand-placed piece is pinned and left out of the auto-spread.
   const pinnedIds = new Set<string>();
   const zStamped = synced.map((slot, i) => {
-    const saved = layerPositions[slotPositionKey(slot.categories, visualLayers)];
-    if (!saved) return { ...slot, z: i + 1 };
-    pinnedIds.add(slot.id);
-    return { ...slot, x: saved.x, y: saved.y, z: i + 1 };
+    const layout = comboLayouts[comboKeyForSlot(slot, synced, visualLayers)];
+    const scale = layout?.scale ?? builtinCategoryScale(slot.categories);
+    if (layout?.x != null && layout?.y != null) {
+      pinnedIds.add(slot.id);
+      return { ...slot, x: layout.x, y: layout.y, scale, z: i + 1 };
+    }
+    return { ...slot, scale, z: i + 1 };
   });
   const spread = spreadOverlappingSlots(
     zStamped.filter((s) => !pinnedIds.has(s.id)),
@@ -1462,12 +1481,7 @@ function syncSlotsWithRules(
   // Layer by the saved stack order: frontmost signature gets the highest z.
   const frontToBack = orderSlotsByLayer(positioned, layerOrder);
   const total = frontToBack.length;
-  // Every piece of a category renders at that category's saved size, or its
-  // built-in default (jackets and pants default to 2x).
-  return frontToBack.map((slot, i) => {
-    const sig = categoryListSignature(slot.categories);
-    return { ...slot, z: total - i, scale: categoryScales[sig] ?? builtinCategoryScale(slot.categories) };
-  });
+  return frontToBack.map((slot, i) => ({ ...slot, z: total - i }));
 }
 
 function formatFillIssue(issue: OutfitFillIssue): string {

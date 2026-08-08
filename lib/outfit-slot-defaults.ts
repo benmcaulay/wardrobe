@@ -67,8 +67,11 @@ export function outfitRegion(categories: readonly string[]): string {
   return "other";
 }
 
-/** Which visual-layer band a slot's first category belongs to, or -1. */
-function slotBandIndex(categories: readonly string[], layers: readonly string[][]): number {
+/** Which visual layer a slot's first category belongs to, or -1 if none. */
+export function layerIndexForCategories(
+  categories: readonly string[],
+  layers: readonly string[][],
+): number {
   if (layers.length === 0) return -1;
   const key = normalizeCategoryName(categories[0] ?? "");
   if (!key) return -1;
@@ -91,7 +94,7 @@ export function spreadOverlappingSlots<
 >(slots: T[], frameWidth = FRAME_WIDTH, layers: readonly string[][] = []): T[] {
   const byGroup = new Map<string, T[]>();
   for (const s of slots) {
-    const band = slotBandIndex(s.categories, layers);
+    const band = layerIndexForCategories(s.categories, layers);
     const key = band >= 0 ? `band:${band}` : `region:${outfitRegion(s.categories)}`;
     const list = byGroup.get(key) ?? [];
     list.push(s);
@@ -202,59 +205,43 @@ export function builtinCategoryScale(categories: readonly string[]): number {
   return DEFAULT_ITEM_SCALE;
 }
 
-/** Clean a persisted per-category scale map (category signature → multiplier). */
-export function sanitizeCategoryScales(raw: unknown): Record<string, number> {
-  if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!key || typeof value !== "number" || !Number.isFinite(value)) continue;
-    out[key] = clampItemScale(value);
-  }
-  return out;
-}
+/** A remembered position and/or size for one piece in one combination. */
+export type ComboLayout = { x?: number; y?: number; scale?: number };
 
 /**
- * The sorted, normalized categories that share a visual layer with this slot's
- * category (the category itself included). Empty when it isn't in any layer.
+ * Identity of a piece within the exact set of categories it is placed *with* in
+ * its visual layer. `present` is the categories currently in the outfit that
+ * share the piece's layer (its own included). So a shirt alone, a shirt beside a
+ * jacket, and a shirt with a jacket and a sweater each get a distinct key — every
+ * combination keeps its own position and size, and dropping a piece re-keys the
+ * survivors back to whatever that smaller combination last used.
  */
-export function layerMembership(
+export function combinationKey(
   categories: readonly string[],
-  layers: readonly string[][],
-): string[] {
-  const key = normalizeCategoryName(categories[0] ?? "");
-  if (!key) return [];
-  const layer = layers.find((l) => l.some((c) => normalizeCategoryName(c) === key));
-  if (!layer) return [];
-  return [...new Set(layer.map((c) => normalizeCategoryName(c)).filter(Boolean))].sort();
-}
-
-/**
- * Key for a remembered drag position: the slot's own category rule plus the
- * exact set of categories sharing its visual layer. A shirt alone in a layer and
- * a shirt beside a jacket get different keys, so each layout is remembered
- * separately and unseen combinations fall back to the default placement.
- */
-export function slotPositionKey(
-  categories: readonly string[],
-  layers: readonly string[][],
+  present: readonly string[],
 ): string {
-  return `${categoryListSignature(categories)}@${layerMembership(categories, layers).join(",")}`;
+  const set = [...new Set(present.map((c) => normalizeCategoryName(c)).filter(Boolean))].sort();
+  return `${categoryListSignature(categories)}@${set.join(",")}`;
 }
 
-/** Clean persisted per-configuration drag positions (key → {x, y}). */
-export function sanitizeLayerPositions(raw: unknown): Record<string, { x: number; y: number }> {
+/** Clean the persisted per-combination layouts (key → {x?, y?, scale?}). */
+export function sanitizeComboLayouts(raw: unknown): Record<string, ComboLayout> {
   if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, { x: number; y: number }> = {};
+  const out: Record<string, ComboLayout> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!key || typeof value !== "object" || value == null) continue;
     const v = value as Record<string, unknown>;
-    const x = typeof v.x === "number" && Number.isFinite(v.x) ? v.x : null;
-    const y = typeof v.y === "number" && Number.isFinite(v.y) ? v.y : null;
-    if (x == null || y == null) continue;
-    out[key] = {
-      x: Math.min(FRAME_WIDTH, Math.max(0, x)),
-      y: Math.min(FRAME_HEIGHT, Math.max(0, y)),
-    };
+    const layout: ComboLayout = {};
+    if (typeof v.x === "number" && Number.isFinite(v.x)) {
+      layout.x = Math.min(FRAME_WIDTH, Math.max(0, v.x));
+    }
+    if (typeof v.y === "number" && Number.isFinite(v.y)) {
+      layout.y = Math.min(FRAME_HEIGHT, Math.max(0, v.y));
+    }
+    if (typeof v.scale === "number" && Number.isFinite(v.scale)) {
+      layout.scale = clampItemScale(v.scale);
+    }
+    if (layout.x != null || layout.y != null || layout.scale != null) out[key] = layout;
   }
   return out;
 }

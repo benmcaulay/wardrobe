@@ -3,13 +3,12 @@ import {
   builtinCategoryScale,
   builtinSlotLayout,
   clampItemScale,
-  layerMembership,
+  combinationKey,
+  layerIndexForCategories,
   outfitSlotDefaultKey,
   resolveSlotLayout,
-  sanitizeCategoryScales,
-  sanitizeLayerPositions,
+  sanitizeComboLayouts,
   sanitizeOutfitSlotDefaults,
-  slotPositionKey,
 } from "../lib/outfit-slot-defaults";
 
 describe("outfitSlotDefaultKey", () => {
@@ -42,20 +41,12 @@ describe("sanitizeOutfitSlotDefaults", () => {
   });
 });
 
-describe("category scales", () => {
+describe("item scale", () => {
   it("clamps a single scale to the allowed range, defaulting to 1", () => {
     expect(clampItemScale(1.4)).toBe(1.4);
     expect(clampItemScale(9)).toBe(5);
     expect(clampItemScale(0.1)).toBe(0.5);
     expect(clampItemScale("nope")).toBe(1);
-  });
-
-  it("keeps only finite numeric entries, each clamped", () => {
-    expect(sanitizeCategoryScales({ shirt: 1.4, hat: 9, bad: "x", "": 1.2 })).toEqual({
-      shirt: 1.4,
-      hat: 5,
-    });
-    expect(sanitizeCategoryScales(null)).toEqual({});
   });
 
   it("defaults jackets and pants to 2x, everything else to 1x", () => {
@@ -67,38 +58,48 @@ describe("category scales", () => {
   });
 });
 
-describe("slotPositionKey", () => {
-  it("differs by what else shares the piece's visual layer", () => {
-    const alone = slotPositionKey(["shirt"], [["shirt"]]);
-    const withJacket = slotPositionKey(["shirt"], [["jacket", "shirt"]]);
-    expect(alone).not.toBe(withJacket);
-  });
-
-  it("is stable regardless of the layer's category order", () => {
-    expect(slotPositionKey(["shirt"], [["jacket", "shirt"]])).toBe(
-      slotPositionKey(["shirt"], [["shirt", "jacket"]]),
-    );
-  });
-
-  it("is unaffected by other, unrelated layers", () => {
-    const a = slotPositionKey(["shirt"], [["shirt"], ["pants"]]);
-    const b = slotPositionKey(["shirt"], [["shirt"], ["shoes"]]);
-    expect(a).toBe(b);
-  });
-
-  it("falls back to an empty membership when the category isn't in a layer", () => {
-    expect(layerMembership(["shirt"], [["pants"]])).toEqual([]);
-    expect(slotPositionKey(["shirt"], [])).toBe(slotPositionKey(["shirt"], [["pants"]]));
+describe("layerIndexForCategories", () => {
+  it("finds the layer holding the category, or -1", () => {
+    const layers = [["hat"], ["shirt", "jacket"]];
+    expect(layerIndexForCategories(["shirt"], layers)).toBe(1);
+    expect(layerIndexForCategories(["hat"], layers)).toBe(0);
+    expect(layerIndexForCategories(["shoes"], layers)).toBe(-1);
+    expect(layerIndexForCategories(["shirt"], [])).toBe(-1);
   });
 });
 
-describe("sanitizeLayerPositions", () => {
-  it("clamps coordinates to the frame and drops malformed entries", () => {
-    const out = sanitizeLayerPositions({
-      "shirt@shirt": { x: -5, y: 9999 },
-      bad: { x: "z", y: 1 },
-      alsoBad: 3,
+describe("combinationKey", () => {
+  it("differs by the set of categories present together", () => {
+    const alone = combinationKey(["shirt"], ["shirt"]);
+    const withJacket = combinationKey(["shirt"], ["shirt", "jacket"]);
+    const allThree = combinationKey(["shirt"], ["shirt", "jacket", "sweater/hoodie"]);
+    expect(new Set([alone, withJacket, allThree]).size).toBe(3);
+  });
+
+  it("is stable regardless of order or duplicates in the present set", () => {
+    expect(combinationKey(["shirt"], ["jacket", "shirt", "jacket"])).toBe(
+      combinationKey(["shirt"], ["shirt", "jacket"]),
+    );
+  });
+
+  it("keys each piece by its own category within the same combination", () => {
+    const present = ["shirt", "jacket"];
+    expect(combinationKey(["shirt"], present)).not.toBe(combinationKey(["jacket"], present));
+  });
+});
+
+describe("sanitizeComboLayouts", () => {
+  it("keeps present fields, clamps them, and drops empty/malformed entries", () => {
+    const out = sanitizeComboLayouts({
+      "shirt@shirt": { x: -5, y: 9999, scale: 9 },
+      "jacket@jacket,shirt": { scale: 1.5 },
+      empty: {},
+      bad: 3,
     });
-    expect(out).toEqual({ "shirt@shirt": { x: 0, y: 960 } });
+    expect(out).toEqual({
+      "shirt@shirt": { x: 0, y: 960, scale: 5 },
+      "jacket@jacket,shirt": { scale: 1.5 },
+    });
+    expect(sanitizeComboLayouts(null)).toEqual({});
   });
 });

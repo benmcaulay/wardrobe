@@ -50,10 +50,8 @@ export type StylePrefs = {
   outfitLayerOrder?: string[];
   /** Vertical placement bands — each entry is a layer (top→bottom) of category names. */
   outfitVisualLayers?: string[][];
-  /** Per-category size multiplier for placed pieces (category signature → scale). */
-  outfitCategoryScales?: Record<string, number>;
-  /** Remembered drag positions keyed by slot + visual-layer configuration. */
-  outfitLayerPositions?: Record<string, { x: number; y: number }>;
+  /** Remembered position + size per piece per placed-together combination. */
+  outfitComboLayouts?: Record<string, { x?: number; y?: number; scale?: number }>;
 };
 
 export function encode<T>(value: T): string {

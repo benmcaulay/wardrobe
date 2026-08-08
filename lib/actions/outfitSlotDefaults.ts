@@ -5,67 +5,42 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { decode, encode, type StylePrefs } from "@/lib/json";
 import {
-  clampItemScale,
   outfitSlotDefaultKey,
-  sanitizeCategoryScales,
+  sanitizeComboLayouts,
   sanitizeLayerOrder,
-  sanitizeLayerPositions,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
+  type ComboLayout,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
 
-/** Remember a piece's dragged position for its slot + visual-layer combination. */
-export async function saveOutfitLayerPosition(
+/**
+ * Remember a piece's position and/or size for one placed-together combination.
+ * The patch is merged into the existing entry so a drag (x/y) and a resize
+ * (scale) accumulate instead of overwriting one another.
+ */
+export async function saveOutfitComboLayout(
   key: string,
-  pos: { x: number; y: number },
+  patch: ComboLayout,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
   const k = key.trim();
-  if (!k) return { ok: false, error: "Missing position key." };
+  if (!k) return { ok: false, error: "Missing combination key." };
 
   const row = await prisma.user.findUnique({
     where: { id: user.id },
     select: { stylePrefs: true },
   });
   const prefs = decode<StylePrefs>(row?.stylePrefs, {});
-  const existing = sanitizeLayerPositions(prefs.outfitLayerPositions);
-  const clean = sanitizeLayerPositions({ [k]: pos });
-  const entry = clean[k];
-  if (!entry) return { ok: false, error: "Invalid position." };
+  const existing = sanitizeComboLayouts(prefs.outfitComboLayouts);
+  const merged = sanitizeComboLayouts({ [k]: { ...existing[k], ...patch } });
+  const entry = merged[k];
+  if (!entry) return { ok: false, error: "Invalid layout." };
 
   await prisma.user.update({
     where: { id: user.id },
     data: {
-      stylePrefs: encode({ ...prefs, outfitLayerPositions: { ...existing, [k]: entry } }),
-    },
-  });
-
-  revalidatePath("/closet/outfits");
-  return { ok: true };
-}
-
-/** Persist the size multiplier for one category (all pieces of that type). */
-export async function saveOutfitCategoryScale(
-  signature: string,
-  scale: number,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await requireUser();
-  const sig = signature.trim();
-  if (!sig) return { ok: false, error: "Missing category." };
-  const clean = clampItemScale(scale);
-
-  const row = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: { stylePrefs: true },
-  });
-  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
-  const existing = sanitizeCategoryScales(prefs.outfitCategoryScales);
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      stylePrefs: encode({ ...prefs, outfitCategoryScales: { ...existing, [sig]: clean } }),
+      stylePrefs: encode({ ...prefs, outfitComboLayouts: { ...existing, [k]: entry } }),
     },
   });
 
