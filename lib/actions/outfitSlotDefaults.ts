@@ -8,8 +8,31 @@ import {
   outfitSlotDefaultKey,
   sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
+  sanitizeVisualLayers,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
+
+/** Persist the outfit vertical layers (top→bottom bands of category names). */
+export async function saveOutfitVisualLayers(
+  layers: string[][],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = sanitizeVisualLayers(layers);
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stylePrefs: encode({ ...prefs, outfitVisualLayers: clean }) },
+  });
+
+  revalidatePath("/closet/outfits");
+  return { ok: true };
+}
 
 /** Persist the outfit stack order (category signatures, frontmost first). */
 export async function saveOutfitLayerOrder(

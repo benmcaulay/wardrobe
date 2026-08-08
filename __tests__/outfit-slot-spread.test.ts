@@ -91,3 +91,35 @@ describe("outfit layer order", () => {
     expect(orderSlotsByLayer(slots, []).map((s) => s.id)).toEqual(["1", "2"]);
   });
 });
+
+import { sanitizeVisualLayers, visualLayerYFor } from "../lib/outfit-slot-defaults";
+
+describe("visual layers (vertical bands)", () => {
+  it("sanitizes: normalizes, dedupes across layers, drops empties", () => {
+    expect(sanitizeVisualLayers([["Hat", "hat"], [], ["Shirt", "Hat"], "x"])).toEqual([
+      ["hat"],
+      ["shirt"],
+    ]);
+  });
+
+  it("returns null when unassigned or no layers", () => {
+    expect(visualLayerYFor(["hat"], [], 960)).toBeNull();
+    expect(visualLayerYFor(["shoes"], [["hat"]], 960)).toBeNull();
+  });
+
+  it("maps layer index to a top→bottom band", () => {
+    const layers = [["hat"], ["shirt"], ["shoes"]];
+    const top = visualLayerYFor(["hat"], layers, 960)!;
+    const mid = visualLayerYFor(["shirt"], layers, 960)!;
+    const bot = visualLayerYFor(["shoes"], layers, 960)!;
+    expect(top).toBeLessThan(mid);
+    expect(mid).toBeLessThan(bot);
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(bot).toBeLessThanOrEqual(960);
+  });
+
+  it("uses the slot's first category to find its band", () => {
+    const layers = [["jacket"], ["pants"]];
+    expect(visualLayerYFor(["jacket", "shirt"], layers, 960)).toBe(visualLayerYFor(["jacket"], layers, 960));
+  });
+});

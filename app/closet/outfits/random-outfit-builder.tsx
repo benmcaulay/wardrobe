@@ -23,11 +23,13 @@ import {
   computeFrameScale,
   toFrameSpace,
 } from "@/lib/outfit-frame-scale";
-import { saveOutfitLayerOrder, saveOutfitSlotDefault } from "@/lib/actions/outfitSlotDefaults";
+import {
+  saveOutfitLayerOrder,
+  saveOutfitVisualLayers,
+} from "@/lib/actions/outfitSlotDefaults";
 import {
   orderSlotsByLayer,
   resolveSlotLayout,
-  slotCategoryLabel,
   spreadOverlappingSlots,
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
@@ -68,6 +70,7 @@ type Props = {
   colorOptions: Color[];
   initialSlotDefaults: OutfitSlotDefaults;
   initialLayerOrder: string[];
+  initialVisualLayers: string[][];
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -85,6 +88,7 @@ export function RandomOutfitBuilder({
   colorOptions,
   initialSlotDefaults,
   initialLayerOrder,
+  initialVisualLayers,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
@@ -111,12 +115,15 @@ export function RandomOutfitBuilder({
   const layerOrderRef = useRef(layerOrder);
   layerOrderRef.current = layerOrder;
   const [dragStackIndex, setDragStackIndex] = useState<number | null>(null);
+  const [visualLayers, setVisualLayers] = useState<string[][]>(initialVisualLayers);
+  const visualLayersRef = useRef(visualLayers);
+  visualLayersRef.current = visualLayers;
+  const [closetSearch, setClosetSearch] = useState("");
+  const [dragCategory, setDragCategory] = useState<string | null>(null);
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [slotDefaults, setSlotDefaults] = useState<OutfitSlotDefaults>(initialSlotDefaults);
-  const [defaultSaveMessage, setDefaultSaveMessage] = useState<string | null>(null);
-  const [defaultSavePending, setDefaultSavePending] = useState(false);
   const [processedImageUrls, setProcessedImageUrls] = useState<Record<string, string>>({});
   const processedImageUrlsRef = useRef(processedImageUrls);
   processedImageUrlsRef.current = processedImageUrls;
@@ -208,8 +215,16 @@ export function RandomOutfitBuilder({
   }, [initialSlotDefaults]);
 
   useEffect(() => {
-    setSlots((prev) => syncSlotsWithRules(prev, categoryRules, slotDefaults, layerOrderRef.current));
-  }, [categoryRules, slotDefaults]);
+    setSlots((prev) =>
+      syncSlotsWithRules(
+        prev,
+        categoryRules,
+        slotDefaults,
+        layerOrderRef.current,
+        visualLayers.filter((l) => l.length > 0),
+      ),
+    );
+  }, [categoryRules, slotDefaults, visualLayers]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -264,6 +279,29 @@ export function RandomOutfitBuilder({
     );
   }, [items, selected]);
 
+  // Front-page-style text search over the closet list (name/brand/color/etc.).
+  const searchedAssignable = useMemo(() => {
+    const q = closetSearch.trim().toLowerCase();
+    if (!q) return assignableItems;
+    return assignableItems.filter((it) => {
+      const hay = [
+        it.name,
+        it.brand ?? "",
+        it.category,
+        it.subcategory ?? "",
+        it.pattern ?? "",
+        it.material ?? "",
+        it.notes ?? "",
+        it.season,
+        it.styleTags,
+        ...it.colors.map((c) => c.name),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [assignableItems, closetSearch]);
+
   async function ensurePieceUrl(item: RandomOutfitItem): Promise<string> {
     if (processedImageUrlsRef.current[item.id]) return processedImageUrlsRef.current[item.id]!;
     const out = await resolveOutfitPieceDisplayUrl(item.imagePath);
@@ -291,41 +329,6 @@ export function RandomOutfitBuilder({
       ),
     );
     setSpinError(null);
-  }
-
-  async function saveSelectedSlotDefault() {
-    if (!selected) return;
-    setDefaultSaveMessage(null);
-    setDefaultSavePending(true);
-    const layout = { x: selected.x, y: selected.y, scale: selected.scale };
-    const res = await saveOutfitSlotDefault(selected.categories, layout);
-    setDefaultSavePending(false);
-    if (!res.ok) {
-      setDefaultSaveMessage(res.error);
-      return;
-    }
-    const key = categoryListSignature(selected.categories);
-    setSlotDefaults((prev) => ({ ...prev, [key]: layout }));
-    setDefaultSaveMessage(`Saved default for ${slotCategoryLabel(selected.categories)}.`);
-  }
-
-  function applyDefaultLayoutToSlot(slotId: string) {
-    setSlots((prev) => {
-      const target = prev.find((s) => s.id === slotId);
-      if (!target) return prev;
-      const sig = categoryListSignature(target.categories);
-      let index = 0;
-      for (const slot of prev) {
-        if (slot.id === slotId) break;
-        if (categoryListSignature(slot.categories) === sig) index += 1;
-      }
-      const layout = resolveSlotLayout(target.categories, index, slotDefaults);
-      return prev.map((s) =>
-        s.id === slotId
-          ? { ...s, x: layout.x, y: layout.y, scale: layout.scale, scaleTouched: false }
-          : s,
-      );
-    });
   }
 
   // Tap a chip in the single row: add a one-of rule, or remove it. Categories
@@ -484,6 +487,36 @@ export function RandomOutfitBuilder({
     }
     setLayerOrder(sigs);
     void saveOutfitLayerOrder(sigs);
+  }
+
+  // --- Visual layers (vertical bands) -------------------------------------
+  function updateVisualLayers(next: string[][]) {
+    setVisualLayers(next);
+    void saveOutfitVisualLayers(next); // server drops empty layers on save
+  }
+
+  function addVisualLayer() {
+    updateVisualLayers([...visualLayers, []]);
+  }
+
+  function assignCategoryToLayer(cat: string, layerIndex: number) {
+    const key = normalizeCategoryName(cat);
+    if (!key) return;
+    const stripped = visualLayers.map((layer) =>
+      layer.filter((c) => normalizeCategoryName(c) !== key),
+    );
+    if (layerIndex < 0 || layerIndex >= stripped.length) return;
+    stripped[layerIndex] = [...stripped[layerIndex]!, key];
+    updateVisualLayers(stripped);
+  }
+
+  function removeCategoryFromLayers(cat: string) {
+    const key = normalizeCategoryName(cat);
+    updateVisualLayers(visualLayers.map((layer) => layer.filter((c) => normalizeCategoryName(c) !== key)));
+  }
+
+  function removeVisualLayer(layerIndex: number) {
+    updateVisualLayers(visualLayers.filter((_, i) => i !== layerIndex));
   }
 
   function saveOutfit() {
@@ -700,6 +733,75 @@ export function RandomOutfitBuilder({
               </ul>
             </div>
           )}
+
+          <div className="w-full rounded-2xl border border-ink/10 bg-white p-3 space-y-2 text-left">
+            <div className="text-[11px] uppercase tracking-wide text-ink-muted">Your closet</div>
+            <input
+              type="search"
+              value={closetSearch}
+              onChange={(e) => setClosetSearch(e.target.value)}
+              placeholder="Search name, brand, color, season, tags…"
+              aria-label="Search closet"
+              className="w-full rounded-full border border-ink/10 bg-paper px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            />
+            <p className="text-xs text-ink-muted">
+              {selected
+                ? `Tap a piece to fill this slot (${formatCategoryList(selected.categories)}).`
+                : "Select a slot on the frame, then tap a piece to assign it."}
+            </p>
+            <ul className="space-y-1 max-h-72 overflow-auto pr-1">
+              {searchedAssignable.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    disabled={!selected}
+                    onClick={() => void assignItemToSlot(item)}
+                    className="w-full flex items-center gap-2 text-sm rounded-lg px-1.5 py-1.5 hover:bg-paper-warm disabled:opacity-50 disabled:hover:bg-transparent text-left"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={thumbnailUrl(item.imagePath)}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover bg-paper-warm flex-shrink-0"
+                      style={{
+                        transform: itemTileImageTransform({
+                          thumbZoom: item.thumbZoom,
+                          mirror: item.mirror,
+                        }),
+                      }}
+                    />
+                    <span className="truncate flex-1">{item.name}</span>
+                    <span className="text-ink-muted capitalize shrink-0">{item.category}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {searchedAssignable.length === 0 && (
+              <p className="text-xs italic text-ink-muted">No pieces match.</p>
+            )}
+          </div>
+
+          <div className="w-full rounded-2xl border border-ink/10 bg-white p-4 space-y-2 text-left">
+            <div className="text-[11px] uppercase tracking-wide text-ink-muted">Save outfit</div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={outfitName}
+                onChange={(e) => setOutfitName(e.target.value)}
+                placeholder="Outfit name"
+                className="flex-1 min-w-0 rounded-full border border-ink/10 px-3 py-1.5 text-sm bg-paper"
+              />
+              <button
+                type="button"
+                onClick={saveOutfit}
+                disabled={!outfitName.trim() || !slots.some((s) => s.itemId) || pending}
+                className="rounded-full bg-ink text-paper px-4 py-1.5 text-sm disabled:opacity-50"
+              >
+                {pending ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {saveError && <p className="text-[11px] text-red-700">{saveError}</p>}
+          </div>
         </div>
         <section className="w-full md:w-[520px] xl:w-[560px] md:shrink-0 md:flex md:justify-center">
         {/* Reserves the on-screen footprint of the scaled canvas so the page
@@ -818,9 +920,12 @@ export function RandomOutfitBuilder({
                   <button
                     key={cat}
                     type="button"
+                    draggable
+                    onDragStart={() => setDragCategory(cat)}
+                    onDragEnd={() => setDragCategory(null)}
                     onClick={() => toggleSimpleCategory(cat)}
                     disabled={locked}
-                    title={locked ? "Managed in multi-select below" : undefined}
+                    title={locked ? "Managed in multi-select below" : "Tap to include · drag into a layer"}
                     className={`rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
                       active
                         ? "bg-ink text-paper border-ink"
@@ -914,6 +1019,100 @@ export function RandomOutfitBuilder({
                 </button>
               </div>
             </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
+          <div className="text-[11px] uppercase tracking-wide text-ink-muted">Visual layers</div>
+          <p className="text-sm text-ink-muted">
+            Drag category chips into a layer to set how high or low they sit on the frame. Top layer
+            = top of the body; items in the same layer sit side by side.
+          </p>
+          {visualLayers.length === 0 ? (
+            <div
+              onDragOver={(e) => {
+                if (dragCategory) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragCategory) {
+                  updateVisualLayers([[normalizeCategoryName(dragCategory)]]);
+                  setDragCategory(null);
+                }
+              }}
+              className={`rounded-xl border border-dashed p-4 text-center text-xs transition ${
+                dragCategory ? "border-accent bg-accent-soft/20 text-ink" : "border-ink/20 text-ink-muted"
+              }`}
+            >
+              Drag a category here to start the top layer.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {visualLayers.map((layer, i) => (
+                <li
+                  key={i}
+                  onDragOver={(e) => {
+                    if (dragCategory) e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragCategory) {
+                      assignCategoryToLayer(dragCategory, i);
+                      setDragCategory(null);
+                    }
+                  }}
+                  className={`rounded-xl border p-2 transition ${
+                    dragCategory ? "border-accent bg-accent-soft/10" : "border-ink/10 bg-paper-warm/40"
+                  }`}
+                >
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-ink-muted">
+                      Layer {i + 1}
+                      {i === 0 ? " · top" : i === visualLayers.length - 1 ? " · bottom" : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeVisualLayer(i)}
+                      aria-label="Remove layer"
+                      className="flex h-5 w-5 items-center justify-center rounded-full text-ink-muted hover:bg-ink/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {layer.length === 0 ? (
+                    <p className="text-xs italic text-ink-muted/70">Drop categories here</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {layer.map((cat) => (
+                        <span
+                          key={cat}
+                          className="inline-flex items-center gap-1 rounded-full bg-ink pl-2.5 pr-1 py-1 text-xs uppercase tracking-wide capitalize text-paper"
+                        >
+                          {cat}
+                          <button
+                            type="button"
+                            onClick={() => removeCategoryFromLayers(cat)}
+                            aria-label={`Remove ${cat} from layer`}
+                            className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-paper/20"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {visualLayers.length > 0 && (
+            <button
+              type="button"
+              onClick={addVisualLayer}
+              className="w-full rounded-lg border border-dashed border-ink/20 py-2 text-xs text-ink-muted transition hover:border-ink/40 hover:text-ink"
+            >
+              + Add visual layer
+            </button>
           )}
         </div>
 
@@ -1030,29 +1229,8 @@ export function RandomOutfitBuilder({
               </button>
             </div>
             <p className="text-xs text-ink-muted">
-              Drag the slot on the frame to adjust placement, then save as the default for this
-              category.
+              Set vertical placement with the Visual layers box; drag on the frame for fine tweaks.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void saveSelectedSlotDefault()}
-                disabled={defaultSavePending}
-                className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper-warm disabled:opacity-50"
-              >
-                {defaultSavePending ? "Saving…" : `Save default for ${slotCategoryLabel(selected.categories)}`}
-              </button>
-              <button
-                type="button"
-                onClick={() => applyDefaultLayoutToSlot(selected.id)}
-                className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper-warm"
-              >
-                Reset to default
-              </button>
-            </div>
-            {defaultSaveMessage && (
-              <p className="text-[11px] text-ink-muted">{defaultSaveMessage}</p>
-            )}
             <button
               type="button"
               onClick={() => removeSlot(selected.id)}
@@ -1063,68 +1241,6 @@ export function RandomOutfitBuilder({
           </div>
         )}
 
-        <div className="rounded-2xl border border-ink/10 bg-white p-3 max-h-64 overflow-auto">
-          <div className="text-[11px] uppercase tracking-wide text-ink-muted mb-2">Your closet</div>
-          {selected ? (
-            <p className="text-sm text-ink-muted mb-2">
-              Tap a piece to fill this slot ({formatCategoryList(selected.categories)}).
-            </p>
-          ) : (
-            <p className="text-sm text-ink-muted mb-2">Select a slot on the frame to assign a piece.</p>
-          )}
-          <ul className="space-y-1">
-            {assignableItems.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  disabled={!selected}
-                  onClick={() => void assignItemToSlot(item)}
-                  className="w-full flex items-center gap-2 text-sm rounded-lg px-1.5 py-1.5 hover:bg-paper-warm disabled:opacity-50 disabled:hover:bg-transparent text-left"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={thumbnailUrl(item.imagePath)}
-                    alt=""
-                    className="w-8 h-8 rounded object-cover bg-paper-warm flex-shrink-0"
-                    style={{
-                      transform: itemTileImageTransform({
-                        thumbZoom: item.thumbZoom,
-                        mirror: item.mirror,
-                      }),
-                    }}
-                  />
-                  <span className="truncate flex-1">{item.name}</span>
-                  <span className="text-ink-muted capitalize shrink-0">{item.category}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {selected && assignableItems.length === 0 && (
-            <p className="text-sm text-ink-muted italic mt-2">No closet pieces match this slot.</p>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-2">
-          <div className="text-[11px] uppercase tracking-wide text-ink-muted">Save spin</div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={outfitName}
-              onChange={(e) => setOutfitName(e.target.value)}
-              placeholder="Outfit name"
-              className="flex-1 rounded-full border border-ink/10 px-3 py-1.5 text-xs bg-paper"
-            />
-            <button
-              type="button"
-              onClick={saveOutfit}
-              disabled={!outfitName.trim() || !slots.some((s) => s.itemId) || pending}
-              className="rounded-full bg-ink text-paper px-3 py-1.5 text-xs disabled:opacity-50"
-            >
-              {pending ? "Saving…" : "Save"}
-            </button>
-          </div>
-          {saveError && <p className="text-[11px] text-red-700">{saveError}</p>}
-        </div>
       </aside>
     </div>
 
@@ -1217,6 +1333,7 @@ function syncSlotsWithRules(
   rules: CategoryRule[],
   defaults: OutfitSlotDefaults,
   layerOrder: string[],
+  visualLayers: string[][],
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1246,7 +1363,7 @@ function syncSlotsWithRules(
     if (used < pool.length) {
       synced.push(pool[used]!);
     } else {
-      const layout = resolveSlotLayout(req.categories, used, defaults);
+      const layout = resolveSlotLayout(req.categories, used, defaults, visualLayers);
       synced.push({
         id: crypto.randomUUID(),
         categories: req.categories,

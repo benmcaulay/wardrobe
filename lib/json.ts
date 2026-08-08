@@ -48,6 +48,8 @@ export type StylePrefs = {
   outfitSlotDefaults?: Record<string, { x: number; y: number; scale: number }>;
   /** Outfit layer order — category signatures, frontmost first (drag to reorder the stack). */
   outfitLayerOrder?: string[];
+  /** Vertical placement bands — each entry is a layer (top→bottom) of category names. */
+  outfitVisualLayers?: string[][];
 };
 
 export function encode<T>(value: T): string {
