@@ -565,12 +565,12 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
           {placedPieces.length > 0 && (
             <div className="w-full space-y-2.5 pt-1">
               {paletteColors.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex h-7 w-full overflow-hidden rounded-lg border border-ink/10">
                   {paletteColors.map((c) => (
-                    <span
+                    <div
                       key={c.name}
                       title={c.name}
-                      className="h-4 w-4 rounded-full border border-ink/15"
+                      className="flex-1"
                       style={{ backgroundColor: c.hex }}
                     />
                   ))}
