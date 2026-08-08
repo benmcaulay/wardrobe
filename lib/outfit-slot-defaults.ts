@@ -184,7 +184,7 @@ export function visualLayerYFor(
 /** Bounds for a placed-piece size multiplier. */
 export const DEFAULT_ITEM_SCALE = 1;
 export const MIN_ITEM_SCALE = 0.5;
-export const MAX_ITEM_SCALE = 2.2;
+export const MAX_ITEM_SCALE = 5;
 
 /** Clamp a single scale multiplier to the allowed range (falls back to 1). */
 export function clampItemScale(raw: unknown): number {

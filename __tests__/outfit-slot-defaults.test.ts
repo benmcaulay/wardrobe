@@ -42,7 +42,7 @@ describe("sanitizeOutfitSlotDefaults", () => {
 describe("category scales", () => {
   it("clamps a single scale to the allowed range, defaulting to 1", () => {
     expect(clampItemScale(1.4)).toBe(1.4);
-    expect(clampItemScale(9)).toBe(2.2);
+    expect(clampItemScale(9)).toBe(5);
     expect(clampItemScale(0.1)).toBe(0.5);
     expect(clampItemScale("nope")).toBe(1);
   });
@@ -50,7 +50,7 @@ describe("category scales", () => {
   it("keeps only finite numeric entries, each clamped", () => {
     expect(sanitizeCategoryScales({ shirt: 1.4, hat: 9, bad: "x", "": 1.2 })).toEqual({
       shirt: 1.4,
-      hat: 2.2,
+      hat: 5,
     });
     expect(sanitizeCategoryScales(null)).toEqual({});
   });

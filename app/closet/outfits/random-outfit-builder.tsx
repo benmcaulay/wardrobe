@@ -17,7 +17,6 @@ import {
 import { CategorySlotIcon } from "@/components/category-slot-icon";
 import { itemTileImageTransform } from "@/lib/item-tile-meta";
 import { OUTFIT_PIECE_IMG_CLASS, resolveOutfitPieceDisplayUrl } from "@/lib/outfit-piece-image";
-import { swapLayerOrder } from "@/lib/outfit-layer";
 import {
   clampToFrame,
   computeFrameScale,
@@ -471,11 +470,6 @@ export function RandomOutfitBuilder({
         return locked && !s.itemId ? s : { ...s, locked };
       }),
     );
-  }
-
-  function moveSlotLayer(dir: -1 | 1) {
-    if (!selected) return;
-    setSlots((prev) => swapLayerOrder(prev, selected.id, dir) ?? prev);
   }
 
   // Drag-reorder the piece list (frontmost first). Reassigns z so the top of the
@@ -1239,25 +1233,15 @@ export function RandomOutfitBuilder({
         {selected && (
           <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
             <div className="text-[11px] uppercase tracking-wide text-ink-muted">Selected slot</div>
-            <p className="text-sm capitalize">{formatCategoryList(selected.categories)}</p>
-            {selected.itemId && (
-              <p className="text-sm text-ink-muted truncate">
-                {itemsById.get(selected.itemId)?.name}
-              </p>
-            )}
-            <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="accent-ink"
-                checked={!!selected.locked}
-                disabled={!selected.itemId}
-                onChange={() => toggleSlotLock(selected.id)}
-              />
-              <span>
-                Lock piece{" "}
-                <span className="text-ink-muted">(keeps this item when you spin again)</span>
-              </span>
-            </label>
+            <p className="text-sm truncate">
+              <span className="capitalize">{formatCategoryList(selected.categories)}</span>
+              {selected.itemId && (
+                <span className="text-ink-muted">
+                  {" · "}
+                  {itemsById.get(selected.itemId)?.name}
+                </span>
+              )}
+            </p>
             <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Size</label>
             <div className="flex items-center gap-2">
               <input
@@ -1278,25 +1262,9 @@ export function RandomOutfitBuilder({
               </span>
             </div>
             <p className="text-xs text-ink-muted">Sizes every piece of this category.</p>
-            <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Layer</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => moveSlotLayer(-1)}
-                className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper-warm"
-              >
-                Send back
-              </button>
-              <button
-                type="button"
-                onClick={() => moveSlotLayer(1)}
-                className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper-warm"
-              >
-                Bring forward
-              </button>
-            </div>
             <p className="text-xs text-ink-muted">
-              Set vertical placement with the Visual layers box; drag on the frame for fine tweaks.
+              Set vertical placement with the Visual layers box, layering by dragging the piece list;
+              drag on the frame for fine tweaks.
             </p>
             <button
               type="button"
