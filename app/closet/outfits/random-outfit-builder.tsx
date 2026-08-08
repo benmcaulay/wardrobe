@@ -651,8 +651,8 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
               so a generated outfit sits on a clean backdrop with no outline. */}
           {!slots.some((s) => s.itemId) && (
             <div className="pointer-events-none absolute inset-x-0 top-12 bottom-10 flex flex-col items-center">
-              <div className="h-28 w-28 rounded-full bg-ink/[0.07] ring-1 ring-ink/15" />
-              <div className="mt-4 w-48 flex-1 rounded-[90px] bg-ink/[0.06] ring-1 ring-ink/15" />
+              <div className="h-28 w-28 rounded-full bg-ink/[0.07] border border-ink/15" />
+              <div className="mt-4 w-48 flex-1 rounded-[90px] bg-ink/[0.06] border border-ink/15" />
             </div>
           )}
           {slots
@@ -671,9 +671,9 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                   data-outfit-slot
                   onPointerDown={(e) => startCanvasDrag(e, slot)}
                   className={`absolute -translate-x-1/2 -translate-y-1/2 touch-none overflow-hidden rounded-xl outline-none focus:outline-none ${
-                    isSelected ? "ring-1 ring-ink/30" : ""
+                    isSelected ? "ring-2 ring-ink" : ""
                   } ${item ? "" : "border-2 border-dashed border-ink/20 bg-white/80"} ${
-                    slot.locked ? "ring-2 ring-accent/50" : ""
+                    slot.locked ? "ring-2 ring-accent" : ""
                   }`}
                   style={{ left: slot.x, top: slot.y, zIndex: slot.z, width: size, height: size }}
                 >
