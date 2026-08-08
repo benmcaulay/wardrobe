@@ -65,6 +65,27 @@ describe("spreadOverlappingSlots", () => {
       expect(s.x).toBeLessThanOrEqual(560 - 90);
     }
   });
+
+  it("does NOT pull a shirt up to a jacket when they're in different visual layers", () => {
+    // Regression: jacket top band, shirt lower band — both region "top", but the
+    // bands must keep their own heights instead of averaging to a shared Y.
+    const jacket = slot("j", "jacket", 280, 200);
+    const shirt = slot("s", "shirt", 280, 400);
+    const layers = [["jacket"], ["shirt"]];
+    const out = spreadOverlappingSlots([jacket, shirt], 560, layers);
+    expect(out.find((s) => s.id === "j")!.y).toBe(200);
+    expect(out.find((s) => s.id === "s")!.y).toBe(400);
+    expect(out.find((s) => s.id === "j")!.x).toBe(280); // alone in its band → not spread
+    expect(out.find((s) => s.id === "s")!.x).toBe(280);
+  });
+
+  it("spreads pieces that share a visual layer side by side", () => {
+    const hat = slot("h", "hat", 280, 120);
+    const jacket = slot("j", "jacket", 280, 120);
+    const layers = [["hat", "jacket"], ["shirt"]];
+    const out = spreadOverlappingSlots([hat, jacket], 560, layers);
+    expect(out.find((s) => s.id === "h")!.x).not.toBe(out.find((s) => s.id === "j")!.x);
+  });
 });
 
 describe("outfit layer order", () => {

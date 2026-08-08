@@ -24,13 +24,17 @@ import {
   toFrameSpace,
 } from "@/lib/outfit-frame-scale";
 import {
+  saveOutfitItemScale,
   saveOutfitLayerOrder,
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
 import {
+  MAX_ITEM_SCALE,
+  MIN_ITEM_SCALE,
   orderSlotsByLayer,
   resolveSlotLayout,
   spreadOverlappingSlots,
+  visualLayerYFor,
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
 import { saveOutfitLayout } from "./actions";
@@ -71,6 +75,7 @@ type Props = {
   initialSlotDefaults: OutfitSlotDefaults;
   initialLayerOrder: string[];
   initialVisualLayers: string[][];
+  initialItemScale: number;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -89,6 +94,7 @@ export function RandomOutfitBuilder({
   initialSlotDefaults,
   initialLayerOrder,
   initialVisualLayers,
+  initialItemScale,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
@@ -120,6 +126,9 @@ export function RandomOutfitBuilder({
   visualLayersRef.current = visualLayers;
   const [closetSearch, setClosetSearch] = useState("");
   const [dragCategory, setDragCategory] = useState<string | null>(null);
+  const [visualLayersOpen, setVisualLayersOpen] = useState(false);
+  const [itemScale, setItemScale] = useState(initialItemScale);
+  const itemScaleSaveRef = useRef(initialItemScale);
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -489,6 +498,14 @@ export function RandomOutfitBuilder({
     void saveOutfitLayerOrder(sigs);
   }
 
+  // Persist the global item size once the user finishes dragging (not on every
+  // intermediate value), and only when it actually changed.
+  function commitItemScale() {
+    if (itemScale === itemScaleSaveRef.current) return;
+    itemScaleSaveRef.current = itemScale;
+    void saveOutfitItemScale(itemScale);
+  }
+
   // --- Visual layers (vertical bands) -------------------------------------
   function updateVisualLayers(next: string[][]) {
     setVisualLayers(next);
@@ -661,6 +678,24 @@ export function RandomOutfitBuilder({
                   ))}
                 </div>
               )}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] uppercase tracking-wide text-ink-muted shrink-0">
+                  Item size
+                </span>
+                <input
+                  type="range"
+                  min={MIN_ITEM_SCALE}
+                  max={MAX_ITEM_SCALE}
+                  step={0.05}
+                  value={itemScale}
+                  aria-label="Default item size"
+                  onChange={(e) => setItemScale(Number(e.target.value))}
+                  onPointerUp={commitItemScale}
+                  onKeyUp={commitItemScale}
+                  onBlur={commitItemScale}
+                  className="w-full accent-ink"
+                />
+              </div>
               <ul className="space-y-1.5 md:max-h-[440px] md:overflow-auto md:pr-1">
                 {placedPieces.map(({ slot, item }, index) => (
                   <li
@@ -843,7 +878,7 @@ export function RandomOutfitBuilder({
             .map((slot) => {
               const item = slot.itemId ? itemsById.get(slot.itemId) : null;
               const isSelected = slot.id === selectedSlotId;
-              const size = item ? BASE_PIECE_SIZE * slot.scale : SLOT_ICON_SIZE;
+              const size = item ? BASE_PIECE_SIZE * slot.scale * itemScale : SLOT_ICON_SIZE;
               const mirror = slot.mirror ?? item?.mirror ?? false;
               const thumbZoom = item?.thumbZoom ?? 1;
               return (
@@ -1023,7 +1058,38 @@ export function RandomOutfitBuilder({
         </div>
 
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
-          <div className="text-[11px] uppercase tracking-wide text-ink-muted">Visual layers</div>
+          <button
+            type="button"
+            onClick={() => setVisualLayersOpen((o) => !o)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+            aria-expanded={visualLayersOpen}
+          >
+            <span className="text-[11px] uppercase tracking-wide text-ink-muted">Visual layers</span>
+            <span className="flex items-center gap-2 text-[11px] text-ink-muted">
+              {!visualLayersOpen &&
+                (() => {
+                  const active = visualLayers.filter((l) => l.length > 0);
+                  const cats = active.reduce((n, l) => n + l.length, 0);
+                  return (
+                    <span>
+                      {cats === 0
+                        ? "Not set up"
+                        : `${active.length} layer${active.length === 1 ? "" : "s"} · ${cats} categor${
+                            cats === 1 ? "y" : "ies"
+                          }`}
+                    </span>
+                  );
+                })()}
+              <span
+                aria-hidden
+                className={`transition-transform ${visualLayersOpen ? "rotate-90" : ""}`}
+              >
+                ›
+              </span>
+            </span>
+          </button>
+          {visualLayersOpen && (
+            <>
           <p className="text-sm text-ink-muted">
             Drag category chips into a layer to set how high or low they sit on the frame. Top layer
             = top of the body; items in the same layer sit side by side.
@@ -1113,6 +1179,8 @@ export function RandomOutfitBuilder({
             >
               + Add visual layer
             </button>
+          )}
+            </>
           )}
         </div>
 
@@ -1361,7 +1429,12 @@ function syncSlotsWithRules(
     const used = usedBySig.get(req.sig) ?? 0;
     const pool = poolBySig.get(req.sig) ?? [];
     if (used < pool.length) {
-      synced.push(pool[used]!);
+      // Reuse the existing slot, but let the visual layers keep owning its
+      // vertical band — otherwise moving a category to a new layer wouldn't move
+      // an already-placed piece.
+      const existing = pool[used]!;
+      const bandY = visualLayerYFor(existing.categories, visualLayers);
+      synced.push(bandY == null ? existing : { ...existing, y: bandY });
     } else {
       const layout = resolveSlotLayout(req.categories, used, defaults, visualLayers);
       synced.push({
@@ -1376,7 +1449,11 @@ function syncSlotsWithRules(
     usedBySig.set(req.sig, used + 1);
   }
 
-  const positioned = spreadOverlappingSlots(synced.map((slot, i) => ({ ...slot, z: i + 1 })));
+  const positioned = spreadOverlappingSlots(
+    synced.map((slot, i) => ({ ...slot, z: i + 1 })),
+    FRAME_WIDTH,
+    visualLayers,
+  );
   // Layer by the saved stack order: frontmost signature gets the highest z.
   const frontToBack = orderSlotsByLayer(positioned, layerOrder);
   const total = frontToBack.length;

@@ -6,11 +6,34 @@ import { prisma } from "@/lib/db";
 import { decode, encode, type StylePrefs } from "@/lib/json";
 import {
   outfitSlotDefaultKey,
+  sanitizeItemScale,
   sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
+
+/** Persist the global default item-size multiplier for the outfit frame. */
+export async function saveOutfitItemScale(
+  scale: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = sanitizeItemScale(scale);
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stylePrefs: encode({ ...prefs, outfitItemScale: clean }) },
+  });
+
+  revalidatePath("/closet/outfits");
+  return { ok: true };
+}
 
 /** Persist the outfit vertical layers (top→bottom bands of category names). */
 export async function saveOutfitVisualLayers(

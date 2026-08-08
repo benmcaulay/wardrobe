@@ -67,26 +67,41 @@ export function outfitRegion(categories: readonly string[]): string {
   return "other";
 }
 
+/** Which visual-layer band a slot's first category belongs to, or -1. */
+function slotBandIndex(categories: readonly string[], layers: readonly string[][]): number {
+  if (layers.length === 0) return -1;
+  const key = normalizeCategoryName(categories[0] ?? "");
+  if (!key) return -1;
+  return layers.findIndex((layer) => layer.some((c) => normalizeCategoryName(c) === key));
+}
+
 /**
- * Offset slots that share a body region (e.g. shirt + jacket + sweater, or two
- * of the same category) so they sit beside each other instead of stacking
- * directly on top. Same-region pieces become a centered horizontal row.
+ * Offset slots that occupy the same vertical position so they sit beside each
+ * other instead of stacking directly on top.
+ *
+ * When visual layers are defined they are the source of truth for grouping: two
+ * pieces spread sideways only when they share a *layer*. A jacket in the top
+ * layer and a shirt in a lower layer live in different bands, so they keep their
+ * own heights (no more pulling the shirt up to the jacket). Without visual
+ * layers we fall back to body region, so the built-in layout still keeps a
+ * shirt + jacket from landing directly on top of each other.
  */
 export function spreadOverlappingSlots<
   T extends { id: string; categories: string[]; x: number; y: number },
->(slots: T[], frameWidth = FRAME_WIDTH): T[] {
-  const byRegion = new Map<string, T[]>();
+>(slots: T[], frameWidth = FRAME_WIDTH, layers: readonly string[][] = []): T[] {
+  const byGroup = new Map<string, T[]>();
   for (const s of slots) {
-    const region = outfitRegion(s.categories);
-    const list = byRegion.get(region) ?? [];
+    const band = slotBandIndex(s.categories, layers);
+    const key = band >= 0 ? `band:${band}` : `region:${outfitRegion(s.categories)}`;
+    const list = byGroup.get(key) ?? [];
     list.push(s);
-    byRegion.set(region, list);
+    byGroup.set(key, list);
   }
 
   const centerX = frameWidth / 2;
   const overrides = new Map<string, { x: number; y: number }>();
-  for (const [region, group] of byRegion) {
-    if (region === "other" || group.length < 2) continue;
+  for (const [key, group] of byGroup) {
+    if (key === "region:other" || group.length < 2) continue;
     const n = group.length;
     const step = Math.min(190, (frameWidth - 80) / n);
     const avgY = group.reduce((sum, s) => sum + s.y, 0) / n;
@@ -164,6 +179,17 @@ export function visualLayerYFor(
   const n = layers.length;
   if (n === 1) return (top + bottom) / 2;
   return top + ((bottom - top) * index) / (n - 1);
+}
+
+/** Global default multiplier for placed-piece size on the frame. */
+export const DEFAULT_ITEM_SCALE = 1;
+export const MIN_ITEM_SCALE = 0.5;
+export const MAX_ITEM_SCALE = 1.8;
+
+/** Clamp a persisted default item scale to the allowed range (falls back to 1). */
+export function sanitizeItemScale(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_ITEM_SCALE;
+  return Math.min(MAX_ITEM_SCALE, Math.max(MIN_ITEM_SCALE, raw));
 }
 
 /** Clean a persisted layer order — a list of category signatures, frontmost first. */
