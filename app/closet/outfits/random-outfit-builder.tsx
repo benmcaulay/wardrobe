@@ -24,6 +24,7 @@ import {
 } from "@/lib/outfit-frame-scale";
 import {
   saveOutfitComboLayout,
+  saveOutfitLayerArrangement,
   saveOutfitLayerOrder,
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
@@ -31,6 +32,7 @@ import {
   builtinCategoryScale,
   combinationKey,
   layerIndexForCategories,
+  layerSetKey,
   MAX_ITEM_SCALE,
   MIN_ITEM_SCALE,
   orderSlotsByLayer,
@@ -77,6 +79,7 @@ type Props = {
   initialLayerOrder: string[];
   initialVisualLayers: string[][];
   initialComboLayouts: Record<string, ComboLayout>;
+  initialLayerArrangements: Record<string, string[]>;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -96,6 +99,7 @@ export function RandomOutfitBuilder({
   initialLayerOrder,
   initialVisualLayers,
   initialComboLayouts,
+  initialLayerArrangements,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
@@ -136,6 +140,10 @@ export function RandomOutfitBuilder({
     useState<Record<string, ComboLayout>>(initialComboLayouts);
   const comboLayoutsRef = useRef(comboLayouts);
   comboLayoutsRef.current = comboLayouts;
+  const [arrangements, setArrangements] =
+    useState<Record<string, string[]>>(initialLayerArrangements);
+  const arrangementsRef = useRef(arrangements);
+  arrangementsRef.current = arrangements;
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -239,9 +247,31 @@ export function RandomOutfitBuilder({
         layerOrderRef.current,
         visualLayers.filter((l) => l.length > 0),
         comboLayoutsRef.current,
+        arrangementsRef.current,
       ),
     );
   }, [categoryRules, slotDefaults, visualLayers]);
+
+  // Lock in the left→right order the first time a multi-piece combination is
+  // shown. Later spins/loads reuse it; only a drag (below) rewrites it.
+  useEffect(() => {
+    const layers = visualLayers.filter((l) => l.length > 0);
+    if (layers.length === 0) return;
+    const bands = new Set(
+      slots.map((s) => layerIndexForCategories(s.categories, layers)).filter((i) => i >= 0),
+    );
+    const toSave: Record<string, string[]> = {};
+    for (const idx of bands) {
+      const order = layerOrderFromSlots(slots, layers, idx);
+      if (order.length < 2) continue;
+      const key = layerSetKey(order);
+      if (arrangementsRef.current[key]) continue;
+      toSave[key] = order;
+    }
+    if (Object.keys(toSave).length === 0) return;
+    setArrangements((prev) => ({ ...prev, ...toSave }));
+    for (const [k, v] of Object.entries(toSave)) void saveOutfitLayerArrangement(k, v);
+  }, [slots, visualLayers]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -604,6 +634,16 @@ export function RandomOutfitBuilder({
     const pos = { x: slot.x, y: slot.y };
     setComboLayouts((prev) => ({ ...prev, [key]: { ...prev[key], ...pos } }));
     void saveOutfitComboLayout(key, pos);
+
+    // A horizontal drag can reorder a multi-piece layer — relock the order.
+    const bandIdx = layerIndexForCategories(slot.categories, layers);
+    if (bandIdx < 0) return;
+    const order = layerOrderFromSlots(slotsRef.current, layers, bandIdx);
+    if (order.length < 2) return;
+    const setKey = layerSetKey(order);
+    if (arrangementsRef.current[setKey]?.join(",") === order.join(",")) return;
+    setArrangements((prev) => ({ ...prev, [setKey]: order }));
+    void saveOutfitLayerArrangement(setKey, order);
   }
 
   function handleFrameBackgroundPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -1403,6 +1443,24 @@ function comboKeyForSlot(
   return combinationKey(slot.categories, present);
 }
 
+/** Left→right order of the categories placed in one visual layer, by their x. */
+function layerOrderFromSlots(
+  slots: readonly CanvasSlot[],
+  layers: string[][],
+  bandIdx: number,
+): string[] {
+  return [
+    ...new Set(
+      slots
+        .filter((s) => layerIndexForCategories(s.categories, layers) === bandIdx)
+        .slice()
+        .sort((a, b) => a.x - b.x)
+        .map((s) => normalizeCategoryName(s.categories[0] ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+}
+
 function syncSlotsWithRules(
   slots: CanvasSlot[],
   rules: CategoryRule[],
@@ -1410,6 +1468,7 @@ function syncSlotsWithRules(
   layerOrder: string[],
   visualLayers: string[][],
   comboLayouts: Record<string, ComboLayout>,
+  arrangements: Record<string, string[]>,
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1475,6 +1534,7 @@ function syncSlotsWithRules(
     zStamped.filter((s) => !pinnedIds.has(s.id)),
     FRAME_WIDTH,
     visualLayers,
+    arrangements,
   );
   const spreadById = new Map(spread.map((s) => [s.id, s]));
   const positioned = zStamped.map((s) => spreadById.get(s.id) ?? s);

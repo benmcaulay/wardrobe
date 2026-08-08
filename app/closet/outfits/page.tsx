@@ -6,6 +6,7 @@ import { readItemTileMeta } from "@/lib/item-tile-meta";
 import { parseColors, parseStylePrefs } from "@/lib/json";
 import {
   sanitizeComboLayouts,
+  sanitizeLayerArrangements,
   sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
@@ -62,6 +63,7 @@ export default async function OutfitsPage() {
   const outfitLayerOrder = sanitizeLayerOrder(prefs.outfitLayerOrder);
   const outfitVisualLayers = sanitizeVisualLayers(prefs.outfitVisualLayers);
   const outfitComboLayouts = sanitizeComboLayouts(prefs.outfitComboLayouts);
+  const outfitLayerArrangements = sanitizeLayerArrangements(prefs.outfitLayerArrangements);
 
   const closetItems: RandomOutfitItem[] = items.map((item) => {
     const tile = readItemTileMeta(item);
@@ -105,6 +107,7 @@ export default async function OutfitsPage() {
         outfitLayerOrder={outfitLayerOrder}
         outfitVisualLayers={outfitVisualLayers}
         outfitComboLayouts={outfitComboLayouts}
+        outfitLayerArrangements={outfitLayerArrangements}
       />
     </main>
   );

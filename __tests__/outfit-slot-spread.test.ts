@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  layerSetKey,
   orderSlotsByLayer,
   outfitRegion,
+  sanitizeLayerArrangements,
   sanitizeLayerOrder,
   spreadOverlappingSlots,
 } from "../lib/outfit-slot-defaults";
@@ -85,6 +87,42 @@ describe("spreadOverlappingSlots", () => {
     const layers = [["hat", "jacket"], ["shirt"]];
     const out = spreadOverlappingSlots([hat, jacket], 560, layers);
     expect(out.find((s) => s.id === "h")!.x).not.toBe(out.find((s) => s.id === "j")!.x);
+  });
+
+  it("places a layer's pieces left→right in the saved arrangement, regardless of input order", () => {
+    const layers = [["shirt", "jacket", "sweater/hoodie"]];
+    const arrangement = { [layerSetKey(["shirt", "jacket", "sweater/hoodie"])]: ["jacket", "shirt", "sweater/hoodie"] };
+    // Input in a different order than the arrangement.
+    const input = [slot("s", "shirt"), slot("w", "sweater/hoodie"), slot("j", "jacket")];
+    const out = spreadOverlappingSlots(input, 560, layers, arrangement);
+    const byX = [...out].sort((a, b) => a.x - b.x).map((s) => s.categories[0]);
+    expect(byX).toEqual(["jacket", "shirt", "sweater/hoodie"]);
+  });
+
+  it("keeps the current order when no arrangement is saved (caller locks it in)", () => {
+    const layers = [["shirt", "jacket"]];
+    const input = [slot("j", "jacket"), slot("s", "shirt")];
+    const out = spreadOverlappingSlots(input, 560, layers, {});
+    const byX = [...out].sort((a, b) => a.x - b.x).map((s) => s.categories[0]);
+    expect(byX).toEqual(["jacket", "shirt"]);
+  });
+});
+
+describe("layerSetKey / sanitizeLayerArrangements", () => {
+  it("keys a set order-independently", () => {
+    expect(layerSetKey(["shirt", "jacket"])).toBe(layerSetKey(["jacket", "shirt"]));
+    expect(layerSetKey(["Shirt", "shirt"])).toBe("shirt");
+  });
+
+  it("normalizes, dedupes, and drops empty arrangements", () => {
+    expect(
+      sanitizeLayerArrangements({
+        "jacket,shirt": ["Jacket", "jacket", "Shirt"],
+        empty: [],
+        bad: "x",
+      }),
+    ).toEqual({ "jacket,shirt": ["jacket", "shirt"] });
+    expect(sanitizeLayerArrangements(null)).toEqual({});
   });
 });
 

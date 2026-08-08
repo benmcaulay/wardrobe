@@ -7,12 +7,43 @@ import { decode, encode, type StylePrefs } from "@/lib/json";
 import {
   outfitSlotDefaultKey,
   sanitizeComboLayouts,
+  sanitizeLayerArrangements,
   sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
   type ComboLayout,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
+
+/** Lock the left→right order of one same-layer combination. */
+export async function saveOutfitLayerArrangement(
+  setKey: string,
+  order: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const k = setKey.trim();
+  if (!k) return { ok: false, error: "Missing combination key." };
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+  const existing = sanitizeLayerArrangements(prefs.outfitLayerArrangements);
+  const clean = sanitizeLayerArrangements({ [k]: order });
+  const entry = clean[k];
+  if (!entry) return { ok: false, error: "Invalid order." };
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      stylePrefs: encode({ ...prefs, outfitLayerArrangements: { ...existing, [k]: entry } }),
+    },
+  });
+
+  revalidatePath("/closet/outfits");
+  return { ok: true };
+}
 
 /**
  * Remember a piece's position and/or size for one placed-together combination.

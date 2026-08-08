@@ -91,7 +91,12 @@ export function layerIndexForCategories(
  */
 export function spreadOverlappingSlots<
   T extends { id: string; categories: string[]; x: number; y: number },
->(slots: T[], frameWidth = FRAME_WIDTH, layers: readonly string[][] = []): T[] {
+>(
+  slots: T[],
+  frameWidth = FRAME_WIDTH,
+  layers: readonly string[][] = [],
+  arrangements: Record<string, string[]> = {},
+): T[] {
   const byGroup = new Map<string, T[]>();
   for (const s of slots) {
     const band = layerIndexForCategories(s.categories, layers);
@@ -105,10 +110,13 @@ export function spreadOverlappingSlots<
   const overrides = new Map<string, { x: number; y: number }>();
   for (const [key, group] of byGroup) {
     if (key === "region:other" || group.length < 2) continue;
-    const n = group.length;
+    // Place pieces left→right in the combination's saved order when there is
+    // one; otherwise keep their current order (which the caller then locks in).
+    const ordered = orderGroupByArrangement(group, arrangements);
+    const n = ordered.length;
     const step = Math.min(190, (frameWidth - 80) / n);
-    const avgY = group.reduce((sum, s) => sum + s.y, 0) / n;
-    group.forEach((s, i) => {
+    const avgY = ordered.reduce((sum, s) => sum + s.y, 0) / n;
+    ordered.forEach((s, i) => {
       const x = centerX + (i - (n - 1) / 2) * step;
       overrides.set(s.id, { x: Math.min(frameWidth - 90, Math.max(90, x)), y: avgY });
     });
@@ -116,6 +124,30 @@ export function spreadOverlappingSlots<
 
   if (overrides.size === 0) return slots;
   return slots.map((s) => (overrides.has(s.id) ? { ...s, ...overrides.get(s.id)! } : s));
+}
+
+/** Stable key for a set of same-layer categories (order-independent). */
+export function layerSetKey(categories: readonly string[]): string {
+  return [...new Set(categories.map((c) => normalizeCategoryName(c)).filter(Boolean))].sort().join(",");
+}
+
+/** Sort a same-layer group left→right by the saved arrangement for its set. */
+function orderGroupByArrangement<T extends { categories: string[] }>(
+  group: T[],
+  arrangements: Record<string, string[]>,
+): T[] {
+  const setKey = layerSetKey(group.map((s) => s.categories[0] ?? ""));
+  const arr = arrangements[setKey];
+  if (!arr || arr.length === 0) return group;
+  const rank = new Map(arr.map((c, i) => [normalizeCategoryName(c), i]));
+  return group
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => {
+      const ra = rank.get(normalizeCategoryName(a.s.categories[0] ?? "")) ?? Number.POSITIVE_INFINITY;
+      const rb = rank.get(normalizeCategoryName(b.s.categories[0] ?? "")) ?? Number.POSITIVE_INFINITY;
+      return ra - rb || a.i - b.i;
+    })
+    .map((e) => e.s);
 }
 
 export function sanitizeOutfitSlotDefaults(raw: unknown): OutfitSlotDefaults {
@@ -222,6 +254,18 @@ export function combinationKey(
 ): string {
   const set = [...new Set(present.map((c) => normalizeCategoryName(c)).filter(Boolean))].sort();
   return `${categoryListSignature(categories)}@${set.join(",")}`;
+}
+
+/** Clean the persisted per-combination horizontal orders (setKey → categories). */
+export function sanitizeLayerArrangements(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || !Array.isArray(value)) continue;
+    const order = [...new Set(value.map((c) => normalizeCategoryName(c)).filter(Boolean))];
+    if (order.length > 0) out[key] = order;
+  }
+  return out;
 }
 
 /** Clean the persisted per-combination layouts (key → {x?, y?, scale?}). */

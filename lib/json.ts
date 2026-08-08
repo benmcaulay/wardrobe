@@ -52,6 +52,8 @@ export type StylePrefs = {
   outfitVisualLayers?: string[][];
   /** Remembered position + size per piece per placed-together combination. */
   outfitComboLayouts?: Record<string, { x?: number; y?: number; scale?: number }>;
+  /** Locked left→right order per same-layer combination (setKey → categories). */
+  outfitLayerArrangements?: Record<string, string[]>;
 };
 
 export function encode<T>(value: T): string {
