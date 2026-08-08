@@ -181,15 +181,26 @@ export function visualLayerYFor(
   return top + ((bottom - top) * index) / (n - 1);
 }
 
-/** Global default multiplier for placed-piece size on the frame. */
+/** Bounds for a placed-piece size multiplier. */
 export const DEFAULT_ITEM_SCALE = 1;
 export const MIN_ITEM_SCALE = 0.5;
-export const MAX_ITEM_SCALE = 1.8;
+export const MAX_ITEM_SCALE = 2.2;
 
-/** Clamp a persisted default item scale to the allowed range (falls back to 1). */
-export function sanitizeItemScale(raw: unknown): number {
+/** Clamp a single scale multiplier to the allowed range (falls back to 1). */
+export function clampItemScale(raw: unknown): number {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_ITEM_SCALE;
   return Math.min(MAX_ITEM_SCALE, Math.max(MIN_ITEM_SCALE, raw));
+}
+
+/** Clean a persisted per-category scale map (category signature → multiplier). */
+export function sanitizeCategoryScales(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || typeof value !== "number" || !Number.isFinite(value)) continue;
+    out[key] = clampItemScale(value);
+  }
+  return out;
 }
 
 /** Clean a persisted layer order — a list of category signatures, frontmost first. */

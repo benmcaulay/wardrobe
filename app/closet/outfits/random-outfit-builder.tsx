@@ -24,7 +24,7 @@ import {
   toFrameSpace,
 } from "@/lib/outfit-frame-scale";
 import {
-  saveOutfitItemScale,
+  saveOutfitCategoryScale,
   saveOutfitLayerOrder,
   saveOutfitVisualLayers,
 } from "@/lib/actions/outfitSlotDefaults";
@@ -64,7 +64,6 @@ type CanvasSlot = {
   scale: number;
   z: number;
   mirror?: boolean;
-  scaleTouched?: boolean;
   itemId?: string;
   locked?: boolean;
 };
@@ -75,7 +74,7 @@ type Props = {
   initialSlotDefaults: OutfitSlotDefaults;
   initialLayerOrder: string[];
   initialVisualLayers: string[][];
-  initialItemScale: number;
+  initialCategoryScales: Record<string, number>;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -94,7 +93,7 @@ export function RandomOutfitBuilder({
   initialSlotDefaults,
   initialLayerOrder,
   initialVisualLayers,
-  initialItemScale,
+  initialCategoryScales,
 }: Props) {
   const pickPool = useMemo(
     () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
@@ -127,8 +126,10 @@ export function RandomOutfitBuilder({
   const [closetSearch, setClosetSearch] = useState("");
   const [dragCategory, setDragCategory] = useState<string | null>(null);
   const [visualLayersOpen, setVisualLayersOpen] = useState(false);
-  const [itemScale, setItemScale] = useState(initialItemScale);
-  const itemScaleSaveRef = useRef(initialItemScale);
+  const [categoryScales, setCategoryScales] =
+    useState<Record<string, number>>(initialCategoryScales);
+  const categoryScalesRef = useRef(categoryScales);
+  categoryScalesRef.current = categoryScales;
   const [outfitName, setOutfitName] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -231,6 +232,7 @@ export function RandomOutfitBuilder({
         slotDefaults,
         layerOrderRef.current,
         visualLayers.filter((l) => l.length > 0),
+        categoryScalesRef.current,
       ),
     );
   }, [categoryRules, slotDefaults, visualLayers]);
@@ -277,6 +279,7 @@ export function RandomOutfitBuilder({
   const readyToSpin = fillIssue === null;
   const spinHint = fillIssue && fillIssue.kind !== "no_combo" ? formatFillIssue(fillIssue) : null;
   const selected = slots.find((s) => s.id === selectedSlotId) ?? null;
+  const selectedSig = selected ? categoryListSignature(selected.categories) : "";
 
   const assignableItems = useMemo(() => {
     if (!selected) return items;
@@ -498,12 +501,19 @@ export function RandomOutfitBuilder({
     void saveOutfitLayerOrder(sigs);
   }
 
-  // Persist the global item size once the user finishes dragging (not on every
-  // intermediate value), and only when it actually changed.
-  function commitItemScale() {
-    if (itemScale === itemScaleSaveRef.current) return;
-    itemScaleSaveRef.current = itemScale;
-    void saveOutfitItemScale(itemScale);
+  // Size every piece of a category (by its signature) together, live.
+  function resizeCategory(sig: string, scale: number) {
+    if (!sig) return;
+    setCategoryScales((prev) => ({ ...prev, [sig]: scale }));
+    setSlots((prev) =>
+      prev.map((s) => (categoryListSignature(s.categories) === sig ? { ...s, scale } : s)),
+    );
+  }
+
+  // Persist a category's size once the user finishes dragging the slider.
+  function commitCategoryScale(sig: string) {
+    if (!sig) return;
+    void saveOutfitCategoryScale(sig, categoryScalesRef.current[sig] ?? 1);
   }
 
   // --- Visual layers (vertical bands) -------------------------------------
@@ -678,24 +688,6 @@ export function RandomOutfitBuilder({
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] uppercase tracking-wide text-ink-muted shrink-0">
-                  Item size
-                </span>
-                <input
-                  type="range"
-                  min={MIN_ITEM_SCALE}
-                  max={MAX_ITEM_SCALE}
-                  step={0.05}
-                  value={itemScale}
-                  aria-label="Default item size"
-                  onChange={(e) => setItemScale(Number(e.target.value))}
-                  onPointerUp={commitItemScale}
-                  onKeyUp={commitItemScale}
-                  onBlur={commitItemScale}
-                  className="w-full accent-ink"
-                />
-              </div>
               <ul className="space-y-1.5 md:max-h-[440px] md:overflow-auto md:pr-1">
                 {placedPieces.map(({ slot, item }, index) => (
                   <li
@@ -878,7 +870,7 @@ export function RandomOutfitBuilder({
             .map((slot) => {
               const item = slot.itemId ? itemsById.get(slot.itemId) : null;
               const isSelected = slot.id === selectedSlotId;
-              const size = item ? BASE_PIECE_SIZE * slot.scale * itemScale : SLOT_ICON_SIZE;
+              const size = item ? BASE_PIECE_SIZE * slot.scale : SLOT_ICON_SIZE;
               const mirror = slot.mirror ?? item?.mirror ?? false;
               const thumbZoom = item?.thumbZoom ?? 1;
               return (
@@ -1263,22 +1255,25 @@ export function RandomOutfitBuilder({
               </span>
             </label>
             <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Size</label>
-            <input
-              type="range"
-              min={0.5}
-              max={2.2}
-              step={0.05}
-              value={selected.scale}
-              onChange={(e) => {
-                const scale = Number(e.target.value);
-                setSlots((prev) =>
-                  prev.map((s) =>
-                    s.id === selected.id ? { ...s, scale, scaleTouched: true } : s,
-                  ),
-                );
-              }}
-              className="w-full accent-ink"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={MIN_ITEM_SCALE}
+                max={MAX_ITEM_SCALE}
+                step={0.05}
+                value={categoryScales[selectedSig] ?? 1}
+                aria-label="Size for selected type"
+                onChange={(e) => resizeCategory(selectedSig, Number(e.target.value))}
+                onPointerUp={() => commitCategoryScale(selectedSig)}
+                onKeyUp={() => commitCategoryScale(selectedSig)}
+                onBlur={() => commitCategoryScale(selectedSig)}
+                className="w-full accent-ink"
+              />
+              <span className="text-[11px] text-ink-muted tabular-nums shrink-0">
+                {Math.round((categoryScales[selectedSig] ?? 1) * 100)}%
+              </span>
+            </div>
+            <p className="text-xs text-ink-muted">Sizes every piece of this category.</p>
             <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Layer</label>
             <div className="flex gap-2">
               <button
@@ -1402,6 +1397,7 @@ function syncSlotsWithRules(
   defaults: OutfitSlotDefaults,
   layerOrder: string[],
   visualLayers: string[][],
+  categoryScales: Record<string, number>,
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1457,7 +1453,11 @@ function syncSlotsWithRules(
   // Layer by the saved stack order: frontmost signature gets the highest z.
   const frontToBack = orderSlotsByLayer(positioned, layerOrder);
   const total = frontToBack.length;
-  return frontToBack.map((slot, i) => ({ ...slot, z: total - i }));
+  // Every piece of a category renders at that category's saved size.
+  return frontToBack.map((slot, i) => {
+    const sig = categoryListSignature(slot.categories);
+    return { ...slot, z: total - i, scale: categoryScales[sig] ?? slot.scale };
+  });
 }
 
 function formatFillIssue(issue: OutfitFillIssue): string {

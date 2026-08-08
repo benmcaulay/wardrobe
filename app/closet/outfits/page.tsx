@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { readItemTileMeta } from "@/lib/item-tile-meta";
 import { parseColors, parseStylePrefs } from "@/lib/json";
 import {
-  sanitizeItemScale,
+  sanitizeCategoryScales,
   sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
@@ -61,7 +61,7 @@ export default async function OutfitsPage() {
   const outfitSlotDefaults = sanitizeOutfitSlotDefaults(prefs.outfitSlotDefaults);
   const outfitLayerOrder = sanitizeLayerOrder(prefs.outfitLayerOrder);
   const outfitVisualLayers = sanitizeVisualLayers(prefs.outfitVisualLayers);
-  const outfitItemScale = sanitizeItemScale(prefs.outfitItemScale);
+  const outfitCategoryScales = sanitizeCategoryScales(prefs.outfitCategoryScales);
 
   const closetItems: RandomOutfitItem[] = items.map((item) => {
     const tile = readItemTileMeta(item);
@@ -104,7 +104,7 @@ export default async function OutfitsPage() {
         outfitSlotDefaults={outfitSlotDefaults}
         outfitLayerOrder={outfitLayerOrder}
         outfitVisualLayers={outfitVisualLayers}
-        outfitItemScale={outfitItemScale}
+        outfitCategoryScales={outfitCategoryScales}
       />
     </main>
   );

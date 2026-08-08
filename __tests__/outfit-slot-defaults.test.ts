@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   builtinSlotLayout,
+  clampItemScale,
   outfitSlotDefaultKey,
   resolveSlotLayout,
+  sanitizeCategoryScales,
   sanitizeOutfitSlotDefaults,
 } from "../lib/outfit-slot-defaults";
 
@@ -33,5 +35,22 @@ describe("sanitizeOutfitSlotDefaults", () => {
       shirt: { x: -10, y: 9999, scale: 9 },
     });
     expect(out.shirt).toEqual({ x: 0, y: 960, scale: 2.2 });
+  });
+});
+
+describe("category scales", () => {
+  it("clamps a single scale to the allowed range, defaulting to 1", () => {
+    expect(clampItemScale(1.4)).toBe(1.4);
+    expect(clampItemScale(9)).toBe(2.2);
+    expect(clampItemScale(0.1)).toBe(0.5);
+    expect(clampItemScale("nope")).toBe(1);
+  });
+
+  it("keeps only finite numeric entries, each clamped", () => {
+    expect(sanitizeCategoryScales({ shirt: 1.4, hat: 9, bad: "x", "": 1.2 })).toEqual({
+      shirt: 1.4,
+      hat: 2.2,
+    });
+    expect(sanitizeCategoryScales(null)).toEqual({});
   });
 });

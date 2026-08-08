@@ -5,30 +5,37 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { decode, encode, type StylePrefs } from "@/lib/json";
 import {
+  clampItemScale,
   outfitSlotDefaultKey,
-  sanitizeItemScale,
+  sanitizeCategoryScales,
   sanitizeLayerOrder,
   sanitizeOutfitSlotDefaults,
   sanitizeVisualLayers,
   type OutfitSlotDefault,
 } from "@/lib/outfit-slot-defaults";
 
-/** Persist the global default item-size multiplier for the outfit frame. */
-export async function saveOutfitItemScale(
+/** Persist the size multiplier for one category (all pieces of that type). */
+export async function saveOutfitCategoryScale(
+  signature: string,
   scale: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
-  const clean = sanitizeItemScale(scale);
+  const sig = signature.trim();
+  if (!sig) return { ok: false, error: "Missing category." };
+  const clean = clampItemScale(scale);
 
   const row = await prisma.user.findUnique({
     where: { id: user.id },
     select: { stylePrefs: true },
   });
   const prefs = decode<StylePrefs>(row?.stylePrefs, {});
+  const existing = sanitizeCategoryScales(prefs.outfitCategoryScales);
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { stylePrefs: encode({ ...prefs, outfitItemScale: clean }) },
+    data: {
+      stylePrefs: encode({ ...prefs, outfitCategoryScales: { ...existing, [sig]: clean } }),
+    },
   });
 
   revalidatePath("/closet/outfits");
