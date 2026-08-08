@@ -522,7 +522,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
   return (
     <div className="flex flex-col gap-8 md:flex-row md:flex-wrap md:items-start md:justify-evenly md:gap-y-8 md:gap-x-0">
-        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[240px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
+        <div className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[300px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
           <button
             type="button"
             onClick={() => void spin()}
@@ -590,8 +590,8 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                       className="h-9 w-9 shrink-0 rounded object-cover bg-paper-warm"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs">{item.name}</p>
-                      <p className="truncate text-[10px] capitalize text-ink-muted">{item.category}</p>
+                      <p className="truncate text-sm">{item.name}</p>
+                      <p className="truncate text-xs capitalize text-ink-muted">{item.category}</p>
                     </div>
                     <button
                       type="button"
@@ -701,12 +701,12 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
       <aside
         data-keep-selection
-        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[380px] md:overflow-y-auto md:pr-1"
+        className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[460px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[10px] uppercase tracking-wide text-ink-muted">Category rules</div>
+            <div className="text-[11px] uppercase tracking-wide text-ink-muted">Category rules</div>
             <label className="flex items-center gap-1.5 text-[11px] text-ink-muted cursor-pointer select-none">
               Multi-select
               <input
@@ -717,13 +717,13 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
               />
             </label>
           </div>
-          <p className="text-xs text-ink-muted">
+          <p className="text-sm text-ink-muted">
             Tap a category to include one. Turn on multi-select to combine categories (OR) or pick
             multiples.
           </p>
 
           {categoryOptions.length === 0 ? (
-            <p className="text-xs text-ink-muted/80 italic">
+            <p className="text-sm text-ink-muted/80 italic">
               Your closet has no categorized pieces yet.
             </p>
           ) : (
@@ -742,7 +742,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                     onClick={() => toggleSimpleCategory(cat)}
                     disabled={locked}
                     title={locked ? "Managed in multi-select below" : undefined}
-                    className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
+                    className={`rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
                       active
                         ? "bg-ink text-paper border-ink"
                         : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
@@ -762,7 +762,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                 rule.categories.length > 1 || rule.count !== 1 ? (
                   <span
                     key={idx}
-                    className="inline-flex items-center gap-1 rounded-full bg-ink text-paper pl-2.5 pr-1 py-1 text-[10px] uppercase tracking-wide capitalize"
+                    className="inline-flex items-center gap-1 rounded-full bg-ink text-paper pl-2.5 pr-1 py-1 text-xs uppercase tracking-wide capitalize"
                   >
                     {rule.categories.join(" / ")}
                     {rule.count > 1 ? ` ×${rule.count}` : ""}
@@ -782,7 +782,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
           {multiSelect && (
             <div className="rounded-xl border border-ink/10 bg-paper-warm/50 p-2.5 space-y-2">
-              <div className="text-[10px] text-ink-muted">
+              <div className="text-xs text-ink-muted">
                 Pick categories to combine (matches any — “or”), then how many.
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -803,7 +803,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                         key={cat}
                         type="button"
                         onClick={() => toggleDraftCategory(cat)}
-                        className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-wide border transition capitalize ${
+                        className={`rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize ${
                           on
                             ? "bg-accent text-white border-accent"
                             : "bg-white border-ink/10 text-ink-muted hover:border-ink/25"
@@ -815,7 +815,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                   })}
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-ink-muted shrink-0">How many</span>
+                <span className="text-xs text-ink-muted shrink-0">How many</span>
                 <input
                   type="number"
                   min={1}
@@ -839,13 +839,13 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
         </div>
 
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
-          <div className="text-[10px] uppercase tracking-wide text-ink-muted">Color rules</div>
-          <p className="text-xs text-ink-muted">
+          <div className="text-[11px] uppercase tracking-wide text-ink-muted">Color rules</div>
+          <p className="text-sm text-ink-muted">
             Optional — counts items whose <span className="text-ink">primary color</span> (★ in the
             editor) matches, e.g. 2 black pieces.
           </p>
           {colorRules.length === 0 ? (
-            <p className="text-xs text-ink-muted/80 italic">No color rules yet.</p>
+            <p className="text-sm text-ink-muted/80 italic">No color rules yet.</p>
           ) : (
             <ul className="space-y-2">
               {colorRules.map((rule, idx) => (
@@ -888,7 +888,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             type="button"
             onClick={addColorRule}
             disabled={colorNameOptions.length === 0}
-            className="text-xs text-ink-muted hover:text-ink underline underline-offset-2 disabled:opacity-40"
+            className="text-sm text-ink-muted hover:text-ink underline underline-offset-2 disabled:opacity-40"
           >
             + Add color rule
           </button>
@@ -896,10 +896,10 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
 
         {selected && (
           <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
-            <div className="text-[10px] uppercase tracking-wide text-ink-muted">Selected slot</div>
+            <div className="text-[11px] uppercase tracking-wide text-ink-muted">Selected slot</div>
             <p className="text-sm capitalize">{formatCategoryList(selected.categories)}</p>
             {selected.itemId && (
-              <p className="text-xs text-ink-muted truncate">
+              <p className="text-sm text-ink-muted truncate">
                 {itemsById.get(selected.itemId)?.name}
               </p>
             )}
@@ -916,7 +916,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                 <span className="text-ink-muted">(keeps this item when you spin again)</span>
               </span>
             </label>
-            <label className="block text-[10px] uppercase tracking-wide text-ink-muted">Size</label>
+            <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Size</label>
             <input
               type="range"
               min={0.5}
@@ -933,7 +933,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
               }}
               className="w-full accent-ink"
             />
-            <label className="block text-[10px] uppercase tracking-wide text-ink-muted">Layer</label>
+            <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Layer</label>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -950,7 +950,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                 Bring forward
               </button>
             </div>
-            <p className="text-[10px] text-ink-muted">
+            <p className="text-xs text-ink-muted">
               Drag the slot on the frame to adjust placement, then save as the default for this
               category.
             </p>
@@ -985,13 +985,13 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
         )}
 
         <div className="rounded-2xl border border-ink/10 bg-white p-3 max-h-64 overflow-auto">
-          <div className="text-[10px] uppercase tracking-wide text-ink-muted mb-2">Your closet</div>
+          <div className="text-[11px] uppercase tracking-wide text-ink-muted mb-2">Your closet</div>
           {selected ? (
-            <p className="text-xs text-ink-muted mb-2">
+            <p className="text-sm text-ink-muted mb-2">
               Tap a piece to fill this slot ({formatCategoryList(selected.categories)}).
             </p>
           ) : (
-            <p className="text-xs text-ink-muted mb-2">Select a slot on the frame to assign a piece.</p>
+            <p className="text-sm text-ink-muted mb-2">Select a slot on the frame to assign a piece.</p>
           )}
           <ul className="space-y-1">
             {assignableItems.map((item) => (
@@ -1000,7 +1000,7 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
                   type="button"
                   disabled={!selected}
                   onClick={() => void assignItemToSlot(item)}
-                  className="w-full flex items-center gap-2 text-xs rounded-lg px-1 py-1 hover:bg-paper-warm disabled:opacity-50 disabled:hover:bg-transparent text-left"
+                  className="w-full flex items-center gap-2 text-sm rounded-lg px-1.5 py-1.5 hover:bg-paper-warm disabled:opacity-50 disabled:hover:bg-transparent text-left"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -1021,12 +1021,12 @@ export function RandomOutfitBuilder({ items, colorOptions, initialSlotDefaults }
             ))}
           </ul>
           {selected && assignableItems.length === 0 && (
-            <p className="text-xs text-ink-muted italic mt-2">No closet pieces match this slot.</p>
+            <p className="text-sm text-ink-muted italic mt-2">No closet pieces match this slot.</p>
           )}
         </div>
 
         <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-2">
-          <div className="text-[10px] uppercase tracking-wide text-ink-muted">Save spin</div>
+          <div className="text-[11px] uppercase tracking-wide text-ink-muted">Save spin</div>
           <div className="flex gap-2">
             <input
               type="text"
