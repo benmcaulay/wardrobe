@@ -10,14 +10,17 @@
  *      volume, respecting an optional weight cap)
  */
 
-import type { Season } from "@/lib/json";
+import type { Color, Season } from "@/lib/json";
 import { classifyGarmentKind, type GarmentKind } from "@/lib/categories";
 import { estimateItemPacking, type EstimableItem } from "./estimate";
+import { colorVersatility } from "./palette";
 import type { ClimateBand } from "@/lib/services/weather";
 
 export type PackableItem = EstimableItem & {
   id: string;
   season?: Season[];
+  /** Drives the versatility term in `climateScore`. See ./palette.ts. */
+  colors?: Color[];
 };
 
 export type PackBag = {
@@ -197,6 +200,7 @@ export function garmentWarmth(item: PackableItem): number {
       "tank",
       "tee",
       "t-shirt",
+      "t shirt",
       "sandal",
       "slide",
       "flip",
@@ -226,13 +230,40 @@ const DESIRED_WARMTH: Record<ClimateBand, number> = {
 };
 
 /**
- * How well an item suits the climate. Season fit dominates; garment warmth
- * refines within a category (e.g. shorts > jeans when it's hot). Higher = fitter.
+ * How much colour versatility can move an item's score.
+ *
+ * Tuned to break ties *within* a warmth band without jumping one. In mild
+ * weather the gap between a shirt and a tee is 1.0, so at 0.8 a maximally
+ * versatile tee still cannot outrank a poorly-coloured shirt — climate fit
+ * stays dominant, which is the whole point of a climate score.
+ */
+const VERSATILITY_WEIGHT = 0.8;
+
+/**
+ * How well an item suits the trip. Higher = fitter.
+ *
+ * Three terms, in order of authority:
+ *   1. season fit  — strongest signal *when present*, but see the note below
+ *   2. warmth      — how close the garment is to what the climate wants
+ *   3. versatility — how easily its colours combine with everything else
+ *
+ * The versatility term exists because the first two do not discriminate on real
+ * data. `season` is 0% populated on the measured closet, so `seasonScore`
+ * returns a constant and that term cancels out for every item; `garmentWarmth`
+ * then resolves 73 tops into just 3 distinct scores, with 44 tied — meaning the
+ * "best" tops were whichever the database happened to return first. Colour is
+ * 100% populated, so it is what actually separates one shirt from another.
+ *
+ * Season is kept rather than removed: it costs nothing, and it starts working
+ * the moment those tags exist.
  */
 export function climateScore(item: PackableItem, band: ClimateBand): number {
   const season = seasonScore(item.season, band);
   const warmth = garmentWarmth(item);
-  return season * 2 - Math.abs(warmth - DESIRED_WARMTH[band]);
+  const versatility = colorVersatility(item.colors);
+  return (
+    season * 2 - Math.abs(warmth - DESIRED_WARMTH[band]) + VERSATILITY_WEIGHT * versatility
+  );
 }
 
 /** Minimum pieces we'll backfill with off-season items if nothing better fits. */

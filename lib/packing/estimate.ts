@@ -67,7 +67,7 @@ const KEYWORD_BASE: { match: string[]; kinds?: GarmentKind[]; base: BaseEstimate
   { match: ["trousers", "pants", "chinos", "slacks"], kinds: ["bottom"], base: { weightGrams: 420, volumeLiters: 1.9 } },
   { match: ["shorts"], kinds: ["bottom"], base: { weightGrams: 220, volumeLiters: 0.9 } },
   { match: ["skirt"], kinds: ["bottom"], base: { weightGrams: 280, volumeLiters: 1.3 } },
-  { match: ["t-shirt", "tee", "tank", "top"], kinds: ["top"], base: { weightGrams: 160, volumeLiters: 0.9 } },
+  { match: ["t-shirt", "t shirt", "tee", "tank", "top"], kinds: ["top"], base: { weightGrams: 160, volumeLiters: 0.9 } },
   { match: ["shirt", "blouse"], kinds: ["top"], base: { weightGrams: 220, volumeLiters: 1.2 } },
   { match: ["boots", "boot"], kinds: ["shoes"], base: { weightGrams: 1200, volumeLiters: 5 } },
   { match: ["sneaker", "trainer", "running"], kinds: ["shoes"], base: { weightGrams: 800, volumeLiters: 3.6 } },

@@ -281,3 +281,43 @@ describe("garmentWarmth uses an accessory scale", () => {
     expect(garmentWarmth({ id: "p", category: "jacket", name: "Parka" })).toBe(3);
   });
 });
+
+describe("climateScore discriminates on colour", () => {
+  const top = (name: string, colors: { name: string; hex: string }[]): PackableItem => ({
+    id: name, category: "shirt", name, colors,
+  });
+  const black = top("black shirt", [{ name: "black", hex: "#000" }]);
+  const orange = top("orange shirt", [{ name: "orange", hex: "#f80" }]);
+
+  it("prefers the more versatile colour between otherwise identical garments", () => {
+    // The whole point of the term: before it, these two scored identically and
+    // the winner was whichever the database returned first.
+    expect(climateScore(black, "mild")).toBeGreaterThan(climateScore(orange, "mild"));
+  });
+
+  it("does not let colour override climate fit", () => {
+    // A well-coloured tee must still lose to a poorly-coloured shirt in mild
+    // weather — climate is the senior term.
+    const neutralTee = { ...top("black tee", [{ name: "black", hex: "#000" }]), name: "black tee" };
+    expect(climateScore(orange, "mild")).toBeGreaterThan(climateScore(neutralTee, "mild"));
+  });
+
+  it("keeps season dominant when the tag exists", () => {
+    const inSeason: PackableItem = { ...orange, season: ["summer"] };
+    expect(climateScore(inSeason, "hot")).toBeGreaterThan(climateScore(black, "hot"));
+  });
+
+  it("does not punish an item that has no colour data", () => {
+    const noColour = top("plain shirt", []);
+    expect(climateScore(noColour, "mild")).toBeGreaterThan(climateScore(orange, "mild"));
+    expect(climateScore(noColour, "mild")).toBeLessThan(climateScore(black, "mild"));
+  });
+
+  it("reads an unhyphenated tee as a tee", () => {
+    // "Vagabond T Shirt" fell through to the shirt rule and outscored an
+    // identical "T-shirt" by a full point purely on spelling.
+    expect(garmentWarmth({ id: "a", category: "shirt", name: "Vagabond T Shirt" })).toBe(
+      garmentWarmth({ id: "b", category: "shirt", name: "Vagabond T-shirt" }),
+    );
+  });
+});

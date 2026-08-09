@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { encode, parseSeasons, parseStringArray, type Season } from "@/lib/json";
+import { encode, parseColors, parseSeasons, parseStringArray, type Season } from "@/lib/json";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
 import { buildPackingPlan, type PackableItem, type PackingPlan } from "@/lib/packing/plan";
@@ -373,6 +373,7 @@ export async function generatePackingPlan(
       subcategory: true,
       material: true,
       season: true,
+      colors: true,
       weightGrams: true,
       volumeLiters: true,
     },
@@ -384,6 +385,9 @@ export async function generatePackingPlan(
     subcategory: r.subcategory,
     material: r.material,
     season: parseSeasons(r.season) as Season[],
+    // Colour drives the versatility term in climateScore — omitting it would
+    // silently flatten selection back to a 3-valued warmth score.
+    colors: parseColors(r.colors),
     weightGrams: r.weightGrams,
     volumeLiters: r.volumeLiters,
   }));
