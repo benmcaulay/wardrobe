@@ -25,6 +25,7 @@ import {
   fetchTripClimate,
   setTripClimate,
   setTripRequirements,
+  parseTripDescription,
   generatePackingPlan,
   setItemPacking,
   updateTrip,
@@ -120,6 +121,9 @@ export function TripPlanner({
   const router = useRouter();
   const [climate, setClimate] = useState<ClimateSummary | null>(initialClimate);
   const [requirements, setRequirements] = useState<TripRequirements>(initialRequirements);
+  const [tripText, setTripText] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [parseNote, setParseNote] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments);
   const [estimates, setEstimates] = useState<Map<string, { weightGrams: number; volumeLiters: number }>>(
     () => new Map(items.map((i) => [i.id, { weightGrams: i.weightGrams, volumeLiters: i.volumeLiters }])),
@@ -262,6 +266,33 @@ export function TripPlanner({
     });
   }, [items, bagOfItem, climate, requirements]);
 
+  async function describeTrip() {
+    const text = tripText.trim();
+    if (!text) return;
+    setParsing(true);
+    setParseNote(null);
+    const res = await parseTripDescription({ tripId: trip.id, text });
+    setParsing(false);
+    if (!res.ok) {
+      setParseNote(res.error);
+      return;
+    }
+    // Prefill and persist, but the chips stay editable — the parse is a
+    // suggestion the user confirms, never a silent write of something they
+    // didn't say.
+    const next = res.parsed.requirements;
+    setRequirements(next);
+    setParseNote(
+      res.parsed.summary +
+        (res.parsed.source === "keywords" ? " (matched on keywords — check the chips.)" : ""),
+    );
+    await setTripRequirements({
+      tripId: trip.id,
+      activities: next.activities,
+      laundry: next.laundry,
+    });
+  }
+
   async function toggleActivity(id: string) {
     const next = requirements.activities.includes(id as never)
       ? requirements.activities.filter((a) => a !== id)
@@ -337,6 +368,28 @@ export function TripPlanner({
         <p className="mt-1 text-sm text-ink-muted">
           We&apos;ll make sure the bag covers it.
         </p>
+
+        <div className="mt-3 flex flex-wrap items-start gap-2">
+          <input
+            value={tripText}
+            onChange={(e) => setTripText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void describeTrip();
+            }}
+            placeholder="Or describe it: 5 days in Lisbon for a wedding, plus a beach day"
+            className="min-w-0 flex-1 rounded-2xl border border-ink/15 bg-white px-3.5 py-2 text-sm placeholder:text-ink-muted/60 focus:border-ink/30"
+          />
+          <button
+            type="button"
+            onClick={() => void describeTrip()}
+            disabled={parsing || !tripText.trim()}
+            className="rounded-full border border-ink/25 px-4 py-2 text-xs transition hover:bg-paper-warm disabled:opacity-40"
+          >
+            {parsing ? "Reading…" : "Read it"}
+          </button>
+        </div>
+        {parseNote && <p className="mt-2 text-xs text-ink-muted">{parseNote}</p>}
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           {ACTIVITIES.map((a) => {
             const on = requirements.activities.includes(a.id);

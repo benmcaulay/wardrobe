@@ -13,6 +13,7 @@ import {
   type TripActivity,
   type TripRequirements,
 } from "@/lib/packing/requirements";
+import { parseTripText, type TripParse } from "@/lib/services/tripParser";
 import {
   getClimateSummary,
   manualClimateSummary,
@@ -474,4 +475,27 @@ export async function setItemPacking(input: {
 
   await prisma.wardrobeItem.update({ where: { id: input.itemId }, data });
   return { ok: true };
+}
+
+/**
+ * Parse a free-text trip description into requirements.
+ *
+ * Prefill only — it returns what it understood and does NOT save, exactly like
+ * the payout-email parser. The model reads intent; the user confirms; the chips
+ * remain the source of truth. Falls back to keyword matching whenever the model
+ * is unavailable, so this never becomes a hard dependency.
+ */
+export async function parseTripDescription(input: {
+  tripId: string;
+  text: string;
+}): Promise<Result<{ parsed: TripParse }>> {
+  const user = await requireUser();
+  const trip = await prisma.packingTrip.findUnique({
+    where: { id: input.tripId },
+    select: { userId: true },
+  });
+  if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
+
+  const text = input.text.slice(0, 2000);
+  return { ok: true, parsed: await parseTripText(text) };
 }
