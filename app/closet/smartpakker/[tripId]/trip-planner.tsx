@@ -342,7 +342,9 @@ export function TripPlanner({
           />
         ) : climate ? (
           <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-2">
-            <Stat label="Forecast" value={BAND_LABELS[climate.band]} />
+            {/* Not "Forecast" — the same row also carries past records and the
+                user's own guess. The footnote below says which. */}
+            <Stat label="Conditions" value={BAND_LABELS[climate.band]} />
             <Stat label="Avg high" value={`${climate.avgHighC}°C`} />
             <Stat label="Avg low" value={`${climate.avgLowC}°C`} />
             <Stat label="Rain" value={`${Math.round(climate.rainChance * 100)}%`} />
@@ -351,7 +353,7 @@ export function TripPlanner({
               {climate.source === "forecast"
                 ? "Live forecast"
                 : climate.source === "climatology"
-                  ? "Seasonal estimate"
+                  ? "From past records"
                   : "You set this"}
             </span>
           </div>
