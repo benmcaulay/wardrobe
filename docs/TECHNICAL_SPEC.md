@@ -319,8 +319,19 @@ upgrade point to an LLM):
 ### 6.4 Marketplace hand-off (`lib/marketplaces.ts`) — the key limitation
 
 Seven marketplaces are modeled (Depop, Poshmark, Mercari, Vinted, eBay, Grailed,
-Facebook). **None expose a public listing-creation API**, so `prefillSupported`
-is `false` everywhere and the product **cannot auto-post**. The
+Facebook). The product **does not auto-post today**, but the reason is not
+uniform across the seven, and an earlier revision of this section overstated it
+by claiming none expose a listing API. Corrected, per `integration` in
+`lib/marketplaces.ts`:
+
+| Platform | `integration` | Reality |
+|---|---|---|
+| eBay | `open` | **A public seller API does exist** and is open to any developer: `createInventoryItem` → `createOffer` → `publishOffer` creates a live listing. Requires OAuth consent + seller business policies. Not yet built — see `docs/EBAY_INTEGRATION.md`. |
+| Vinted, Facebook | `gated` | An API exists but is approval-only (Meta Marketplace Partner program; Vinted Pro Integrations), scoped to large merchants and specific verticals. Not reachable for a consumer app. |
+| Depop, Poshmark, Mercari, Grailed | `none` | No public listing API at any tier. Competing cross-listers drive these with browser extensions — a different product with different ToS exposure. |
+
+So the honest framing is: **six of seven require manual hand-off; eBay is
+buildable and unbuilt.** For all seven today the
 flow is: generate a copy-ready draft → **one-tap "Copy & open"** (copies the
 full listing — title, price, condition, body, hashtags — then opens the
 marketplace's new-listing page) → user pastes. The for-sale board
@@ -333,7 +344,12 @@ and lifecycle controls. It's the staging area until cross-listing is automated
 > **Diligence flag.** This manual hand-off is the single biggest product
 > limitation and the central roadmap bet (§13). It is cleanly isolated: the data
 > (drafts, price, images, condition, target marketplaces) is already produced and
-> stored; only the *delivery* mechanism is manual.
+> stored; only the *delivery* mechanism is manual. Note that the ceiling here is
+> commercial and legal, not technical — for four of the seven platforms there is
+> no sanctioned automation to build, at any level of engineering effort. eBay is
+> the one platform where full automation (post *and* sale sync) is available
+> through supported channels, which makes it the highest-leverage integration
+> and the natural proof case.
 
 ---
 
