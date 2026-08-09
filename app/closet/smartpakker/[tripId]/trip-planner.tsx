@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { thumbnailUrl } from "@/lib/image-paths";
@@ -23,9 +23,9 @@ import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import { formatTemperature, type TemperatureUnit } from "@/lib/temperature";
 import {
+  PLANE_FLIGHT_MS,
   isScrolledToEnd,
-  planeRouteState,
-  type PlaneRouteState,
+  planeFlightVars,
 } from "@/lib/packing/planner-view";
 import {
   fetchTripClimate,
@@ -138,9 +138,28 @@ export function TripPlanner({
   );
   const [loadingClimate, setLoadingClimate] = useState(false);
   const [packing, setPacking] = useState(false);
-  const [packed, setPacked] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
+
+  /**
+   * The departure animation runs on its own clock: one flight per press,
+   * PLANE_FLIGHT_MS long, regardless of how the pack itself goes. `flightId`
+   * remounts the strip so a second press restarts the plane instead of being
+   * swallowed by the animation already running.
+   */
+  const [flightId, setFlightId] = useState(0);
+  const [flying, setFlying] = useState(false);
+  const flightTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (flightTimer.current) window.clearTimeout(flightTimer.current);
+  }, []);
+
+  function launchPlane() {
+    setFlightId((n) => n + 1);
+    setFlying(true);
+    if (flightTimer.current) window.clearTimeout(flightTimer.current);
+    flightTimer.current = window.setTimeout(() => setFlying(false), PLANE_FLIGHT_MS);
+  }
 
   /**
    * The bag column is a capped, independently scrolling panel, so its content
@@ -207,6 +226,7 @@ export function TripPlanner({
   }
 
   async function handleAutoPack() {
+    launchPlane();
     setPacking(true);
     setWarnings([]);
     const res = await generatePackingPlan(trip.id);
@@ -215,9 +235,6 @@ export function TripPlanner({
       setWarnings([res.error]);
       return;
     }
-    // The plane only lands on a plan we actually got — a failed pack leaves it
-    // parked, so the strip never implies a trip that didn't happen.
-    setPacked(true);
     setClimate(res.climate);
     setAssignments(res.plan.assignments);
     setWarnings(res.plan.warnings);
@@ -473,7 +490,9 @@ export function TripPlanner({
         </div>
       </section>
 
-      {/* Auto-pack */}
+      {/* Auto-pack. The flight track is the flex-1 gap between the button and
+          the total, so the plane's route is exactly the distance between them
+          however wide the column gets. The total sits at the right edge. */}
       <section className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -483,11 +502,11 @@ export function TripPlanner({
         >
           {packing ? "Packing…" : "Auto-pack my bags"}
         </button>
-        <span className="text-xs text-ink-muted">
+        <PlaneRoute key={flightId} flying={flying} />
+        <span className="ml-auto text-xs text-ink-muted">
           Total packed: {formatVolume(usage.totals.volumeLiters)} · {formatWeight(usage.totals.weightGrams)} ·{" "}
           {usage.totals.count} {usage.totals.count === 1 ? "item" : "items"}
         </span>
-        <PlaneRoute state={planeRouteState({ packing, packed })} />
       </section>
 
       {warnings.length > 0 ? (
@@ -762,55 +781,36 @@ function DayCard({
 }
 
 /**
- * The little flight strip beside the auto-pack button: origin dot, dotted
- * route, plane, destination dot. Purely decorative — the button text already
- * announces "Packing…" for anyone not watching the plane — so it's hidden from
- * the accessibility tree. Motion lives in globals.css under `.plane-route`,
- * which puts it behind the app's prefers-reduced-motion rule for free.
+ * The plane that leaves the auto-pack button and flies the gap to the "Total
+ * packed" total — one second, once per press, then it and its trail fade.
+ *
+ * The wrapper is the flight track: a flex-1 item filling whatever space is left
+ * between the button and the total, so the route is the real distance between
+ * them at any column width and nothing has to be measured in JS. The plane and
+ * trail then animate in percentages of it.
+ *
+ * Purely decorative — the button's own label already says "Packing…" — so it's
+ * hidden from the accessibility tree. Motion lives in globals.css under
+ * `.plane-route`, which puts it behind the app's prefers-reduced-motion rule
+ * for free.
  */
-function PlaneRoute({ state }: { state: PlaneRouteState }) {
+function PlaneRoute({ flying }: { flying: boolean }) {
   return (
     <span
-      className="plane-route ml-auto hidden text-ink sm:block"
-      data-state={state}
+      className="plane-route pointer-events-none relative hidden h-4 min-w-[2.5rem] flex-1 text-ink sm:block"
+      data-state={flying ? "flying" : "idle"}
+      style={planeFlightVars() as CSSProperties}
       aria-hidden="true"
     >
-      <svg width="200" height="30" viewBox="0 0 200 30" fill="none">
-        {/* Route. Two copies: a faint one always showing where the plane is
-            headed, and the drawn trail that chases it. */}
-        <path
-          d="M 8 23 C 58 24, 84 9, 190 7"
-          stroke="currentColor"
-          strokeOpacity="0.14"
-          strokeWidth="1.25"
-          strokeDasharray="3 4"
-          strokeLinecap="round"
-        />
-        <path
-          className="plane-trail"
-          d="M 8 23 C 58 24, 84 9, 190 7"
-          stroke="currentColor"
-          strokeOpacity="0.45"
-          strokeWidth="1.25"
-          strokeDasharray="3 4"
-          strokeLinecap="round"
-        />
+      {/* Dashed trail, growing behind the plane — its right edge tracks the
+          plane because both run 0→100% of the same track. */}
+      <span className="plane-trail absolute left-0 top-1/2 h-px -translate-y-1/2" />
 
-        <circle cx="8" cy="23" r="2" fill="currentColor" fillOpacity="0.3" />
-        <circle
-          cx="190"
-          cy="7"
-          r="2.5"
-          fill="none"
-          stroke="currentColor"
-          strokeOpacity={state === "landed" ? "0.75" : "0.25"}
-          strokeWidth="1.25"
-        />
-
-        {/* Airliner from above — nose at +x so offset-rotate points it down the
-            route. Drawn as one closed silhouette: nose, swept wings, tailplane,
-            tail cone, then the mirror of all four back up the other side. */}
-        <g className="plane-craft">
+      {/* Airliner from above, nose right. One closed silhouette: nose, swept
+          wing, tailplane, tail cone, then the mirror of all four back up the
+          other side. Centred on its own position so it meets the total nose-first. */}
+      <span className="plane-craft absolute top-1/2 -translate-x-1/2 -translate-y-1/2">
+        <svg width="17" height="13" viewBox="-8.5 -6.5 17 13" className="block">
           <path
             d="M 7.2 0
                C 7.2 -0.64 6 -1.1 4.25 -1.15
@@ -823,8 +823,8 @@ function PlaneRoute({ state }: { state: PlaneRouteState }) {
                C 6 1.1 7.2 0.64 7.2 0 Z"
             fill="currentColor"
           />
-        </g>
-      </svg>
+        </svg>
+      </span>
     </span>
   );
 }
