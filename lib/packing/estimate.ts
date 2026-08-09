@@ -10,7 +10,7 @@
  * Pure module (no Node built-ins) so it can run on the client too.
  */
 
-import { normalizeCategoryName } from "@/lib/categories";
+import { classifyGarmentKind, normalizeCategoryName, type GarmentKind } from "@/lib/categories";
 
 export type PackingEstimate = {
   weightGrams: number;
@@ -44,29 +44,41 @@ const CATEGORY_BASE: Record<string, BaseEstimate> = {
 
 const GENERIC: BaseEstimate = { weightGrams: 250, volumeLiters: 1.5 };
 
-// Subcategory / name keyword refinements. First match wins, checked against the
-// lowercased "subcategory + name" text. Overrides the category base entirely.
-const KEYWORD_BASE: { match: string[]; base: BaseEstimate }[] = [
-  { match: ["puffer", "down jacket", "parka", "winter coat"], base: { weightGrams: 1100, volumeLiters: 6.5 } },
-  { match: ["coat", "trench"], base: { weightGrams: 1200, volumeLiters: 6 } },
-  { match: ["blazer", "jacket"], base: { weightGrams: 700, volumeLiters: 3.5 } },
-  { match: ["sweater", "knit", "cardigan", "hoodie", "sweatshirt", "fleece"], base: { weightGrams: 450, volumeLiters: 2.8 } },
-  { match: ["jeans", "denim"], base: { weightGrams: 600, volumeLiters: 2.2 } },
-  { match: ["trousers", "pants", "chinos", "slacks"], base: { weightGrams: 420, volumeLiters: 1.9 } },
-  { match: ["shorts"], base: { weightGrams: 220, volumeLiters: 0.9 } },
-  { match: ["skirt"], base: { weightGrams: 280, volumeLiters: 1.3 } },
-  { match: ["t-shirt", "tee", "tank", "top"], base: { weightGrams: 160, volumeLiters: 0.9 } },
-  { match: ["shirt", "blouse"], base: { weightGrams: 220, volumeLiters: 1.2 } },
-  { match: ["boots", "boot"], base: { weightGrams: 1200, volumeLiters: 5 } },
-  { match: ["sneaker", "trainer", "running"], base: { weightGrams: 800, volumeLiters: 3.6 } },
-  { match: ["sandal", "flip", "slide"], base: { weightGrams: 350, volumeLiters: 1.4 } },
-  { match: ["heel", "flat", "loafer"], base: { weightGrams: 600, volumeLiters: 2.6 } },
-  { match: ["hat", "cap", "beanie"], base: { weightGrams: 110, volumeLiters: 0.2 } },
-  { match: ["scarf"], base: { weightGrams: 150, volumeLiters: 0.9 } },
-  { match: ["belt"], base: { weightGrams: 200, volumeLiters: 0.4 } },
-  { match: ["bag", "purse", "backpack"], base: { weightGrams: 500, volumeLiters: 3 } },
-  { match: ["sunglasses", "jewelry", "jewellery", "watch", "ring", "necklace"], base: { weightGrams: 60, volumeLiters: 0.2 } },
-  { match: ["swim", "bikini", "trunks"], base: { weightGrams: 120, volumeLiters: 0.5 } },
+/**
+ * Subcategory / name keyword refinements, checked against the lowercased
+ * "subcategory + name" text.
+ *
+ * `kinds` is what stops this being a pile of order-dependent substring matches.
+ * A rule only applies to an item already classified as one of its kinds, so
+ * "Evisu Denim Cap" cannot be costed as a pair of jeans just because the denim
+ * rule happens to sit higher in the list. That bug was real and expensive: two
+ * baseball caps were being estimated at 2.2 L / 600 g each instead of
+ * 0.2 L / 110 g, burning 4 L — 22% of an 18 L carry-on — on headwear.
+ *
+ * A rule with no `kinds` applies to anything. Items that classify as "other"
+ * fall back to matching against every rule, since we have nothing better.
+ */
+const KEYWORD_BASE: { match: string[]; kinds?: GarmentKind[]; base: BaseEstimate }[] = [
+  { match: ["puffer", "down jacket", "parka", "winter coat"], kinds: ["outerwear"], base: { weightGrams: 1100, volumeLiters: 6.5 } },
+  { match: ["coat", "trench"], kinds: ["outerwear"], base: { weightGrams: 1200, volumeLiters: 6 } },
+  { match: ["blazer", "jacket"], kinds: ["outerwear"], base: { weightGrams: 700, volumeLiters: 3.5 } },
+  { match: ["sweater", "knit", "cardigan", "hoodie", "sweatshirt", "fleece"], kinds: ["top", "outerwear"], base: { weightGrams: 450, volumeLiters: 2.8 } },
+  { match: ["jeans", "denim"], kinds: ["bottom"], base: { weightGrams: 600, volumeLiters: 2.2 } },
+  { match: ["trousers", "pants", "chinos", "slacks"], kinds: ["bottom"], base: { weightGrams: 420, volumeLiters: 1.9 } },
+  { match: ["shorts"], kinds: ["bottom"], base: { weightGrams: 220, volumeLiters: 0.9 } },
+  { match: ["skirt"], kinds: ["bottom"], base: { weightGrams: 280, volumeLiters: 1.3 } },
+  { match: ["t-shirt", "tee", "tank", "top"], kinds: ["top"], base: { weightGrams: 160, volumeLiters: 0.9 } },
+  { match: ["shirt", "blouse"], kinds: ["top"], base: { weightGrams: 220, volumeLiters: 1.2 } },
+  { match: ["boots", "boot"], kinds: ["shoes"], base: { weightGrams: 1200, volumeLiters: 5 } },
+  { match: ["sneaker", "trainer", "running"], kinds: ["shoes"], base: { weightGrams: 800, volumeLiters: 3.6 } },
+  { match: ["sandal", "flip", "slide"], kinds: ["shoes"], base: { weightGrams: 350, volumeLiters: 1.4 } },
+  { match: ["heel", "flat", "loafer"], kinds: ["shoes"], base: { weightGrams: 600, volumeLiters: 2.6 } },
+  { match: ["hat", "cap", "beanie"], kinds: ["accessory"], base: { weightGrams: 110, volumeLiters: 0.2 } },
+  { match: ["scarf"], kinds: ["accessory"], base: { weightGrams: 150, volumeLiters: 0.9 } },
+  { match: ["belt"], kinds: ["accessory"], base: { weightGrams: 200, volumeLiters: 0.4 } },
+  { match: ["bag", "purse", "backpack"], kinds: ["accessory"], base: { weightGrams: 500, volumeLiters: 3 } },
+  { match: ["sunglasses", "jewelry", "jewellery", "watch", "ring", "necklace"], kinds: ["accessory"], base: { weightGrams: 60, volumeLiters: 0.2 } },
+  { match: ["swim", "bikini", "trunks"], kinds: ["top", "bottom"], base: { weightGrams: 120, volumeLiters: 0.5 } },
 ];
 
 // Material multipliers on { weight, volume }. First match wins.
@@ -89,11 +101,21 @@ function round1(n: number): number {
 
 function baseFor(item: EstimableItem): BaseEstimate {
   const text = `${item.subcategory ?? ""} ${item.name ?? ""}`.toLowerCase();
+  const kind = classifyGarmentKind({
+    category: item.category,
+    subcategory: item.subcategory,
+    name: item.name,
+  });
+
   for (const rule of KEYWORD_BASE) {
+    // Skip rules that can't apply to what this item actually is. When we
+    // couldn't classify it ("other") every rule is fair game — a keyword is
+    // better than nothing.
+    if (kind !== "other" && rule.kinds && !rule.kinds.includes(kind)) continue;
     if (rule.match.some((m) => text.includes(m))) return rule.base;
   }
-  const cat = normalizeCategoryName(item.category ?? "");
-  return CATEGORY_BASE[cat] ?? GENERIC;
+
+  return CATEGORY_BASE[kind] ?? CATEGORY_BASE[normalizeCategoryName(item.category ?? "")] ?? GENERIC;
 }
 
 function materialModifier(material: string | null | undefined): { weight: number; volume: number } {

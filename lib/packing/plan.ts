@@ -168,6 +168,16 @@ export function isPants(item: PackableItem): boolean {
 export function garmentWarmth(item: PackableItem): number {
   const text = itemText(item);
   const material = (item.material ?? "").toLowerCase();
+
+  // Accessories get their own scale before the garment rules run. Otherwise a
+  // "Denim Cap" matches the jeans rule below and scores warmth 2, which reads
+  // as a cold-weather garment and wins slots in mild climates — the same
+  // order-dependent keyword collision that had it costed as a pair of jeans.
+  if (bucketFor(item) === "accessory") {
+    if (matchesAny(text, ["scarf", "glove", "mitten", "beanie", "balaclava", "earmuff"])) return 2;
+    return 0.3;
+  }
+
   if (matchesAny(text, ["puffer", "parka", "down", "winter coat"]) || material.includes("down")) {
     return 3;
   }

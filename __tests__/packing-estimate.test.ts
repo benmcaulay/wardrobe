@@ -50,3 +50,34 @@ describe("estimateItemPacking", () => {
     expect(formatVolume(1.25)).toBe("1.3 L");
   });
 });
+
+describe("keyword rules are gated by garment kind", () => {
+  it("costs a denim cap as headwear, not as jeans", () => {
+    // The ['jeans','denim'] rule sits above ['hat','cap','beanie'], so before
+    // kind-gating this returned 2.2 L / 600 g — 4 L of an 18 L bag on two caps.
+    const e = estimateItemPacking({ category: "hat", name: "Evisu Denim Cap" });
+    expect(e.volumeLiters).toBe(0.2);
+    expect(e.weightGrams).toBe(110);
+  });
+
+  it("costs a denim chenille hat as headwear", () => {
+    const e = estimateItemPacking({ category: "hat", name: "Padres Denim Chenille Hat" });
+    expect(e.volumeLiters).toBe(0.2);
+  });
+
+  it("still costs actual jeans as jeans", () => {
+    const e = estimateItemPacking({ category: "pants", name: "Uniqlo Light Wash Baggy Jeans" });
+    expect(e.volumeLiters).toBeGreaterThan(1.5);
+  });
+
+  it("does not read a bootcut jean as a boot", () => {
+    const jeans = estimateItemPacking({ category: "pants", name: "Bootcut Jeans" });
+    const boots = estimateItemPacking({ category: "shoes", name: "Chelsea Boots" });
+    expect(jeans.volumeLiters).toBeLessThan(boots.volumeLiters);
+  });
+
+  it("falls back to matching every rule when the kind is unknown", () => {
+    const e = estimateItemPacking({ category: "gear", name: "mystery parka" });
+    expect(e.volumeLiters).toBeGreaterThan(4);
+  });
+});

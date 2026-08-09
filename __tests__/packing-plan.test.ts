@@ -3,6 +3,7 @@ import {
   bucketFor,
   buildPackingPlan,
   climateScore,
+  garmentWarmth,
   computeUsage,
   isPants,
   isShorts,
@@ -260,5 +261,23 @@ describe("buildPackingPlan shortfall warnings", () => {
     ];
     const plan = buildPackingPlan({ items, bags, days: 5, band: "cold", rainChance: 0 });
     expect(plan.warnings.some((w) => /dress/.test(w))).toBe(false);
+  });
+});
+
+describe("garmentWarmth uses an accessory scale", () => {
+  it("does not score a denim cap as denim", () => {
+    // Matched the jeans/denim rule and scored 2, which reads as a cold-weather
+    // garment and won slots in mild climates over actual shirts.
+    expect(garmentWarmth({ id: "c", category: "hat", name: "Evisu Denim Cap" })).toBe(0.3);
+  });
+
+  it("keeps cold-weather accessories warm", () => {
+    expect(garmentWarmth({ id: "s", category: "accessory", name: "Wool Scarf" })).toBe(2);
+    expect(garmentWarmth({ id: "g", category: "accessory", name: "Leather Gloves" })).toBe(2);
+  });
+
+  it("leaves real garments on the garment scale", () => {
+    expect(garmentWarmth({ id: "j", category: "pants", name: "Baggy Jeans" })).toBe(2);
+    expect(garmentWarmth({ id: "p", category: "jacket", name: "Parka" })).toBe(3);
   });
 });

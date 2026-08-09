@@ -26,7 +26,13 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       where: { userId: user.id, id: { in: bagIds.length ? bagIds : ["__none__"] } },
     }),
     prisma.wardrobeItem.findMany({
-      where: { userId: user.id, isWishlist: false },
+      where: {
+        userId: user.id,
+        isWishlist: false,
+        // A sold piece isn't yours to pack. Items merely listed stay browsable
+        // so you can still add one by hand; auto-pack skips those separately.
+        NOT: { saleListing: { status: "sold" } },
+      },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,

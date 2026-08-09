@@ -358,7 +358,14 @@ export async function generatePackingPlan(
     .sort((a, b) => bagIds.indexOf(a.id) - bagIds.indexOf(b.id));
 
   const rows = await prisma.wardrobeItem.findMany({
-    where: { userId: user.id, isWishlist: false },
+    where: {
+      userId: user.id,
+      isWishlist: false,
+      // Don't auto-pack pieces you're trying to sell — the last two trips each
+      // packed three for-sale items. "skipped" means the user chose to keep it,
+      // so those stay eligible. The user can still add any of these by hand.
+      NOT: { saleListing: { status: { in: ["for_sale", "listed", "sold"] } } },
+    },
     select: {
       id: true,
       name: true,
