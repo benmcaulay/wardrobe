@@ -11,7 +11,7 @@
  */
 
 import type { Season } from "@/lib/json";
-import { normalizeCategoryName } from "@/lib/categories";
+import { classifyGarmentKind, type GarmentKind } from "@/lib/categories";
 import { estimateItemPacking, type EstimableItem } from "./estimate";
 import type { ClimateBand } from "@/lib/services/weather";
 
@@ -26,15 +26,11 @@ export type PackBag = {
   maxWeightKg?: number | null;
 };
 
-/** Canonical category buckets the targets are expressed in. */
-export type CategoryBucket =
-  | "top"
-  | "bottom"
-  | "dress"
-  | "outerwear"
-  | "shoes"
-  | "accessory"
-  | "other";
+/**
+ * Canonical category buckets the targets are expressed in. Same taxonomy as
+ * `GarmentKind` — aliased rather than redeclared so the two can't drift.
+ */
+export type CategoryBucket = GarmentKind;
 
 const BUCKETS: CategoryBucket[] = [
   "top",
@@ -46,10 +42,26 @@ const BUCKETS: CategoryBucket[] = [
   "other",
 ];
 
-export function bucketFor(category: string): CategoryBucket {
-  const c = normalizeCategoryName(category);
-  if ((BUCKETS as string[]).includes(c)) return c as CategoryBucket;
-  return "other";
+/**
+ * Which packing bucket an item belongs to.
+ *
+ * Delegates to the shared classifier so user-named categories ("shirt",
+ * "sweater/hoodie", "pants") land where they should. This used to compare
+ * normalized names against the canonical list, which meant any closet not using
+ * the six default category names had almost everything fall through to "other"
+ * — a bucket whose target is 0, so the planner packed no clothes at all.
+ *
+ * Accepts either a bare category (convenient, and what the board passes) or a
+ * whole item, which classifies better because subcategory and name are
+ * available to disambiguate a vague category.
+ */
+export function bucketFor(item: string | EstimableItem): CategoryBucket {
+  if (typeof item === "string") return classifyGarmentKind({ category: item });
+  return classifyGarmentKind({
+    category: item.category,
+    subcategory: item.subcategory,
+    name: item.name,
+  });
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -189,7 +201,7 @@ export function garmentWarmth(item: PackableItem): number {
   if (matchesAny(text, ["shirt", "blouse", "trousers", "pants", "chinos", "skirt", "sneaker", "trainer", "polo"])) {
     return 1;
   }
-  const bucket = bucketFor(item.category);
+  const bucket = bucketFor(item);
   if (bucket === "outerwear") return 2;
   if (bucket === "shoes" || bucket === "top" || bucket === "bottom") return 1;
   return 0.5;
@@ -304,7 +316,7 @@ export function selectItems(
 ): SelectedItem[] {
   const byBucket = new Map<CategoryBucket, Candidate[]>();
   for (const item of items) {
-    const bucket = bucketFor(item.category);
+    const bucket = bucketFor(item);
     const est = estimateItemPacking(item);
     const arr = byBucket.get(bucket) ?? [];
     arr.push({
@@ -468,5 +480,43 @@ export function buildPackingPlan(input: {
     if (usage.overWeight) warnings.push("A bag is over its weight limit.");
   }
 
+  // Say so when we couldn't fill a category. Previously a plan that found no
+  // tops and no bottoms returned an empty `warnings` array — reporting success
+  // while handing back a bag you couldn't get dressed out of. A shortfall is
+  // nearly always a gap in the closet (or a category we failed to recognise),
+  // and the user can only act on it if we name it.
+  const selectedByBucket = new Map<CategoryBucket, number>();
+  for (const s of selected) {
+    selectedByBucket.set(s.bucket, (selectedByBucket.get(s.bucket) ?? 0) + 1);
+  }
+  const shortfalls = ESSENTIAL_BUCKETS.filter(
+    (bucket) => (targets[bucket] ?? 0) > 0 && (selectedByBucket.get(bucket) ?? 0) === 0,
+  );
+  if (shortfalls.length > 0) {
+    warnings.push(
+      `Nothing in your closet matched ${listBuckets(shortfalls)} for this trip. Check those items' categories, or add some.`,
+    );
+  }
+
   return { targets, selected, assignments, unplaced, perBag, totals, warnings };
+}
+
+/** Buckets whose absence makes a plan unusable, so it's worth interrupting over. */
+const ESSENTIAL_BUCKETS: CategoryBucket[] = ["top", "bottom", "shoes", "outerwear"];
+
+const BUCKET_LABELS: Record<CategoryBucket, string> = {
+  top: "tops",
+  bottom: "bottoms",
+  dress: "dresses",
+  outerwear: "outerwear",
+  shoes: "shoes",
+  accessory: "accessories",
+  other: "other pieces",
+};
+
+/** "tops", "tops or bottoms", "tops, bottoms or shoes". */
+function listBuckets(buckets: CategoryBucket[]): string {
+  const labels = buckets.map((b) => BUCKET_LABELS[b]);
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
 }

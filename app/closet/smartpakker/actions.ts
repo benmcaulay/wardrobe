@@ -7,7 +7,11 @@ import { encode, parseSeasons, parseStringArray, type Season } from "@/lib/json"
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
 import { buildPackingPlan, type PackableItem, type PackingPlan } from "@/lib/packing/plan";
-import { getClimateSummary, type ClimateSummary } from "@/lib/services/weather";
+import {
+  getClimateSummary,
+  manualClimateSummary,
+  type ClimateSummary,
+} from "@/lib/services/weather";
 
 type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -273,6 +277,48 @@ export async function fetchTripClimate(tripId: string): Promise<Result<{ climate
     data: { climateData: encode(climate) },
   });
   revalidatePath(`/closet/smartpakker/${tripId}`);
+  return { ok: true, climate };
+}
+
+/**
+ * Set the trip's weather by hand.
+ *
+ * The escape hatch for when we can't work it out — no weather provider
+ * configured, an unresolvable destination, or simply a forecast the user knows
+ * better than we do. Stored in the same `climateData` column with
+ * `source: "manual"`, which outranks anything we'd infer and survives a
+ * "Refresh climate" unless the user explicitly asks for one.
+ */
+export async function setTripClimate(input: {
+  tripId: string;
+  avgHighC: number;
+  avgLowC?: number | null;
+  rainChance?: number | null;
+}): Promise<Result<{ climate: ClimateSummary }>> {
+  const user = await requireUser();
+  const trip = await prisma.packingTrip.findUnique({ where: { id: input.tripId } });
+  if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
+
+  if (!Number.isFinite(input.avgHighC)) return { ok: false, error: "Enter a typical high" };
+  // Wide enough for Yakutsk and Death Valley; anything outside is a typo.
+  if (input.avgHighC < -60 || input.avgHighC > 60) {
+    return { ok: false, error: "That temperature doesn't look right" };
+  }
+
+  const climate = manualClimateSummary({
+    destination: trip.destination,
+    avgHighC: input.avgHighC,
+    avgLowC: input.avgLowC,
+    rainChance: input.rainChance,
+    start: trip.startDate,
+    end: trip.endDate,
+  });
+
+  await prisma.packingTrip.update({
+    where: { id: input.tripId },
+    data: { climateData: encode(climate) },
+  });
+  revalidatePath(`/closet/smartpakker/${input.tripId}`);
   return { ok: true, climate };
 }
 

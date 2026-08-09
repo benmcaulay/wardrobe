@@ -7,9 +7,11 @@ import { thumbnailUrl } from "@/lib/image-paths";
 import type { Season } from "@/lib/json";
 import { formatVolume, formatWeight } from "@/lib/packing/estimate";
 import { computeUsage, seasonScore, type CategoryBucket } from "@/lib/packing/plan";
+import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import {
   fetchTripClimate,
+  setTripClimate,
   generatePackingPlan,
   setItemPacking,
   updateTrip,
@@ -244,7 +246,16 @@ export function TripPlanner({
             {loadingClimate ? "Checking…" : climate ? "Refresh climate" : "Check climate"}
           </button>
         </div>
-        {climate ? (
+        {/* When the climate is "unknown" we have no latitude and therefore no
+            real numbers — showing the placeholder as a forecast is how a June
+            trip to Ireland used to read "Hot, 28°C". Ask instead. */}
+        {climate && climate.source === "unknown" ? (
+          <ClimateUnknown
+            tripId={trip.id}
+            destination={trip.destination}
+            onSet={(next) => setClimate(next)}
+          />
+        ) : climate ? (
           <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-2">
             <Stat label="Forecast" value={BAND_LABELS[climate.band]} />
             <Stat label="Avg high" value={`${climate.avgHighC}°C`} />
@@ -256,7 +267,7 @@ export function TripPlanner({
                 ? "Live forecast"
                 : climate.source === "climatology"
                   ? "Seasonal estimate"
-                  : "Offline estimate"}
+                  : "You set this"}
             </span>
           </div>
         ) : (
@@ -387,6 +398,67 @@ export function TripPlanner({
   );
 }
 
+/** Preset highs, so setting the weather by hand is a tap rather than typing. */
+const CLIMATE_PRESETS: { label: string; avgHighC: number }[] = [
+  { label: "Hot", avgHighC: 31 },
+  { label: "Warm", avgHighC: 25 },
+  { label: "Mild", avgHighC: 18 },
+  { label: "Cool", avgHighC: 11 },
+  { label: "Cold", avgHighC: 3 },
+];
+
+/**
+ * Shown when we couldn't work out the destination's weather. Deliberately does
+ * not display the placeholder temperatures — the whole point of the fix is that
+ * we stop presenting a guess as a forecast — and offers the two ways forward:
+ * try the lookup, or say what it'll be like.
+ */
+function ClimateUnknown({
+  tripId,
+  destination,
+  onSet,
+}: {
+  tripId: string;
+  destination: string;
+  onSet: (climate: ClimateSummary) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function choose(avgHighC: number) {
+    setBusy(true);
+    setError(null);
+    const res = await setTripClimate({ tripId, avgHighC });
+    setBusy(false);
+    if (res.ok) onSet(res.climate);
+    else setError(res.error);
+  }
+
+  return (
+    <div className="mt-3">
+      <p className="text-sm text-ink-muted">
+        We don&apos;t know what the weather is like in {destination || "your destination"} for these
+        dates, so the packing list is using a neutral guess. Tell us roughly what to expect:
+      </p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {CLIMATE_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            disabled={busy}
+            onClick={() => choose(p.avgHighC)}
+            className="rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+          >
+            {p.label}
+            <span className="ml-1.5 text-ink-muted">{p.avgHighC}°C</span>
+          </button>
+        ))}
+      </div>
+      {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
+    </div>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -404,10 +476,7 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const range = `${new Date(trip.startDate).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })} – ${new Date(trip.endDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  const range = formatTripRange(trip.startDate, trip.endDate);
 
   async function save() {
     setBusy(true);

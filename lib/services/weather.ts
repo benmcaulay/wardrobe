@@ -34,7 +34,15 @@ export type ClimateSummary = {
   rainChance: number;
   /** Number of (inclusive) days in the trip. */
   days: number;
-  source: "forecast" | "climatology" | "stub";
+  /**
+   * Where the numbers came from, worst to best:
+   *   "unknown"     — we have no latitude, so these are a neutral placeholder.
+   *                   Never present them as a forecast.
+   *   "climatology" — real geocoded latitude + seasonal model. Out-of-horizon.
+   *   "forecast"    — an actual forecast for these dates.
+   *   "manual"      — the user told us; beats everything.
+   */
+  source: "forecast" | "climatology" | "unknown" | "manual";
 };
 
 export function weatherEnabled(): boolean {
@@ -58,13 +66,18 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Stable pseudo-latitude from a string so the stub is destination-aware. */
-function pseudoLatitude(name: string): number {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-  // Bias toward inhabited mid-latitudes: -55..+60.
-  return ((Math.abs(h) % 115) - 55);
-}
+/**
+ * Neutral stand-in used when we have no latitude to reason from. Deliberately
+ * bland: a temperate spring day, the same for every destination.
+ *
+ * There used to be a `pseudoLatitude()` here that hashed the destination string
+ * into a latitude so the offline path could be "destination-aware". It produced
+ * confident, specific, and completely fabricated numbers — Ireland in June came
+ * out as "Hot, 28°C" — which then drove the entire packing plan. A wrong answer
+ * delivered with the same authority as a real forecast is worse than no answer,
+ * so we now say we don't know and ask. See `hasKnownClimate`.
+ */
+const UNKNOWN_CLIMATE = { avgHighC: 18, avgLowC: 10, rainChance: 0.3 } as const;
 
 /**
  * Deterministic climatology: rough average daytime high from latitude + month.
@@ -79,20 +92,22 @@ function climatologyHigh(latitude: number, month: number): number {
   return annualMean + amplitude * Math.cos(phase);
 }
 
+/**
+ * Seasonal estimate from a *real* latitude. Only reachable once geocoding has
+ * resolved the destination — there is deliberately no fallback latitude.
+ */
 function climatologySummary(
   destination: string,
-  latitude: number | null,
+  latitude: number,
   longitude: number | null,
   start: Date,
   end: Date,
-  source: "climatology" | "stub",
 ): ClimateSummary {
-  const lat = latitude ?? pseudoLatitude(destination);
   const month = start.getUTCMonth() + 1;
-  const avgHighC = Math.round(climatologyHigh(lat, month));
+  const avgHighC = Math.round(climatologyHigh(latitude, month));
   const avgLowC = Math.round(avgHighC - 8);
   // Wetter near the equator and in cooler bands; deterministic per place.
-  const rainSeed = (Math.abs(Math.round(lat)) % 5) / 10; // 0..0.4
+  const rainSeed = (Math.abs(Math.round(latitude)) % 5) / 10; // 0..0.4
   const rainChance = Math.min(0.7, 0.2 + rainSeed);
   return {
     destination,
@@ -103,7 +118,65 @@ function climatologySummary(
     band: bandForHigh(avgHighC),
     rainChance: Math.round(rainChance * 100) / 100,
     days: inclusiveDays(start, end),
-    source,
+    source: "climatology",
+  };
+}
+
+/**
+ * "We don't know." Carries neutral numbers so the planner still has a band to
+ * work from, but `source: "unknown"` tells the UI not to present them as a
+ * forecast — it should ask the user instead (`hasKnownClimate`).
+ */
+function unknownSummary(destination: string, start: Date, end: Date): ClimateSummary {
+  return {
+    destination,
+    latitude: null,
+    longitude: null,
+    avgHighC: UNKNOWN_CLIMATE.avgHighC,
+    avgLowC: UNKNOWN_CLIMATE.avgLowC,
+    band: bandForHigh(UNKNOWN_CLIMATE.avgHighC),
+    rainChance: UNKNOWN_CLIMATE.rainChance,
+    days: inclusiveDays(start, end),
+    source: "unknown",
+  };
+}
+
+/**
+ * Whether the numbers in a summary describe the actual destination, or are
+ * just the neutral placeholder. UI must not render temperatures when false.
+ */
+export function hasKnownClimate(summary: Pick<ClimateSummary, "source">): boolean {
+  return summary.source !== "unknown";
+}
+
+/** A climate the user typed in themselves. Always wins over anything we infer. */
+export function manualClimateSummary(input: {
+  destination: string;
+  avgHighC: number;
+  avgLowC?: number | null;
+  rainChance?: number | null;
+  start: Date;
+  end: Date;
+}): ClimateSummary {
+  const avgHighC = Math.round(input.avgHighC);
+  const avgLowC =
+    input.avgLowC != null && Number.isFinite(input.avgLowC)
+      ? Math.round(input.avgLowC)
+      : avgHighC - 8;
+  const rain =
+    input.rainChance != null && Number.isFinite(input.rainChance)
+      ? Math.min(1, Math.max(0, input.rainChance))
+      : 0.2;
+  return {
+    destination: input.destination,
+    latitude: null,
+    longitude: null,
+    avgHighC,
+    avgLowC,
+    band: bandForHigh(avgHighC),
+    rainChance: Math.round(rain * 100) / 100,
+    days: inclusiveDays(input.start, input.end),
+    source: "manual",
   };
 }
 
@@ -174,14 +247,17 @@ export async function getClimateSummary(input: {
   end: Date;
 }): Promise<ClimateSummary> {
   const destination = input.destination.trim();
+  // No provider (or nowhere to look up) means no latitude, and without a
+  // latitude there is nothing honest to say about the weather.
   if (!weatherEnabled() || !destination) {
-    return climatologySummary(destination || "Unknown", null, null, input.start, input.end, "stub");
+    return unknownSummary(destination || "Unknown", input.start, input.end);
   }
 
   try {
     const hit = await geocode(destination);
     if (!hit) {
-      return climatologySummary(destination, null, null, input.start, input.end, "climatology");
+      // Couldn't resolve the place — don't guess a climate for it.
+      return unknownSummary(destination, input.start, input.end);
     }
     const label = hit.country ? `${hit.name}, ${hit.country}` : hit.name;
 
@@ -203,8 +279,10 @@ export async function getClimateSummary(input: {
         };
       }
     }
-    return climatologySummary(label, hit.latitude, hit.longitude, input.start, input.end, "climatology");
+    return climatologySummary(label, hit.latitude, hit.longitude, input.start, input.end);
   } catch {
-    return climatologySummary(destination, null, null, input.start, input.end, "climatology");
+    // Network or provider failure. We had no chance to resolve a latitude, so
+    // this is "unknown", not a climatology estimate.
+    return unknownSummary(destination, input.start, input.end);
   }
 }

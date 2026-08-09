@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatVolume } from "@/lib/packing/estimate";
+import { formatTripRange } from "@/lib/packing/trip-dates";
 import { createTrip, deleteTrip } from "./actions";
 
 export type BagOption = { id: string; name: string; volumeLiters: number };
@@ -22,12 +23,6 @@ function isoToday(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
   return d.toISOString().slice(0, 10);
-}
-
-function formatRange(startIso: string, endIso: string): string {
-  const fmt = (s: string) =>
-    new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `${fmt(startIso)} – ${fmt(endIso)}`;
 }
 
 export function HubClient({
@@ -186,7 +181,7 @@ export function HubClient({
                   <div className="font-serif text-xl">{trip.name}</div>
                   <div className="mt-1 text-sm text-ink-muted">{trip.destination}</div>
                   <div className="mt-3 text-xs text-ink-muted">
-                    {formatRange(trip.startDate, trip.endDate)}
+                    {formatTripRange(trip.startDate, trip.endDate)}
                   </div>
                   <div className="mt-1 text-xs text-ink-muted">
                     {trip.bagCount} {trip.bagCount === 1 ? "bag" : "bags"}

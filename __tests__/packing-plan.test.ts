@@ -213,3 +213,52 @@ describe("buildPackingPlan", () => {
     expect(plan.warnings).toContain("Add at least one bag to pack into.");
   });
 });
+
+describe("buildPackingPlan shortfall warnings", () => {
+  const bags = [{ id: "carryon", volumeLiters: 40 }];
+
+  it("warns when a whole essential category is missing from the closet", () => {
+    // Shoes and accessories only — no tops, no bottoms. This is exactly the
+    // shape the category-mapping bug produced, and it used to come back with
+    // an empty `warnings` array, i.e. reported as a successful plan.
+    const items: PackableItem[] = [
+      { id: "s1", category: "shoes", name: "sneakers" },
+      { id: "a1", category: "accessory", name: "cap" },
+    ];
+    const plan = buildPackingPlan({ items, bags, days: 8, band: "hot", rainChance: 0.1 });
+
+    expect(plan.warnings.some((w) => /tops/.test(w))).toBe(true);
+    expect(plan.warnings.some((w) => /bottoms/.test(w))).toBe(true);
+  });
+
+  it("names every missing essential category in one warning", () => {
+    const plan = buildPackingPlan({ items: [], bags, days: 4, band: "mild", rainChance: 0 });
+    const shortfall = plan.warnings.find((w) => /Nothing in your closet matched/.test(w));
+    expect(shortfall).toBeDefined();
+    expect(shortfall).toMatch(/tops, bottoms, shoes or outerwear/);
+  });
+
+  it("stays quiet when every essential category is filled", () => {
+    const items: PackableItem[] = [
+      { id: "t1", category: "shirt", season: ["summer"], name: "tee" },
+      { id: "b1", category: "shorts", season: ["summer"], name: "shorts" },
+      { id: "b2", category: "pants", season: ["summer"], name: "chinos" },
+      { id: "o1", category: "jacket", season: ["summer"], name: "light jacket" },
+      { id: "s1", category: "shoes", season: ["summer"], name: "sandals" },
+    ];
+    const plan = buildPackingPlan({ items, bags, days: 3, band: "hot", rainChance: 0 });
+    expect(plan.warnings.filter((w) => /Nothing in your closet matched/.test(w))).toEqual([]);
+  });
+
+  it("does not warn about a category the trip never asked for", () => {
+    // Dresses have a target of 0 in cold weather, so their absence is correct.
+    const items: PackableItem[] = [
+      { id: "t1", category: "shirt", season: ["winter"], name: "thermal" },
+      { id: "b1", category: "pants", season: ["winter"], name: "jeans" },
+      { id: "o1", category: "jacket", season: ["winter"], name: "parka" },
+      { id: "s1", category: "shoes", season: ["winter"], name: "boots" },
+    ];
+    const plan = buildPackingPlan({ items, bags, days: 5, band: "cold", rainChance: 0 });
+    expect(plan.warnings.some((w) => /dress/.test(w))).toBe(false);
+  });
+});
