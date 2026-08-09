@@ -6,7 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { imageUrl } from "@/lib/image-paths";
 import { formatCents, suggestedAskingCents } from "@/lib/sale-listing";
 import { fadeUp, scaleIn, springSnappy, springSoft } from "@/lib/ui-motion";
-import { setSaleDecision, removeSaleListing } from "./actions";
+import { setSaleDecision, removeSaleListing } from "../actions";
 
 export type SwipeItem = {
   id: string;

@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { parseColors, parseStringArray } from "@/lib/json";
-import { sanitizeMarketplaceIds } from "@/lib/marketplaces";
+import { parseColors, parseStringArray, parseStylePrefs } from "@/lib/json";
+import { isMarketplaceId, sanitizeMarketplaceIds } from "@/lib/marketplaces";
 import {
   buildListingDraft,
   isItemCondition,
@@ -13,6 +13,8 @@ import {
   type ItemCondition,
   type SaleStatus,
 } from "@/lib/sale-listing";
+import { readFeeOverrides } from "@/lib/sell/fee-prefs";
+import { estimateFeeCents } from "@/lib/sell/fees";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -59,6 +61,7 @@ export async function setSaleDecision(input: {
       },
     });
     revalidatePath("/closet/sell");
+    revalidatePath("/closet/sell/triage");
     return { ok: true };
   }
 
@@ -95,6 +98,7 @@ export async function setSaleDecision(input: {
     },
   });
   revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/triage");
   revalidatePath("/closet/sell/listings");
   return { ok: true };
 }
@@ -175,6 +179,7 @@ export async function setSaleStatus(input: {
 
   await prisma.saleListing.update({ where: { itemId: input.itemId }, data });
   revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/triage");
   revalidatePath("/closet/sell/listings");
   return { ok: true };
 }
@@ -191,6 +196,7 @@ export async function removeSaleListing(itemId: string): Promise<Result> {
   }
   await prisma.saleListing.delete({ where: { itemId } });
   revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/triage");
   revalidatePath("/closet/sell/listings");
   return { ok: true };
 }
@@ -218,6 +224,7 @@ export async function bulkSetSaleStatus(input: {
     data: { status: input.status, soldPriceCents: null },
   });
   revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/triage");
   revalidatePath("/closet/sell/listings");
   return { ok: true, count: res.count };
 }
@@ -230,6 +237,159 @@ export async function bulkRemoveSaleListings(itemIds: string[]): Promise<BulkRes
     where: { userId: user.id, itemId: { in: itemIds } },
   });
   revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/triage");
   revalidatePath("/closet/sell/listings");
   return { ok: true, count: res.count };
+}
+
+/**
+ * Record a completed sale against a specific marketplace.
+ *
+ * This is the write behind "Log a sale" — the one place per-platform truth
+ * enters the system. It does two things at once: flips the listing to sold
+ * (so the board and totals agree), and writes the placement row that every
+ * per-platform and time-to-sell number reads from.
+ *
+ * `feeCents` is optional. When the user didn't supply one we fall back to the
+ * platform's rate and mark the row `feeEstimated`, so the UI can be honest
+ * about which net figures are measured and which are inferred.
+ */
+export async function logSale(input: {
+  itemId: string;
+  platform: string;
+  soldPriceCents: number;
+  feeCents?: number | null;
+  shippingCents?: number | null;
+  soldAtMs?: number | null;
+  listedAtMs?: number | null;
+  externalUrl?: string | null;
+}): Promise<Result> {
+  const user = await requireUser();
+  if (!isMarketplaceId(input.platform)) return { ok: false, error: "Unknown marketplace" };
+
+  const sold = Math.max(0, Math.round(input.soldPriceCents));
+  if (!Number.isFinite(sold)) return { ok: false, error: "Enter a sale price" };
+
+  const listing = await prisma.saleListing.findUnique({
+    where: { itemId: input.itemId },
+    select: { id: true, userId: true, currency: true },
+  });
+  if (!listing || listing.userId !== user.id) return { ok: false, error: "Listing not found" };
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const overrides = readFeeOverrides(parseStylePrefs(dbUser?.stylePrefs));
+
+  const feeGiven = input.feeCents != null && Number.isFinite(input.feeCents);
+  const feeCents = feeGiven
+    ? Math.max(0, Math.round(input.feeCents as number))
+    : estimateFeeCents(input.platform, sold, overrides);
+
+  const shippingCents =
+    input.shippingCents != null && Number.isFinite(input.shippingCents)
+      ? Math.max(0, Math.round(input.shippingCents))
+      : null;
+
+  // A sale needs a date to count toward time-to-sell; default to now rather
+  // than leaving it null, since the user is logging it as it happens.
+  const soldAt = input.soldAtMs ? new Date(input.soldAtMs) : new Date();
+  const listedAt = input.listedAtMs ? new Date(input.listedAtMs) : undefined;
+
+  const placementData = {
+    status: "sold",
+    soldPriceCents: sold,
+    feeCents,
+    feeEstimated: !feeGiven,
+    shippingCents,
+    soldAt,
+    currency: listing.currency || "USD",
+    externalUrl: input.externalUrl?.trim() || null,
+    ...(listedAt ? { listedAt } : {}),
+  };
+
+  await prisma.$transaction([
+    prisma.listingPlacement.upsert({
+      where: { listingId_platform: { listingId: listing.id, platform: input.platform } },
+      update: placementData,
+      create: {
+        userId: user.id,
+        listingId: listing.id,
+        platform: input.platform,
+        ...placementData,
+      },
+    }),
+    // Anywhere else it was cross-posted is no longer for sale — it's gone.
+    prisma.listingPlacement.updateMany({
+      where: {
+        listingId: listing.id,
+        platform: { not: input.platform },
+        status: { in: ["draft", "listed"] },
+      },
+      data: { status: "ended" },
+    }),
+    prisma.saleListing.update({
+      where: { id: listing.id },
+      data: { status: "sold" satisfies SaleStatus, soldPriceCents: sold },
+    }),
+  ]);
+
+  revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/triage");
+  revalidatePath("/closet/sell/listings");
+  return { ok: true };
+}
+
+/**
+ * Mark a listing live on a marketplace. Sets `listedAt` the first time only —
+ * re-listing shouldn't reset the clock that time-to-sell measures against.
+ */
+export async function setPlacementListed(input: {
+  itemId: string;
+  platform: string;
+  externalUrl?: string | null;
+}): Promise<Result> {
+  const user = await requireUser();
+  if (!isMarketplaceId(input.platform)) return { ok: false, error: "Unknown marketplace" };
+
+  const listing = await prisma.saleListing.findUnique({
+    where: { itemId: input.itemId },
+    select: { id: true, userId: true, askingCents: true, currency: true },
+  });
+  if (!listing || listing.userId !== user.id) return { ok: false, error: "Listing not found" };
+
+  const existing = await prisma.listingPlacement.findUnique({
+    where: { listingId_platform: { listingId: listing.id, platform: input.platform } },
+    select: { id: true, listedAt: true },
+  });
+
+  const externalUrl = input.externalUrl?.trim() || null;
+  if (existing) {
+    await prisma.listingPlacement.update({
+      where: { id: existing.id },
+      data: {
+        status: "listed",
+        externalUrl,
+        ...(existing.listedAt ? {} : { listedAt: new Date() }),
+      },
+    });
+  } else {
+    await prisma.listingPlacement.create({
+      data: {
+        userId: user.id,
+        listingId: listing.id,
+        platform: input.platform,
+        status: "listed",
+        askingCents: listing.askingCents,
+        currency: listing.currency || "USD",
+        listedAt: new Date(),
+        externalUrl,
+      },
+    });
+  }
+
+  revalidatePath("/closet/sell");
+  revalidatePath("/closet/sell/listings");
+  return { ok: true };
 }

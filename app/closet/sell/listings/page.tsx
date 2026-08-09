@@ -82,7 +82,7 @@ export default async function ListingsPage() {
       {/* pr-28 clears the fixed menu trigger (app/closet/layout.tsx). */}
       <nav className="text-xs text-ink-muted mb-6 flex items-center justify-between pr-28">
         <Link href="/closet/sell" className="hover:text-ink">
-          ← Keep swiping
+          ← Sell
         </Link>
         <Link href="/closet" className="hover:text-ink">
           Closet →
@@ -93,8 +93,8 @@ export default async function ListingsPage() {
         <h1 className="font-serif text-4xl tracking-tight">For sale</h1>
         <p className="text-ink-muted mt-2">
           Tweak each draft, set your price, then copy or download a bundle (listing.txt + photos)
-          and paste into the marketplace. No public API lets us post for you — but everything here
-          is hand-off ready.
+          and paste into the marketplace. Most of these have no seller API, so posting is still by
+          hand — but everything here is hand-off ready.
         </p>
       </header>
 

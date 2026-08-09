@@ -101,12 +101,12 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
     return (
       <div className="rounded-3xl border border-ink/10 bg-paper-warm p-12 text-center">
         <p className="font-serif text-2xl">Nothing listed yet.</p>
-        <p className="mt-2 text-ink-muted">Swipe right on pieces you want to sell.</p>
+        <p className="mt-2 text-ink-muted">Sort through your closet to pick what goes up.</p>
         <Link
-          href="/closet/sell"
+          href="/closet/sell/triage"
           className="mt-6 inline-block rounded-full bg-ink px-6 py-2.5 text-sm tracking-wide text-paper transition hover:bg-ink-soft"
         >
-          Start swiping
+          Sell or keep
         </Link>
       </div>
     );

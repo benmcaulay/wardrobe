@@ -33,6 +33,7 @@ model User {
   outfitLayouts     OutfitLayout[]
   virtualTryOns     VirtualTryOn[]
   saleListings      SaleListing[]
+  listingPlacements ListingPlacement[]
   packingBags       PackingBag[]
   packingTrips      PackingTrip[]
   accounts          Account[]
@@ -313,9 +314,57 @@ model SaleListing {
   marketplaces String       @default("[]") // JSON: string[] of marketplace ids
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+  placements   ListingPlacement[]
 
   @@index([userId])
   @@index([userId, status])
+}
+
+// One row per (listing × marketplace): where a piece was actually cross-posted,
+// and — if it sold there — for how much, minus what the platform took.
+//
+// SaleListing stays the item-level draft (title, description, asking price);
+// placements hold the per-platform truth, so the same coat can sit live on Depop
+// and Poshmark at once and sell on exactly one of them. Every per-platform and
+// time-to-sell number on the Sell landing reads off this table.
+//
+// `SaleListing.marketplaces` predates this and only ever recorded *intent* —
+// which platforms the user meant to post to. It's kept in sync as a denormalized
+// mirror so older screens keep working; placements are the source of truth.
+model ListingPlacement {
+  id             String      @id @default(cuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId      String
+  listing        SaleListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  /// Marketplace id from lib/marketplaces.ts ("depop" | "poshmark" | …).
+  platform       String
+  /// "draft" | "listed" | "sold" | "ended" — see lib/sell/placement.ts
+  status         String      @default("draft")
+  /// Asking price on THIS platform; null means "same as the listing's".
+  askingCents    Int?
+  soldPriceCents Int?
+  /// Commission the platform took. Recorded when known, estimated otherwise —
+  /// `feeEstimated` says which, so we never present a guess as a fact.
+  feeCents       Int?
+  feeEstimated   Boolean     @default(true)
+  /// Shipping the seller absorbed, when they did.
+  shippingCents  Int?
+  currency       String      @default("USD")
+  /// When it actually went live / sold here. These drive time-to-sell; the
+  /// row's updatedAt can't, since any edit moves it.
+  listedAt       DateTime?
+  soldAt         DateTime?
+  /// Deep link to the live listing, when the user pastes one.
+  externalUrl    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([listingId, platform])
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, platform, status])
+  @@index([userId, soldAt])
 }
 
 // Saved drag/resize/layer outfit compositions for the outfit-builder canvas.
