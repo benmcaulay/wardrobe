@@ -95,6 +95,19 @@ export function colorVersatility(colors: readonly Color[] | undefined | null): n
   return Math.min(1, Math.max(0, mean * busy));
 }
 
+/**
+ * The role of a piece's dominant colour — the first one listed, which is how
+ * the colour picker orders them.
+ *
+ * Unknown colour data reports "neutral" on purpose: an untagged piece should
+ * never be the thing that makes an outfit read as a colour clash, because we
+ * have no evidence that it does.
+ */
+export function dominantRole(colors: readonly Color[] | undefined | null): ColorRole {
+  const first = colors?.find((c) => c?.name && c.name.trim().length > 0);
+  return first ? colorRole(first.name) : "neutral";
+}
+
 /** True when every named colour is a true or near neutral. */
 export function isNeutralPiece(colors: readonly Color[] | undefined | null): boolean {
   if (!colors || colors.length === 0) return false;

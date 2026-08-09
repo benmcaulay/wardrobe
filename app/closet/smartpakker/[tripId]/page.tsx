@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { parseSeasons, parseStringArray, type Season } from "@/lib/json";
+import { parseColors, parseSeasons, parseStringArray, type Season } from "@/lib/json";
 import { estimateItemPacking } from "@/lib/packing/estimate";
 import { bucketFor } from "@/lib/packing/plan";
 import type { ClimateSummary } from "@/lib/services/weather";
@@ -41,6 +41,7 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         subcategory: true,
         material: true,
         season: true,
+        colors: true,
         originalImagePath: true,
         ghostImagePath: true,
         weightGrams: true,
@@ -74,7 +75,8 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       name: r.name,
       imagePath: r.ghostImagePath ?? r.originalImagePath,
       category: r.category,
-      bucket: bucketFor(r.category),
+      bucket: bucketFor(r),
+      colors: parseColors(r.colors),
       season: parseSeasons(r.season) as Season[],
       weightGrams: est.weightGrams,
       volumeLiters: est.volumeLiters,

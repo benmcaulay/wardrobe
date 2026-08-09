@@ -7,6 +7,13 @@ import { thumbnailUrl } from "@/lib/image-paths";
 import type { Season } from "@/lib/json";
 import { formatVolume, formatWeight } from "@/lib/packing/estimate";
 import { computeUsage, seasonScore, type CategoryBucket } from "@/lib/packing/plan";
+import {
+  completeDayCount,
+  distinctOutfitCount,
+  planDailyOutfits,
+  rewearDayCount,
+  type DayOutfit,
+} from "@/lib/packing/outfits";
 import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import {
@@ -38,6 +45,7 @@ export type PlannerItem = {
   imagePath: string;
   category: string;
   bucket: CategoryBucket;
+  colors: { name: string; hex: string }[];
   season: Season[];
   weightGrams: number;
   volumeLiters: number;
@@ -229,6 +237,17 @@ export function TripPlanner({
     return { typeRows, valueLabel, pricedCount, total };
   }, [items, bagOfItem]);
 
+  // Derived from the live assignment rather than the last auto-pack, so
+  // swapping a piece re-plans the week immediately. This is why lib/packing is
+  // pure — the same code the server used runs here with no round trip.
+  const dayPlan = useMemo(() => {
+    const packed = items
+      .filter((i) => bagOfItem.has(i.id))
+      .map((i) => ({ id: i.id, bucket: i.bucket, colors: i.colors }));
+    const cold = climate ? ["cool", "cold"].includes(climate.band) || climate.rainChance >= 0.4 : false;
+    return planDailyOutfits({ packed, days: climate?.days ?? 0, includeOuterwear: cold });
+  }, [items, bagOfItem, climate]);
+
   return (
     <div className="space-y-8">
       <TripHeader trip={trip} onSaved={() => router.refresh()} />
@@ -299,6 +318,33 @@ export function TripPlanner({
             <li key={i}>• {w}</li>
           ))}
         </ul>
+      ) : null}
+
+      {/* Day by day — the output contract that makes a bad bag obvious */}
+      {dayPlan.length > 0 ? (
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="font-serif text-xl">Day by day</h2>
+            <p className="text-xs text-ink-muted">
+              {completeDayCount(dayPlan)} of {dayPlan.length} days dressed
+              {distinctOutfitCount(dayPlan) > 0
+                ? ` · ${distinctOutfitCount(dayPlan)} distinct ${
+                    distinctOutfitCount(dayPlan) === 1 ? "outfit" : "outfits"
+                  }`
+                : ""}
+              {/* Reconciles with the packing warning's "covers N of M days",
+                  which counts only days you can dress in clean clothes. */}
+              {rewearDayCount(dayPlan) > 0
+                ? ` · ${rewearDayCount(dayPlan)} need a re-wear`
+                : ""}
+            </p>
+          </div>
+          <ul className="mt-4 grid gap-2.5 sm:grid-cols-2">
+            {dayPlan.map((day) => (
+              <DayCard key={day.day} day={day} itemById={itemById} startDate={trip.startDate} />
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {/* Packed summary: garment-type counts + total value */}
@@ -456,6 +502,61 @@ function ClimateUnknown({
       </div>
       {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
     </div>
+  );
+}
+
+/** One day of the trip: what you'd wear, or what's missing. */
+function DayCard({
+  day,
+  itemById,
+  startDate,
+}: {
+  day: DayOutfit;
+  itemById: Map<string, PlannerItem>;
+  startDate: string;
+}) {
+  const pieces = day.itemIds.map((id) => itemById.get(id)).filter((i): i is PlannerItem => !!i);
+  const date = new Date(startDate);
+  date.setUTCDate(date.getUTCDate() + day.day - 1);
+  const label = date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+
+  return (
+    <li
+      className={`rounded-xl border p-3 ${
+        day.complete ? "border-ink/10 bg-paper" : "border-amber-300/60 bg-amber-50"
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium">{label}</span>
+        {!day.complete ? (
+          <span className="text-[11px] text-amber-900">Nothing to wear</span>
+        ) : day.rewear ? (
+          <span className="text-[11px] text-ink-muted">Re-wear</span>
+        ) : !day.coherent ? (
+          <span className="text-[11px] text-ink-muted">Bold combination</span>
+        ) : null}
+      </div>
+      {pieces.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {pieces.map((piece) => (
+            <img
+              key={piece.id}
+              src={thumbnailUrl(piece.imagePath)}
+              alt={piece.name}
+              title={piece.name}
+              className="h-12 w-12 rounded-lg bg-white object-contain"
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-[11px] text-ink-muted">Pack a top, a bottom and shoes.</p>
+      )}
+    </li>
   );
 }
 
