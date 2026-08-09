@@ -1,22 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { isScrolledToEnd, planeRouteState } from "@/lib/packing/planner-view";
+import { PLANE_FLIGHT_MS, isScrolledToEnd, planeFlightVars } from "@/lib/packing/planner-view";
 
-describe("planeRouteState", () => {
-  it("parks the plane until something has been packed", () => {
-    expect(planeRouteState({ packing: false, packed: false })).toBe("idle");
+describe("plane flight duration", () => {
+  it("is a fixed one-second gesture, not a progress indicator", () => {
+    expect(PLANE_FLIGHT_MS).toBe(1000);
   });
 
-  it("flies while a pack is running", () => {
-    expect(planeRouteState({ packing: true, packed: false })).toBe("flying");
-  });
-
-  it("lands once a plan comes back", () => {
-    expect(planeRouteState({ packing: false, packed: true })).toBe("landed");
-  });
-
-  it("takes off again for a re-pack rather than sitting at the destination", () => {
-    expect(planeRouteState({ packing: true, packed: true })).toBe("flying");
+  it("hands CSS the same duration the timer uses, so the two can't drift", () => {
+    // The keyframes end the flight visually; the timer ends it in state. If
+    // these disagree the plane either vanishes mid-route or lingers after it.
+    expect(planeFlightVars()).toEqual({ "--plane-flight": `${PLANE_FLIGHT_MS}ms` });
   });
 });
 

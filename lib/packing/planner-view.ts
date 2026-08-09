@@ -1,27 +1,30 @@
 /**
  * Small view-state helpers for the trip planner.
  *
- * Both of these decide something the eye then reads as a claim — whether the
- * bag has been packed, whether there is more list below the fold — so they live
- * here as pure functions rather than inline in the JSX, where they can't be
- * tested and quietly drift.
+ * These decide something the eye then reads as a claim — how long the plane is
+ * in the air, whether there is more list below the fold — so they live here as
+ * plain values and pure functions rather than inline in the JSX, where they
+ * can't be tested and quietly drift.
  */
 
 /**
- * Where the plane sits on the flight strip beside the auto-pack button.
+ * How long the plane flies after the auto-pack button is pressed.
  *
- *   idle    — nothing packed yet this session; parked at the origin
- *   flying  — a pack is running
- *   landed  — a pack came back with a plan
- *
- * `packing` wins: a re-pack puts the plane back in the air rather than leaving
- * it sitting at the destination while work is happening.
+ * Deliberately a fixed gesture, not a progress indicator. Tying it to the
+ * request would make it a spinner that lies: a warm cache returns in 40ms and
+ * the plane would twitch, a cold one takes seconds and it would loop like the
+ * pack had stalled. One second of departure, every time, whatever the server
+ * is doing.
  */
-export type PlaneRouteState = "idle" | "flying" | "landed";
+export const PLANE_FLIGHT_MS = 1000;
 
-export function planeRouteState(input: { packing: boolean; packed: boolean }): PlaneRouteState {
-  if (input.packing) return "flying";
-  return input.packed ? "landed" : "idle";
+/**
+ * The flight duration handed to CSS. Both the keyframes and the timer that
+ * ends the flight read from `PLANE_FLIGHT_MS` through here, so they can't drift
+ * apart and strand the plane mid-route.
+ */
+export function planeFlightVars(): Record<string, string> {
+  return { "--plane-flight": `${PLANE_FLIGHT_MS}ms` };
 }
 
 /**
