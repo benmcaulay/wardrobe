@@ -69,6 +69,77 @@ body {
   }
 }
 
+/* --- SmartPakker auto-pack flight strip ---------------------------------
+   A plane runs the route while the bag is being packed, drawing its trail
+   behind it. Three states, set via data-state on the wrapper:
+     idle    — parked at the origin, route faint and undrawn
+     flying  — looping, one lap per pass
+     landed  — parked at the destination with the route drawn
+   The `--trail` length is the route path's length rounded up; over-long only
+   means the dash starts fully hidden, which is what we want. */
+.plane-route {
+  --trail: 210;
+}
+
+.plane-route .plane-trail {
+  stroke-dasharray: var(--trail);
+  stroke-dashoffset: var(--trail);
+}
+
+.plane-route .plane-craft {
+  offset-path: path("M 8 23 C 58 24, 84 9, 190 7");
+  offset-rotate: auto;
+  offset-distance: 0%;
+}
+
+.plane-route[data-state="flying"] .plane-craft {
+  animation: plane-fly 1.9s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+.plane-route[data-state="flying"] .plane-trail {
+  animation: plane-trail 1.9s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+.plane-route[data-state="landed"] .plane-craft {
+  offset-distance: 100%;
+}
+
+.plane-route[data-state="landed"] .plane-trail {
+  stroke-dashoffset: 0;
+}
+
+@keyframes plane-fly {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  86% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes plane-trail {
+  0% {
+    stroke-dashoffset: var(--trail);
+    opacity: 1;
+  }
+  86% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
 /* Consistent keyboard focus ring across every interactive element.
    `:focus-visible` so mouse clicks don't flash it. */
 :focus-visible {
