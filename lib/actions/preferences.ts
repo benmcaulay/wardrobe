@@ -8,6 +8,7 @@ import { decode, encode, type StylePrefs } from "@/lib/json";
 import { sanitizeStyleTagsList } from "@/lib/preferences";
 import { sanitizeHiddenFilters } from "@/lib/closet-filter-visibility";
 import { readClosetSort } from "@/lib/closet-sort";
+import { readTemperatureUnit } from "@/lib/temperature";
 
 function sanitizeStylePrefsPayload(prefs: StylePrefs): StylePrefs {
   const {
@@ -91,6 +92,26 @@ export async function setDefaultClosetSort(sort: string): Promise<void> {
     where: { id: user.id },
     data: { stylePrefs: encode(sanitizeStylePrefsPayload(merged)) },
   });
+}
+
+/**
+ * Choose Celsius or Fahrenheit. Display only — nothing stored is converted —
+ * so this revalidates the pages that render a temperature.
+ */
+export async function setTemperatureUnit(unit: string): Promise<void> {
+  const user = await requireUser();
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const existing = decode<StylePrefs>(row?.stylePrefs, {});
+  const merged: StylePrefs = { ...existing, temperatureUnit: readTemperatureUnit(unit) };
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stylePrefs: encode(sanitizeStylePrefsPayload(merged)) },
+  });
+  revalidatePath("/settings");
+  revalidatePath("/closet/smartpakker", "layout");
 }
 
 export async function setAutoGenerateGhost(enabled: boolean): Promise<void> {

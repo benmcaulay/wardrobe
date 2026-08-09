@@ -10,7 +10,14 @@ import {
   updateStylePrefs,
   setAutoGenerateGhost,
   setHiddenClosetFilters,
+  setTemperatureUnit,
 } from "@/lib/actions/preferences";
+import {
+  TEMPERATURE_UNIT_LABELS,
+  formatTemperature,
+  readTemperatureUnit,
+  type TemperatureUnit,
+} from "@/lib/temperature";
 import {
   CLOSET_FILTER_KEYS,
   CLOSET_FILTER_LABELS,
@@ -80,6 +87,9 @@ export function SettingsClient({
   const [newColorHex, setNewColorHex] = useState("#4a6fb0");
   const [newColorName, setNewColorName] = useState("");
   const [autoGen, setAutoGen] = useState(autoGenerateGhost);
+  const [tempUnit, setTempUnit] = useState<TemperatureUnit>(() =>
+    readTemperatureUnit(initialPrefs.temperatureUnit),
+  );
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [catError, setCatError] = useState<string | null>(null);
@@ -169,6 +179,13 @@ export function SettingsClient({
     await updateStylePrefs(prefs);
     setSaving(false);
     setSavedAt(Date.now());
+    router.refresh();
+  }
+
+  async function onPickTemperatureUnit(next: TemperatureUnit) {
+    if (next === tempUnit) return;
+    setTempUnit(next);
+    await setTemperatureUnit(next);
     router.refresh();
   }
 
@@ -711,6 +728,42 @@ export function SettingsClient({
             {filterError}
           </p>
         )}
+      </section>
+
+      <section className="space-y-4">
+        <h3 className="text-xs uppercase tracking-wide text-ink-muted">Temperature</h3>
+        <p className="text-sm text-ink-muted max-w-xl">
+          The unit trip forecasts are shown in. Display only — nothing is re-saved, so switching
+          back and forth never drifts a stored figure.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Temperature unit"
+          className="inline-flex rounded-full border border-ink/15 bg-white p-1"
+        >
+          {(["c", "f"] as const).map((unit) => {
+            const active = tempUnit === unit;
+            return (
+              <button
+                key={unit}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onPickTemperatureUnit(unit)}
+                className={`rounded-full px-4 py-1.5 text-sm transition ${
+                  active ? "bg-ink text-paper" : "text-ink-muted hover:bg-paper-warm"
+                }`}
+              >
+                {TEMPERATURE_UNIT_LABELS[unit]}
+                {/* A worked example beats the abbreviation: 21°C means nothing
+                    to half the world, and neither does 70°F to the other half. */}
+                <span className={`ml-2 ${active ? "text-paper/60" : "text-ink-muted/70"}`}>
+                  {formatTemperature(21, unit)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-ink/10 bg-white p-5 space-y-3">

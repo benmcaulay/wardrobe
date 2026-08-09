@@ -21,6 +21,7 @@ import {
 } from "@/lib/packing/requirements";
 import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
+import { formatTemperature, type TemperatureUnit } from "@/lib/temperature";
 import {
   fetchTripClimate,
   setTripClimate,
@@ -110,6 +111,7 @@ export function TripPlanner({
   initialClimate,
   initialRequirements,
   initialAssignments,
+  temperatureUnit,
 }: {
   trip: PlannerTrip;
   bags: PlannerBag[];
@@ -117,6 +119,7 @@ export function TripPlanner({
   initialClimate: ClimateSummary | null;
   initialRequirements: TripRequirements;
   initialAssignments: Record<string, string[]>;
+  temperatureUnit: TemperatureUnit;
 }) {
   const router = useRouter();
   const [climate, setClimate] = useState<ClimateSummary | null>(initialClimate);
@@ -315,8 +318,12 @@ export function TripPlanner({
   }
 
   return (
-    <div className="space-y-8">
-      <TripHeader trip={trip} onSaved={() => router.refresh()} />
+    // Two columns from lg up: the plan on the left, what's actually in the bags
+    // on the right. Below lg they stack in the same order.
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-8">
+      {/* Left: the trip and what it asks of the bag. */}
+      <div className="space-y-8">
+        <TripHeader trip={trip} onSaved={() => router.refresh()} />
 
       {/* Climate */}
       <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
@@ -338,6 +345,7 @@ export function TripPlanner({
           <ClimateUnknown
             tripId={trip.id}
             destination={trip.destination}
+            temperatureUnit={temperatureUnit}
             onSet={(next) => setClimate(next)}
           />
         ) : climate ? (
@@ -345,8 +353,8 @@ export function TripPlanner({
             {/* Not "Forecast" — the same row also carries past records and the
                 user's own guess. The footnote below says which. */}
             <Stat label="Conditions" value={BAND_LABELS[climate.band]} />
-            <Stat label="Avg high" value={`${climate.avgHighC}°C`} />
-            <Stat label="Avg low" value={`${climate.avgLowC}°C`} />
+            <Stat label="Avg high" value={formatTemperature(climate.avgHighC, temperatureUnit)} />
+            <Stat label="Avg low" value={formatTemperature(climate.avgLowC, temperatureUnit)} />
             <Stat label="Rain" value={`${Math.round(climate.rainChance * 100)}%`} />
             <Stat label="Days" value={String(climate.days)} />
             <span className="text-[11px] text-ink-muted">
@@ -509,7 +517,11 @@ export function TripPlanner({
           ) : null}
         </section>
       ) : null}
+      </div>
 
+      {/* Right: the bags themselves, plus the pool you fill them from. Sticky
+          so the contents stay in view while you read the plan beside them. */}
+      <aside className="mt-8 space-y-5 lg:sticky lg:top-6 lg:mt-0 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pb-2">
       {/* Bags */}
       {bags.length === 0 ? (
         <div className="rounded-2xl bg-paper-warm p-6 text-sm text-ink-muted">
@@ -520,7 +532,7 @@ export function TripPlanner({
           then edit the trip to include it.
         </div>
       ) : (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="space-y-5">
           {bags.map((bag) => {
             const u = usage.perBag.find((p) => p.bagId === bag.id)!;
             return (
@@ -555,7 +567,9 @@ export function TripPlanner({
         {unpacked.length === 0 ? (
           <p className="text-sm text-ink-muted">Everything&apos;s packed.</p>
         ) : (
-          <ul className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+          // No inner scroller: the column already scrolls, and nesting the two
+          // makes the wheel fight over which one moves.
+          <ul className="space-y-2">
             {unpacked.map((item) => (
               <ItemRow
                 key={item.id}
@@ -571,6 +585,7 @@ export function TripPlanner({
           </ul>
         )}
       </section>
+      </aside>
     </div>
   );
 }
@@ -593,10 +608,12 @@ const CLIMATE_PRESETS: { label: string; avgHighC: number }[] = [
 function ClimateUnknown({
   tripId,
   destination,
+  temperatureUnit,
   onSet,
 }: {
   tripId: string;
   destination: string;
+  temperatureUnit: TemperatureUnit;
   onSet: (climate: ClimateSummary) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -627,7 +644,9 @@ function ClimateUnknown({
             className="rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
           >
             {p.label}
-            <span className="ml-1.5 text-ink-muted">{p.avgHighC}°C</span>
+            <span className="ml-1.5 text-ink-muted">
+              {formatTemperature(p.avgHighC, temperatureUnit)}
+            </span>
           </button>
         ))}
       </div>
