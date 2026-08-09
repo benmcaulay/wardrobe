@@ -42,6 +42,11 @@ export type StylePrefs = {
   hiddenClosetFilters?: string[];
   /** Sort the closet opens with — remembers whatever you last chose. */
   defaultClosetSort?: string;
+  /**
+   * Display unit for temperatures ("c" | "f"). Presentation only — trip climate
+   * is always stored in Celsius. See lib/temperature.ts.
+   */
+  temperatureUnit?: string;
   /** Manual item order within category + primary-color groups (group key → item ids). */
   closetGroupOrders?: Record<string, string[]>;
   /** Default canvas placement per outfit slot category rule (signature → layout). */

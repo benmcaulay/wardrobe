@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { parseColors, parseSeasons, parseStringArray, type Season } from "@/lib/json";
+import { parseColors, parseSeasons, parseStringArray, parseStylePrefs, type Season } from "@/lib/json";
+import { readTemperatureUnit } from "@/lib/temperature";
 import { estimateItemPacking } from "@/lib/packing/estimate";
 import { bucketFor } from "@/lib/packing/plan";
 import { parseTripRequirements } from "@/lib/packing/requirements";
@@ -22,7 +23,8 @@ export default async function TripPage({ params }: { params: { tripId: string } 
   if (!trip || trip.userId !== user.id) notFound();
 
   const bagIds = parseStringArray(trip.bagIds);
-  const [bagRows, itemRows] = await Promise.all([
+  const [prefRow, bagRows, itemRows] = await Promise.all([
+    prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
     prisma.packingBag.findMany({
       where: { userId: user.id, id: { in: bagIds.length ? bagIds : ["__none__"] } },
     }),
@@ -115,7 +117,9 @@ export default async function TripPage({ params }: { params: { tripId: string } 
   for (const bag of bags) if (!assignments[bag.id]) assignments[bag.id] = [];
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
+    // Wider than the rest of SmartPakker: this page runs the plan and the bag
+    // contents side by side, and 5xl squeezes both.
+    <main className="mx-auto max-w-7xl px-6 py-12">
       <nav className="mb-6 text-xs text-ink-muted">
         <Link href="/closet/smartpakker" className="hover:text-ink">
           ← Trip Packing Assistant
@@ -127,8 +131,9 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         bags={bags}
         items={items}
         initialRequirements={parseTripRequirements(trip.requirements)}
-      initialClimate={climate}
+        initialClimate={climate}
         initialAssignments={assignments}
+        temperatureUnit={readTemperatureUnit(parseStylePrefs(prefRow?.stylePrefs).temperatureUnit)}
       />
     </main>
   );
