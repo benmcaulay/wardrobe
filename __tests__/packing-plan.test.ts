@@ -3,6 +3,8 @@ import {
   bucketFor,
   buildPackingPlan,
   climateScore,
+  coverThenFill,
+  coveredDays,
   garmentWarmth,
   computeUsage,
   isPants,
@@ -11,6 +13,7 @@ import {
   seasonScore,
   selectItems,
   targetCounts,
+  type CategoryBucket,
   type PackableItem,
   type SelectedItem,
 } from "@/lib/packing/plan";
@@ -260,7 +263,7 @@ describe("buildPackingPlan shortfall warnings", () => {
       { id: "s1", category: "shoes", season: ["winter"], name: "boots" },
     ];
     const plan = buildPackingPlan({ items, bags, days: 5, band: "cold", rainChance: 0 });
-    expect(plan.warnings.some((w) => /dress/.test(w))).toBe(false);
+    expect(plan.warnings.some((w) => /dresses/.test(w))).toBe(false);
   });
 });
 
@@ -319,5 +322,137 @@ describe("climateScore discriminates on colour", () => {
     expect(garmentWarmth({ id: "a", category: "shirt", name: "Vagabond T Shirt" })).toBe(
       garmentWarmth({ id: "b", category: "shirt", name: "Vagabond T-shirt" }),
     );
+  });
+});
+
+describe("coveredDays", () => {
+  it("is a minimum across essentials, not a sum", () => {
+    // Eight tops and no bottoms dresses you for zero days. The old packer
+    // scored exactly this arrangement highly, because it measured litres.
+    expect(coveredDays({ top: 8, shoes: 1 }, 8)).toBe(0);
+    expect(coveredDays({ bottom: 8, shoes: 1 }, 8)).toBe(0);
+  });
+
+  it("needs shoes", () => {
+    expect(coveredDays({ top: 8, bottom: 8 }, 8)).toBe(0);
+  });
+
+  it("applies re-wear: one bottom covers several days", () => {
+    expect(coveredDays({ top: 2, bottom: 1, shoes: 1 }, 8)).toBe(3);
+  });
+
+  it("caps at the trip length", () => {
+    expect(coveredDays({ top: 40, bottom: 40, shoes: 1 }, 5)).toBe(5);
+  });
+
+  it("lets a dress cover both halves", () => {
+    expect(coveredDays({ dress: 4, shoes: 1 }, 6)).toBe(6);
+  });
+
+  it("is zero for an empty bag", () => {
+    expect(coveredDays({}, 7)).toBe(0);
+  });
+});
+
+describe("coverThenFill", () => {
+  const item = (id: string, bucket: CategoryBucket, volumeLiters: number): SelectedItem => ({
+    id, bucket, volumeLiters, weightGrams: volumeLiters * 200, seasonOk: true,
+  });
+  const targets = { top: 8, bottom: 4, dress: 0, outerwear: 1, shoes: 2, accessory: 3, other: 0 };
+
+  it("does not let bulk evict every top — the original failure", () => {
+    // 18 L against ~24 L of candidates. FFD packed largest-first and left zero
+    // tops; coverage-first must keep tops.
+    const selected: SelectedItem[] = [
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => item(`top${n}`, "top", 1.2)),
+      ...[1, 2, 3, 4].map((n) => item(`bot${n}`, "bottom", 2.2)),
+      item("jacket", "outerwear", 3.5),
+      item("shoe1", "shoes", 3.5),
+      item("shoe2", "shoes", 3.5),
+    ];
+    const { assignments, counts } = coverThenFill(selected, [{ id: "bag", volumeLiters: 18 }], {
+      days: 8, targets,
+    });
+    expect(counts.top ?? 0).toBeGreaterThanOrEqual(3);
+    expect(assignments.bag.length).toBeGreaterThan(0);
+  });
+
+  it("guarantees the floor before spending space on extras", () => {
+    const selected: SelectedItem[] = [
+      item("top1", "top", 1), item("bot1", "bottom", 1),
+      item("shoe1", "shoes", 1), item("jacket", "outerwear", 1),
+      item("shoe2", "shoes", 1),
+    ];
+    const { counts } = coverThenFill(selected, [{ id: "bag", volumeLiters: 4 }], { days: 5, targets });
+    expect(counts.top).toBe(1);
+    expect(counts.bottom).toBe(1);
+    expect(counts.shoes).toBe(1);
+    expect(counts.outerwear).toBe(1);
+  });
+
+  it("never exceeds a bucket's target", () => {
+    const selected = [...Array(20)].map((_, i) => item(`top${i}`, "top", 0.1));
+    const { counts } = coverThenFill(selected, [{ id: "bag", volumeLiters: 100 }], {
+      days: 30, targets: { ...targets, top: 3 },
+    });
+    expect(counts.top).toBe(3);
+  });
+
+  it("does not over-pack a huge bag for a short trip", () => {
+    // With unlimited space the only thing stopping a 20-top pack is the
+    // day-scaled target, so use the real one rather than a synthetic target.
+    const realTargets = targetCounts(3, "mild", 0, 100);
+    const selected: SelectedItem[] = [
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => item(`top${n}`, "top", 1)),
+      ...[1, 2, 3].map((n) => item(`bot${n}`, "bottom", 1)),
+      item("shoe1", "shoes", 1),
+    ];
+    const { counts } = coverThenFill(selected, [{ id: "bag", volumeLiters: 100 }], {
+      days: 3, targets: realTargets,
+    });
+    expect(counts.top).toBeLessThanOrEqual(realTargets.top);
+    expect(counts.top).toBeLessThan(8);
+  });
+
+  it("spreads across multiple bags", () => {
+    const selected: SelectedItem[] = [
+      item("top1", "top", 3), item("bot1", "bottom", 3),
+      item("shoe1", "shoes", 3), item("jacket", "outerwear", 3),
+    ];
+    const { assignments, unplaced } = coverThenFill(
+      selected, [{ id: "a", volumeLiters: 6 }, { id: "b", volumeLiters: 6 }], { days: 2, targets },
+    );
+    expect(unplaced).toHaveLength(0);
+    expect(assignments.a.length + assignments.b.length).toBe(4);
+  });
+
+  it("respects a weight cap", () => {
+    const selected: SelectedItem[] = [
+      { id: "h1", bucket: "shoes", volumeLiters: 1, weightGrams: 900, seasonOk: true },
+      { id: "h2", bucket: "shoes", volumeLiters: 1, weightGrams: 900, seasonOk: true },
+    ];
+    const { unplaced } = coverThenFill(selected, [{ id: "bag", volumeLiters: 50, maxWeightKg: 1 }], {
+      days: 3, targets,
+    });
+    expect(unplaced).toHaveLength(1);
+  });
+
+  it("handles no bags and no items without throwing", () => {
+    expect(coverThenFill([], [], { days: 5, targets }).unplaced).toEqual([]);
+    const only = coverThenFill([item("t", "top", 1)], [], { days: 5, targets });
+    expect(only.unplaced).toEqual(["t"]);
+  });
+
+  it("is deterministic", () => {
+    const selected: SelectedItem[] = [
+      ...[1, 2, 3, 4].map((n) => item(`top${n}`, "top", 1.2)),
+      ...[1, 2].map((n) => item(`bot${n}`, "bottom", 2.2)),
+      item("shoe1", "shoes", 3.5),
+    ];
+    const bags = [{ id: "bag", volumeLiters: 9 }];
+    const a = coverThenFill(selected, bags, { days: 6, targets });
+    const b = coverThenFill(selected, bags, { days: 6, targets });
+    expect(a.assignments).toEqual(b.assignments);
+    expect(a.unplaced).toEqual(b.unplaced);
   });
 });

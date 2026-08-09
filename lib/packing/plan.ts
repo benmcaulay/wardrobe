@@ -4,10 +4,16 @@
  *
  * Pipeline:
  *   1. derive target item counts per category from trip length + climate band
- *   2. score wardrobe items by how well their season suits the climate
- *   3. select the best items up to each target (with sensible minimums)
- *   4. bin-pack the selection into the user's bags (first-fit-decreasing by
- *      volume, respecting an optional weight cap)
+ *   2. score items on climate fit and colour versatility (see ./palette.ts)
+ *   3. select the best candidates up to each target
+ *   4. cover-then-fill them into the bags: guarantee a floor, then feed whichever
+ *      bucket is the bottleneck until the trip is covered, then spend what's
+ *      left on extras
+ *
+ * Step 4 is deliberately not a bin-pack. Filling litres and being dressed are
+ * different objectives, and optimising the first produced bags with no tops in
+ * them — see `coverThenFill`. `packItems` keeps the plain first-fit-decreasing
+ * placement for callers that already know exactly what they want to place.
  */
 
 import type { Color, Season } from "@/lib/json";
@@ -309,6 +315,8 @@ export type PackingPlan = {
   perBag: PerBagUsage[];
   totals: { volumeLiters: number; weightGrams: number; count: number };
   warnings: string[];
+  /** How many of the trip's days the packed bag can actually dress you for. */
+  coverage: { days: number; coveredDays: number };
 };
 
 function round1(n: number): number {
@@ -451,6 +459,165 @@ export function packItems(
   return { assignments, unplaced };
 }
 
+/**
+ * How many days one piece of each kind covers before it wants washing.
+ *
+ * Only the first three matter — a jacket, shoes and a hat are worn every day of
+ * a trip, so their figure just has to exceed any realistic trip length.
+ */
+export const WEARS_PER_ITEM: Record<CategoryBucket, number> = {
+  top: 1.5,
+  bottom: 3,
+  dress: 1.5,
+  outerwear: 60,
+  shoes: 60,
+  accessory: 60,
+  other: 60,
+};
+
+type BucketCounts = Partial<Record<CategoryBucket, number>>;
+
+/**
+ * How many days of the trip this set of counts can actually dress you for.
+ *
+ * A minimum, not a sum: eight tops and no bottoms dresses you for zero days.
+ * That is the property the old packer was missing — it measured litres consumed,
+ * which eight tops and no bottoms scores very well on. Dresses count toward both
+ * halves, since one covers a whole day on its own.
+ */
+export function coveredDays(counts: BucketCounts, days: number): number {
+  const dressDays = (counts.dress ?? 0) * WEARS_PER_ITEM.dress;
+  const topDays = (counts.top ?? 0) * WEARS_PER_ITEM.top + dressDays;
+  const bottomDays = (counts.bottom ?? 0) * WEARS_PER_ITEM.bottom + dressDays;
+  const shoeDays = (counts.shoes ?? 0) > 0 ? days : 0;
+  return Math.max(0, Math.min(days, topDays, bottomDays, shoeDays));
+}
+
+/** Which coverage bucket is currently the bottleneck, or null once covered. */
+function bindingBucket(counts: BucketCounts, days: number): CategoryBucket | null {
+  const dressDays = (counts.dress ?? 0) * WEARS_PER_ITEM.dress;
+  const ranked: [CategoryBucket, number][] = [
+    ["top", (counts.top ?? 0) * WEARS_PER_ITEM.top + dressDays],
+    ["bottom", (counts.bottom ?? 0) * WEARS_PER_ITEM.bottom + dressDays],
+    ["shoes", (counts.shoes ?? 0) > 0 ? days : 0],
+  ];
+  // Deterministic: least-covered first, ties broken by name.
+  ranked.sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]));
+  return ranked[0][1] >= days ? null : ranked[0][0];
+}
+
+/** Buckets guaranteed one piece before anything else is considered. */
+const FLOOR_BUCKETS: CategoryBucket[] = ["top", "bottom", "shoes", "outerwear"];
+
+type BagState = { bag: PackBag; volume: number; weight: number; itemIds: string[] };
+
+function placeInto(state: BagState[], item: SelectedItem): boolean {
+  for (const s of state) {
+    const capGrams = s.bag.maxWeightKg != null ? s.bag.maxWeightKg * 1000 : Infinity;
+    const fitsVolume = s.volume + item.volumeLiters <= s.bag.volumeLiters + 1e-6;
+    const fitsWeight = s.weight + item.weightGrams <= capGrams + 1e-6;
+    if (fitsVolume && fitsWeight) {
+      s.volume += item.volumeLiters;
+      s.weight += item.weightGrams;
+      s.itemIds.push(item.id);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Decide what makes the cut AND where it goes, in one capacity-aware pass.
+ *
+ * The old pipeline chose items and placed them in two separate phases:
+ * `selectItems` picked a full set of targets without knowing how big the bags
+ * were, then first-fit-decreasing dropped whatever didn't fit. Because FFD
+ * places largest-first, the shortfall fell entirely on the smallest pieces — on
+ * a real 8-day trip into an 18 L bag that meant four bottoms, a leather jacket
+ * and *zero tops*, reported as "7 items didn't fit".
+ *
+ * Cover-Then-Fill makes the trade-off explicit and lexicographic:
+ *
+ *   0. FLOOR    — one top, one bottom, one pair of shoes, one jacket. You can
+ *                 leave the house.
+ *   1. COVER    — keep adding to whichever bucket is the current bottleneck
+ *                 until the bag dresses you for the whole trip.
+ *   2. FILL     — only now spend leftover space on extras, up to target.
+ *
+ * Nothing in a later phase can displace something in an earlier one, so a second
+ * pair of shoes can never cost you your fourth shirt. Items are consumed in the
+ * order `selectItems` emitted them, which is best-scoring first within each
+ * bucket — so the coverage phase still gets the most climate- and
+ * colour-appropriate pieces, it just stops over-buying one bucket.
+ *
+ * Deterministic: no randomness, stable ordering, and the coverage loop is
+ * bounded by the candidate count.
+ */
+export function coverThenFill(
+  selected: readonly SelectedItem[],
+  bags: readonly PackBag[],
+  opts: { days: number; targets: Record<CategoryBucket, number> },
+): { assignments: Record<string, string[]>; unplaced: string[]; counts: BucketCounts } {
+  const state: BagState[] = bags.map((bag) => ({ bag, volume: 0, weight: 0, itemIds: [] }));
+  const packed = new Set<string>();
+  const counts: BucketCounts = {};
+
+  // Preference order within a bucket is the order selectItems produced.
+  const pool = new Map<CategoryBucket, SelectedItem[]>();
+  for (const item of selected) {
+    const list = pool.get(item.bucket) ?? [];
+    list.push(item);
+    pool.set(item.bucket, list);
+  }
+
+  /** Pack the best unpacked item of a bucket that fits. */
+  const takeFrom = (bucket: CategoryBucket): boolean => {
+    for (const item of pool.get(bucket) ?? []) {
+      if (packed.has(item.id)) continue;
+      if (!placeInto(state, item)) continue;
+      packed.add(item.id);
+      counts[bucket] = (counts[bucket] ?? 0) + 1;
+      return true;
+    }
+    return false;
+  };
+
+  // 0 — floor.
+  for (const bucket of FLOOR_BUCKETS) {
+    if ((opts.targets[bucket] ?? 0) > 0) takeFrom(bucket);
+  }
+
+  // 1 — cover. Each pass feeds the bottleneck. A pass can leave coverage flat
+  // when two buckets are tied; the next pass then targets the other one, so it
+  // still converges. Bounded by the candidate count either way.
+  let guard = selected.length + FLOOR_BUCKETS.length + 1;
+  while (coveredDays(counts, opts.days) < opts.days && guard-- > 0) {
+    const bucket = bindingBucket(counts, opts.days);
+    if (!bucket) break;
+    // Respect the trip's target: past it, more of this bucket is hoarding.
+    if ((counts[bucket] ?? 0) >= (opts.targets[bucket] ?? 0)) break;
+    if (!takeFrom(bucket)) break; // nothing left that fits
+  }
+
+  // 2 — fill leftover space with extras, never exceeding target.
+  for (const item of selected) {
+    if (packed.has(item.id)) continue;
+    if ((counts[item.bucket] ?? 0) >= (opts.targets[item.bucket] ?? 0)) continue;
+    if (!placeInto(state, item)) continue;
+    packed.add(item.id);
+    counts[item.bucket] = (counts[item.bucket] ?? 0) + 1;
+  }
+
+  const assignments: Record<string, string[]> = {};
+  for (const s of state) assignments[s.bag.id] = s.itemIds;
+
+  return {
+    assignments,
+    unplaced: selected.filter((s) => !packed.has(s.id)).map((s) => s.id),
+    counts,
+  };
+}
+
 /** Recompute per-bag usage for an arbitrary assignment (used after edits). */
 export function computeUsage(
   assignments: Record<string, string[]>,
@@ -505,7 +672,10 @@ export function buildPackingPlan(input: {
   const totalCapacityLiters = input.bags.reduce((sum, b) => sum + b.volumeLiters, 0);
   const targets = targetCounts(input.days, input.band, input.rainChance, totalCapacityLiters);
   const selected = selectItems(input.items, input.band, targets);
-  const { assignments, unplaced } = packItems(selected, input.bags);
+  const { assignments, unplaced, counts } = coverThenFill(selected, input.bags, {
+    days: input.days,
+    targets,
+  });
 
   const estimates = new Map(
     selected.map((s) => [s.id, { weightGrams: s.weightGrams, volumeLiters: s.volumeLiters }]),
@@ -514,11 +684,20 @@ export function buildPackingPlan(input: {
 
   const warnings: string[] = [];
   if (input.bags.length === 0) warnings.push("Add at least one bag to pack into.");
-  if (unplaced.length > 0) {
-    warnings.push(`${unplaced.length} item${unplaced.length === 1 ? "" : "s"} didn't fit in your bags.`);
-  }
   for (const usage of perBag) {
     if (usage.overWeight) warnings.push("A bag is over its weight limit.");
+  }
+
+  // Leftover candidates are now expected — coverThenFill deliberately stops
+  // buying a bucket once the trip is covered — so the old "N items didn't fit"
+  // was both alarming and useless. What the user actually needs to know is
+  // whether the bag dresses them for the whole trip.
+  const covered = coveredDays(counts, input.days);
+  if (input.bags.length > 0 && covered < input.days) {
+    const short = Math.max(1, Math.round(input.days - covered));
+    warnings.push(
+      `This packs enough to dress you for about ${Math.floor(covered)} of ${input.days} days — ${short} short. Add a bag, or free up space by dropping something bulky.`,
+    );
   }
 
   // Say so when we couldn't fill a category. Previously a plan that found no
@@ -539,7 +718,16 @@ export function buildPackingPlan(input: {
     );
   }
 
-  return { targets, selected, assignments, unplaced, perBag, totals, warnings };
+  return {
+    targets,
+    selected,
+    assignments,
+    unplaced,
+    perBag,
+    totals,
+    warnings,
+    coverage: { days: input.days, coveredDays: Math.round(covered * 10) / 10 },
+  };
 }
 
 /** Buckets whose absence makes a plan unusable, so it's worth interrupting over. */
