@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { parseColors, parseSeasons, parseStringArray, type Season } from "@/lib/json";
 import { estimateItemPacking } from "@/lib/packing/estimate";
 import { bucketFor } from "@/lib/packing/plan";
+import { parseTripRequirements } from "@/lib/packing/requirements";
 import type { ClimateSummary } from "@/lib/services/weather";
 import {
   TripPlanner,
@@ -125,7 +126,8 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         trip={tripView}
         bags={bags}
         items={items}
-        initialClimate={climate}
+        initialRequirements={parseTripRequirements(trip.requirements)}
+      initialClimate={climate}
         initialAssignments={assignments}
       />
     </main>

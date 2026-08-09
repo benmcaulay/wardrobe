@@ -20,6 +20,13 @@ import type { Color, Season } from "@/lib/json";
 import { classifyGarmentKind, type GarmentKind } from "@/lib/categories";
 import { estimateItemPacking, type EstimableItem } from "./estimate";
 import { colorVersatility } from "./palette";
+import {
+  activityNeeds,
+  EMPTY_REQUIREMENTS,
+  wearMultiplier,
+  type ActivityNeed,
+  type TripRequirements,
+} from "./requirements";
 import type { ClimateBand } from "@/lib/services/weather";
 
 export type PackableItem = EstimableItem & {
@@ -95,15 +102,23 @@ export function targetCounts(
   band: ClimateBand,
   rainChance: number,
   totalCapacityLiters = Infinity,
+  /**
+   * Laundry mid-trip (see ./requirements.ts). It has to shrink the *targets*,
+   * not just stretch coverage: the fill phase spends whatever space is left up
+   * to target, so without this a laundry trip packs MORE rather than less —
+   * covered sooner, then topped up. Which is the opposite of the point.
+   */
+  wearMultiplier = 1,
 ): Record<CategoryBucket, number> {
   const d = clamp(Math.round(days), 1, 30);
+  const m = wearMultiplier > 0 ? wearMultiplier : 1;
 
   const topsFactor = band === "hot" ? 1 : band === "cold" ? 0.9 : 0.8;
-  const tops = clamp(Math.round(d * topsFactor), 1, 14);
+  const tops = clamp(Math.round((d * topsFactor) / m), 1, 14);
   // >= 2 so the one-shorts + one-pants baseline always has room.
-  const bottoms = clamp(Math.ceil(d / 2.5), 2, 6);
+  const bottoms = clamp(Math.ceil(d / (2.5 * m)), 2, 6);
 
-  const dresses = band === "hot" || band === "warm" ? clamp(Math.ceil(d / 4), 0, 4) : 0;
+  const dresses = band === "hot" || band === "warm" ? clamp(Math.ceil(d / (4 * m)), 0, 4) : 0;
 
   // Always bring a jacket; pack more layers as it gets cold or wet.
   let outerwear = { hot: 0, warm: 0, mild: 1, cool: 1, cold: 2 }[band];
@@ -294,6 +309,9 @@ export type SelectedItem = {
   weightGrams: number;
   volumeLiters: number;
   seasonOk: boolean;
+  /** Carried through so activity needs can be matched without the full item. */
+  name?: string | null;
+  subcategory?: string | null;
 };
 
 export type PerBagUsage = {
@@ -384,6 +402,8 @@ export function selectItems(
     weightGrams: c.weightGrams,
     volumeLiters: c.volumeLiters,
     seasonOk: c.season > 0,
+    name: c.item.name,
+    subcategory: c.item.subcategory,
   });
 
   const selected: SelectedItem[] = [];
@@ -485,20 +505,21 @@ type BucketCounts = Partial<Record<CategoryBucket, number>>;
  * which eight tops and no bottoms scores very well on. Dresses count toward both
  * halves, since one covers a whole day on its own.
  */
-export function coveredDays(counts: BucketCounts, days: number): number {
-  const dressDays = (counts.dress ?? 0) * WEARS_PER_ITEM.dress;
-  const topDays = (counts.top ?? 0) * WEARS_PER_ITEM.top + dressDays;
-  const bottomDays = (counts.bottom ?? 0) * WEARS_PER_ITEM.bottom + dressDays;
+export function coveredDays(counts: BucketCounts, days: number, wearMultiplier = 1): number {
+  const m = wearMultiplier > 0 ? wearMultiplier : 1;
+  const dressDays = (counts.dress ?? 0) * WEARS_PER_ITEM.dress * m;
+  const topDays = (counts.top ?? 0) * WEARS_PER_ITEM.top * m + dressDays;
+  const bottomDays = (counts.bottom ?? 0) * WEARS_PER_ITEM.bottom * m + dressDays;
   const shoeDays = (counts.shoes ?? 0) > 0 ? days : 0;
   return Math.max(0, Math.min(days, topDays, bottomDays, shoeDays));
 }
 
 /** Which coverage bucket is currently the bottleneck, or null once covered. */
-function bindingBucket(counts: BucketCounts, days: number): CategoryBucket | null {
-  const dressDays = (counts.dress ?? 0) * WEARS_PER_ITEM.dress;
+function bindingBucket(counts: BucketCounts, days: number, m = 1): CategoryBucket | null {
+  const dressDays = (counts.dress ?? 0) * WEARS_PER_ITEM.dress * m;
   const ranked: [CategoryBucket, number][] = [
-    ["top", (counts.top ?? 0) * WEARS_PER_ITEM.top + dressDays],
-    ["bottom", (counts.bottom ?? 0) * WEARS_PER_ITEM.bottom + dressDays],
+    ["top", (counts.top ?? 0) * WEARS_PER_ITEM.top * m + dressDays],
+    ["bottom", (counts.bottom ?? 0) * WEARS_PER_ITEM.bottom * m + dressDays],
     ["shoes", (counts.shoes ?? 0) > 0 ? days : 0],
   ];
   // Deterministic: least-covered first, ties broken by name.
@@ -556,8 +577,21 @@ function placeInto(state: BagState[], item: SelectedItem): boolean {
 export function coverThenFill(
   selected: readonly SelectedItem[],
   bags: readonly PackBag[],
-  opts: { days: number; targets: Record<CategoryBucket, number> },
-): { assignments: Record<string, string[]>; unplaced: string[]; counts: BucketCounts } {
+  opts: {
+    days: number;
+    targets: Record<CategoryBucket, number>;
+    /** Items the trip's activities demand, reserved before general coverage. */
+    needs?: readonly ActivityNeed[];
+    /** Laundry stretches every piece; see ./requirements.ts. */
+    wearMultiplier?: number;
+  },
+): {
+  assignments: Record<string, string[]>;
+  unplaced: string[];
+  counts: BucketCounts;
+  /** Activity needs the closet couldn't satisfy, for the UI to report. */
+  unmetNeeds: ActivityNeed[];
+} {
   const state: BagState[] = bags.map((bag) => ({ bag, volume: 0, weight: 0, itemIds: [] }));
   const packed = new Set<string>();
   const counts: BucketCounts = {};
@@ -582,17 +616,43 @@ export function coverThenFill(
     return false;
   };
 
-  // 0 — floor.
+  // 0a — what the trip specifically asked for. These come first because a
+  // wedding without smart shoes is a failed trip however well the bag covers
+  // the days, and because "same pack every time" is exactly what happens when
+  // the planner has no idea what the trip is for.
+  const unmetNeeds: ActivityNeed[] = [];
+  for (const need of opts.needs ?? []) {
+    let got = 0;
+    // Smallest match first, not best-scoring first. A need is a yes/no
+    // requirement rather than a preference, so satisfying it as cheaply as
+    // possible leaves room for the others — otherwise one bulky match (a 3.5 L
+    // blazer) can starve every remaining need in a tight bag.
+    const matches = (pool.get(need.bucket) ?? [])
+      .filter((i) => need.match.test(`${i.subcategory ?? ""} ${i.name ?? ""}`.toLowerCase()))
+      .sort((a, b) => a.volumeLiters - b.volumeLiters || a.id.localeCompare(b.id));
+    for (const item of matches) {
+      if (got >= need.count) break;
+      if (packed.has(item.id)) continue;
+      if (!placeInto(state, item)) continue;
+      packed.add(item.id);
+      counts[need.bucket] = (counts[need.bucket] ?? 0) + 1;
+      got += 1;
+    }
+    if (got < need.count) unmetNeeds.push(need);
+  }
+
+  // 0b — floor.
   for (const bucket of FLOOR_BUCKETS) {
-    if ((opts.targets[bucket] ?? 0) > 0) takeFrom(bucket);
+    if ((opts.targets[bucket] ?? 0) > 0 && (counts[bucket] ?? 0) === 0) takeFrom(bucket);
   }
 
   // 1 — cover. Each pass feeds the bottleneck. A pass can leave coverage flat
   // when two buckets are tied; the next pass then targets the other one, so it
   // still converges. Bounded by the candidate count either way.
+  const m = opts.wearMultiplier ?? 1;
   let guard = selected.length + FLOOR_BUCKETS.length + 1;
-  while (coveredDays(counts, opts.days) < opts.days && guard-- > 0) {
-    const bucket = bindingBucket(counts, opts.days);
+  while (coveredDays(counts, opts.days, m) < opts.days && guard-- > 0) {
+    const bucket = bindingBucket(counts, opts.days, m);
     if (!bucket) break;
     // Respect the trip's target: past it, more of this bucket is hoarding.
     if ((counts[bucket] ?? 0) >= (opts.targets[bucket] ?? 0)) break;
@@ -615,6 +675,7 @@ export function coverThenFill(
     assignments,
     unplaced: selected.filter((s) => !packed.has(s.id)).map((s) => s.id),
     counts,
+    unmetNeeds,
   };
 }
 
@@ -661,6 +722,56 @@ export function computeUsage(
   };
 }
 
+/**
+ * Make sure anything an activity requires is a candidate at all.
+ *
+ * `selectItems` caps each bucket at the climate target, so a 4-day trip with a
+ * small bag selects exactly one pair of shoes — the best-scoring one. If the
+ * trip needs sandals and the trainers scored higher, the sandals were never in
+ * the pool for `coverThenFill` to reserve, and the whole requirements layer
+ * would silently do nothing. Needed items are appended so they can be reserved;
+ * the target still caps everything chosen on preference alone.
+ */
+function withNeededItems(
+  selected: SelectedItem[],
+  all: readonly PackableItem[],
+  needs: readonly ActivityNeed[],
+): SelectedItem[] {
+  if (needs.length === 0) return selected;
+  const have = new Set(selected.map((s) => s.id));
+  const extra: SelectedItem[] = [];
+
+  for (const need of needs) {
+    const matches = all
+      .filter((item) => {
+        if (have.has(item.id)) return false;
+        if (bucketFor(item) !== need.bucket) return false;
+        return need.match.test(`${item.subcategory ?? ""} ${item.name ?? ""}`.toLowerCase());
+      })
+      .map((item) => {
+        const est = estimateItemPacking(item);
+        return {
+          id: item.id,
+          bucket: need.bucket,
+          weightGrams: est.weightGrams,
+          volumeLiters: est.volumeLiters,
+          seasonOk: true,
+          name: item.name,
+          subcategory: item.subcategory,
+        } satisfies SelectedItem;
+      })
+      .sort((a, b) => a.volumeLiters - b.volumeLiters || a.id.localeCompare(b.id))
+      .slice(0, need.count);
+
+    for (const m of matches) {
+      have.add(m.id);
+      extra.push(m);
+    }
+  }
+
+  return [...selected, ...extra];
+}
+
 /** Full plan: pick items for the climate/trip and pack them into the bags. */
 export function buildPackingPlan(input: {
   items: PackableItem[];
@@ -668,13 +779,29 @@ export function buildPackingPlan(input: {
   days: number;
   band: ClimateBand;
   rainChance: number;
+  requirements?: TripRequirements;
 }): PackingPlan {
   const totalCapacityLiters = input.bags.reduce((sum, b) => sum + b.volumeLiters, 0);
-  const targets = targetCounts(input.days, input.band, input.rainChance, totalCapacityLiters);
-  const selected = selectItems(input.items, input.band, targets);
-  const { assignments, unplaced, counts } = coverThenFill(selected, input.bags, {
+  const requirements = input.requirements ?? EMPTY_REQUIREMENTS;
+  const multiplier = wearMultiplier(requirements);
+  const targets = targetCounts(
+    input.days,
+    input.band,
+    input.rainChance,
+    totalCapacityLiters,
+    multiplier,
+  );
+  const needs = activityNeeds(requirements);
+  const selected = withNeededItems(
+    selectItems(input.items, input.band, targets),
+    input.items,
+    needs,
+  );
+  const { assignments, unplaced, counts, unmetNeeds } = coverThenFill(selected, input.bags, {
     days: input.days,
     targets,
+    needs,
+    wearMultiplier: multiplier,
   });
 
   const estimates = new Map(
@@ -692,7 +819,7 @@ export function buildPackingPlan(input: {
   // buying a bucket once the trip is covered — so the old "N items didn't fit"
   // was both alarming and useless. What the user actually needs to know is
   // whether the bag dresses them for the whole trip.
-  const covered = coveredDays(counts, input.days);
+  const covered = coveredDays(counts, input.days, multiplier);
   if (input.bags.length > 0 && covered < input.days) {
     const short = Math.max(1, Math.round(input.days - covered));
     warnings.push(
@@ -709,6 +836,14 @@ export function buildPackingPlan(input: {
   for (const s of selected) {
     selectedByBucket.set(s.bucket, (selectedByBucket.get(s.bucket) ?? 0) + 1);
   }
+  if (unmetNeeds.length > 0) {
+    // Naming the activity's need is far more actionable than a generic
+    // shortfall — "no swimwear" tells you what to buy or un-tick.
+    warnings.push(
+      `Your closet has no ${unmetNeeds.map((n) => n.label).join(", no ")} for the activities you picked.`,
+    );
+  }
+
   const shortfalls = ESSENTIAL_BUCKETS.filter(
     (bucket) => (targets[bucket] ?? 0) > 0 && (selectedByBucket.get(bucket) ?? 0) === 0,
   );

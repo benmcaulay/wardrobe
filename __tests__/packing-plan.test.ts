@@ -456,3 +456,19 @@ describe("coverThenFill", () => {
     expect(a.unplaced).toEqual(b.unplaced);
   });
 });
+
+describe("targetCounts with laundry", () => {
+  it("asks for fewer tops when you can wash mid-trip", () => {
+    const without = targetCounts(10, "mild", 0, 100, 1);
+    const withLaundry = targetCounts(10, "mild", 0, 100, 2);
+    expect(withLaundry.top).toBeLessThan(without.top);
+    expect(withLaundry.bottom).toBeLessThanOrEqual(without.bottom);
+  });
+
+  it("keeps the baseline floors intact", () => {
+    const t = targetCounts(2, "mild", 0, 100, 2);
+    expect(t.top).toBeGreaterThanOrEqual(1);
+    expect(t.bottom).toBeGreaterThanOrEqual(2);
+    expect(t.outerwear).toBeGreaterThanOrEqual(1);
+  });
+});

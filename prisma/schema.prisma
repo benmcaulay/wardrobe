@@ -411,6 +411,10 @@ model PackingTrip {
   endDate     DateTime
   climateData String?  // JSON: ClimateSummary from lib/services/weather.ts
   bagIds      String   @default("[]") // JSON: string[] of PackingBag ids
+  /// JSON: TripRequirements from lib/packing/requirements.ts — what the trip is
+  /// FOR (activities, laundry). Without it every trip to the same place in the
+  /// same week packs identically; see that module's header.
+  requirements String?
   assignments String   @default("{}") // JSON: { [bagId]: string[] of WardrobeItem ids }
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

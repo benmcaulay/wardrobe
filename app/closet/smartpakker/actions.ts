@@ -8,6 +8,12 @@ import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
 import { buildPackingPlan, type PackableItem, type PackingPlan } from "@/lib/packing/plan";
 import {
+  isTripActivity,
+  parseTripRequirements,
+  type TripActivity,
+  type TripRequirements,
+} from "@/lib/packing/requirements";
+import {
   getClimateSummary,
   manualClimateSummary,
   type ClimateSummary,
@@ -322,6 +328,38 @@ export async function setTripClimate(input: {
   return { ok: true, climate };
 }
 
+/**
+ * Record what the trip is for.
+ *
+ * The planner had no way to tell a wedding from a hiking week, so every trip to
+ * the same place in the same week packed identically. These chips are the
+ * missing input; an AI parser can later fill the same structure from free text
+ * without the planner knowing a model was involved.
+ */
+export async function setTripRequirements(input: {
+  tripId: string;
+  activities: string[];
+  laundry: boolean;
+}): Promise<Result<{ requirements: TripRequirements }>> {
+  const user = await requireUser();
+  const trip = await prisma.packingTrip.findUnique({
+    where: { id: input.tripId },
+    select: { userId: true },
+  });
+  if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
+
+  const requirements: TripRequirements = {
+    activities: [...new Set(input.activities.filter(isTripActivity))] as TripActivity[],
+    laundry: input.laundry === true,
+  };
+  await prisma.packingTrip.update({
+    where: { id: input.tripId },
+    data: { requirements: encode(requirements) },
+  });
+  revalidatePath(`/closet/smartpakker/${input.tripId}`);
+  return { ok: true, requirements };
+}
+
 /* ---------------------------------------------------------------- plan --- */
 
 export async function generatePackingPlan(
@@ -397,6 +435,7 @@ export async function generatePackingPlan(
     bags: bags.map((b) => ({ id: b.id, volumeLiters: b.volumeLiters, maxWeightKg: b.maxWeightKg })),
     days: climate.days,
     band: climate.band,
+    requirements: parseTripRequirements(trip.requirements),
     rainChance: climate.rainChance,
   });
 

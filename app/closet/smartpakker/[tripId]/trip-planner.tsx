@@ -14,11 +14,17 @@ import {
   rewearDayCount,
   type DayOutfit,
 } from "@/lib/packing/outfits";
+import {
+  ACTIVITIES,
+  wearMultiplier,
+  type TripRequirements,
+} from "@/lib/packing/requirements";
 import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import {
   fetchTripClimate,
   setTripClimate,
+  setTripRequirements,
   generatePackingPlan,
   setItemPacking,
   updateTrip,
@@ -101,16 +107,19 @@ export function TripPlanner({
   bags,
   items,
   initialClimate,
+  initialRequirements,
   initialAssignments,
 }: {
   trip: PlannerTrip;
   bags: PlannerBag[];
   items: PlannerItem[];
   initialClimate: ClimateSummary | null;
+  initialRequirements: TripRequirements;
   initialAssignments: Record<string, string[]>;
 }) {
   const router = useRouter();
   const [climate, setClimate] = useState<ClimateSummary | null>(initialClimate);
+  const [requirements, setRequirements] = useState<TripRequirements>(initialRequirements);
   const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments);
   const [estimates, setEstimates] = useState<Map<string, { weightGrams: number; volumeLiters: number }>>(
     () => new Map(items.map((i) => [i.id, { weightGrams: i.weightGrams, volumeLiters: i.volumeLiters }])),
@@ -245,8 +254,34 @@ export function TripPlanner({
       .filter((i) => bagOfItem.has(i.id))
       .map((i) => ({ id: i.id, bucket: i.bucket, colors: i.colors }));
     const cold = climate ? ["cool", "cold"].includes(climate.band) || climate.rainChance >= 0.4 : false;
-    return planDailyOutfits({ packed, days: climate?.days ?? 0, includeOuterwear: cold });
-  }, [items, bagOfItem, climate]);
+    return planDailyOutfits({
+      packed,
+      days: climate?.days ?? 0,
+      includeOuterwear: cold,
+      wearMultiplier: wearMultiplier(requirements),
+    });
+  }, [items, bagOfItem, climate, requirements]);
+
+  async function toggleActivity(id: string) {
+    const next = requirements.activities.includes(id as never)
+      ? requirements.activities.filter((a) => a !== id)
+      : [...requirements.activities, id as never];
+    const optimistic = { ...requirements, activities: next };
+    setRequirements(optimistic);
+    const res = await setTripRequirements({ tripId: trip.id, activities: next, laundry: requirements.laundry });
+    if (!res.ok) setRequirements(requirements);
+  }
+
+  async function toggleLaundry() {
+    const optimistic = { ...requirements, laundry: !requirements.laundry };
+    setRequirements(optimistic);
+    const res = await setTripRequirements({
+      tripId: trip.id,
+      activities: requirements.activities,
+      laundry: optimistic.laundry,
+    });
+    if (!res.ok) setRequirements(requirements);
+  }
 
   return (
     <div className="space-y-8">
@@ -294,6 +329,47 @@ export function TripPlanner({
             Check the climate to tailor the packing list to the weather.
           </p>
         )}
+      </section>
+
+      {/* What the trip is for — the input that stops every trip packing alike */}
+      <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
+        <h2 className="font-serif text-xl">What&apos;s this trip for?</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          We&apos;ll make sure the bag covers it.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {ACTIVITIES.map((a) => {
+            const on = requirements.activities.includes(a.id);
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => void toggleActivity(a.id)}
+                aria-pressed={on}
+                className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
+                  on
+                    ? "border-ink bg-ink text-paper"
+                    : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                }`}
+              >
+                {a.label}
+              </button>
+            );
+          })}
+          <span aria-hidden className="mx-1 w-px self-stretch bg-ink/10" />
+          <button
+            type="button"
+            onClick={() => void toggleLaundry()}
+            aria-pressed={requirements.laundry}
+            className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
+              requirements.laundry
+                ? "border-ink bg-ink text-paper"
+                : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+            }`}
+          >
+            Laundry available
+          </button>
+        </div>
       </section>
 
       {/* Auto-pack */}

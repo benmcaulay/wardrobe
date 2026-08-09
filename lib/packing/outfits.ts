@@ -79,10 +79,10 @@ function wearBudget(bucket: CategoryBucket): number {
 
 type Tracked = OutfitPiece & { wearsLeft: number; lastWornDay: number };
 
-function track(pieces: readonly OutfitPiece[], bucket: CategoryBucket): Tracked[] {
+function track(pieces: readonly OutfitPiece[], bucket: CategoryBucket, mult = 1): Tracked[] {
   return pieces
     .filter((p) => p.bucket === bucket)
-    .map((p) => ({ ...p, wearsLeft: wearBudget(bucket), lastWornDay: -99 }));
+    .map((p) => ({ ...p, wearsLeft: wearBudget(bucket) * mult, lastWornDay: -99 }));
 }
 
 /**
@@ -112,22 +112,24 @@ export function planDailyOutfits(input: {
   days: number;
   /** Include the jacket in every look — set for cool/cold/wet trips. */
   includeOuterwear?: boolean;
+  /** Laundry stretches every piece; must match what the packer used. */
+  wearMultiplier?: number;
 }): DayOutfit[] {
   const days = Math.max(0, Math.floor(input.days));
   if (days === 0) return [];
 
-  const tops = track(input.packed, "top");
-  const bottoms = track(input.packed, "bottom");
-  const dresses = track(input.packed, "dress");
-  const shoes = track(input.packed, "shoes");
-  const outerwear = track(input.packed, "outerwear");
+  const tops = track(input.packed, "top", input.wearMultiplier ?? 1);
+  const bottoms = track(input.packed, "bottom", input.wearMultiplier ?? 1);
+  const dresses = track(input.packed, "dress", input.wearMultiplier ?? 1);
+  const shoes = track(input.packed, "shoes", input.wearMultiplier ?? 1);
+  const outerwear = track(input.packed, "outerwear", input.wearMultiplier ?? 1);
 
   // Days you can dress in clean clothes, from the same aggregate model the
   // packing warning reports. Everything past this is a re-wear, by definition
   // rather than by a second, subtly different calculation.
   const counts: Partial<Record<CategoryBucket, number>> = {};
   for (const p of input.packed) counts[p.bucket] = (counts[p.bucket] ?? 0) + 1;
-  const cleanDays = coveredDays(counts, days);
+  const cleanDays = coveredDays(counts, days, input.wearMultiplier ?? 1);
 
   const out: DayOutfit[] = [];
 
