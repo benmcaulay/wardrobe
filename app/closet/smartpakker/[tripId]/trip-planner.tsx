@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { thumbnailUrl } from "@/lib/image-paths";
@@ -22,6 +22,11 @@ import {
 import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import { formatTemperature, type TemperatureUnit } from "@/lib/temperature";
+import {
+  isScrolledToEnd,
+  planeRouteState,
+  type PlaneRouteState,
+} from "@/lib/packing/planner-view";
 import {
   fetchTripClimate,
   setTripClimate,
@@ -133,8 +138,23 @@ export function TripPlanner({
   );
   const [loadingClimate, setLoadingClimate] = useState(false);
   const [packing, setPacking] = useState(false);
+  const [packed, setPacked] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
+
+  /**
+   * The bag column is a capped, independently scrolling panel, so its content
+   * meets the viewport edge mid-item and reads as truncated rather than
+   * scrollable. A scrim fades that edge — and lifts once you reach the end, so
+   * it never suggests content that isn't there.
+   */
+  const bagColumn = useRef<HTMLDivElement>(null);
+  const [bagColumnAtEnd, setBagColumnAtEnd] = useState(true);
+  const measureBagColumn = useCallback(() => {
+    const el = bagColumn.current;
+    if (!el) return;
+    setBagColumnAtEnd(isScrolledToEnd(el));
+  }, []);
 
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -195,6 +215,9 @@ export function TripPlanner({
       setWarnings([res.error]);
       return;
     }
+    // The plane only lands on a plan we actually got — a failed pack leaves it
+    // parked, so the strip never implies a trip that didn't happen.
+    setPacked(true);
     setClimate(res.climate);
     setAssignments(res.plan.assignments);
     setWarnings(res.plan.warnings);
@@ -222,6 +245,21 @@ export function TripPlanner({
 
   const packedIds = new Set(bagOfItem.keys());
   const unpackedAll = items.filter((i) => !packedIds.has(i.id));
+
+  // Re-measure on scroll, on resize, and whenever the column's contents change
+  // — moving an item between bags changes how much there is left to scroll.
+  useEffect(() => {
+    const el = bagColumn.current;
+    if (!el) return;
+    measureBagColumn();
+    el.addEventListener("scroll", measureBagColumn, { passive: true });
+    window.addEventListener("resize", measureBagColumn);
+    return () => {
+      el.removeEventListener("scroll", measureBagColumn);
+      window.removeEventListener("resize", measureBagColumn);
+    };
+  }, [measureBagColumn, assignments, filter, bags.length]);
+
   const unpacked = unpackedAll.filter((i) =>
     filter ? i.name.toLowerCase().includes(filter.toLowerCase()) : true,
   );
@@ -449,6 +487,7 @@ export function TripPlanner({
           Total packed: {formatVolume(usage.totals.volumeLiters)} · {formatWeight(usage.totals.weightGrams)} ·{" "}
           {usage.totals.count} {usage.totals.count === 1 ? "item" : "items"}
         </span>
+        <PlaneRoute state={planeRouteState({ packing, packed })} />
       </section>
 
       {warnings.length > 0 ? (
@@ -521,7 +560,11 @@ export function TripPlanner({
 
       {/* Right: the bags themselves, plus the pool you fill them from. Sticky
           so the contents stay in view while you read the plan beside them. */}
-      <aside className="mt-8 space-y-5 lg:sticky lg:top-6 lg:mt-0 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pb-2">
+      <aside className="relative mt-8 lg:sticky lg:top-6 lg:mt-0">
+      <div
+        ref={bagColumn}
+        className="space-y-5 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pb-10 lg:pr-1"
+      >
       {/* Bags */}
       {bags.length === 0 ? (
         <div className="rounded-2xl bg-paper-warm p-6 text-sm text-ink-muted">
@@ -585,6 +628,14 @@ export function TripPlanner({
           </ul>
         )}
       </section>
+      </div>
+
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-x-0 bottom-0 hidden h-14 bg-gradient-to-t from-paper via-paper/80 to-transparent transition-opacity duration-200 lg:block ${
+          bagColumnAtEnd ? "opacity-0" : "opacity-100"
+        }`}
+      />
       </aside>
     </div>
   );
@@ -707,6 +758,74 @@ function DayCard({
         <p className="mt-2 text-[11px] text-ink-muted">Pack a top, a bottom and shoes.</p>
       )}
     </li>
+  );
+}
+
+/**
+ * The little flight strip beside the auto-pack button: origin dot, dotted
+ * route, plane, destination dot. Purely decorative — the button text already
+ * announces "Packing…" for anyone not watching the plane — so it's hidden from
+ * the accessibility tree. Motion lives in globals.css under `.plane-route`,
+ * which puts it behind the app's prefers-reduced-motion rule for free.
+ */
+function PlaneRoute({ state }: { state: PlaneRouteState }) {
+  return (
+    <span
+      className="plane-route ml-auto hidden text-ink sm:block"
+      data-state={state}
+      aria-hidden="true"
+    >
+      <svg width="200" height="30" viewBox="0 0 200 30" fill="none">
+        {/* Route. Two copies: a faint one always showing where the plane is
+            headed, and the drawn trail that chases it. */}
+        <path
+          d="M 8 23 C 58 24, 84 9, 190 7"
+          stroke="currentColor"
+          strokeOpacity="0.14"
+          strokeWidth="1.25"
+          strokeDasharray="3 4"
+          strokeLinecap="round"
+        />
+        <path
+          className="plane-trail"
+          d="M 8 23 C 58 24, 84 9, 190 7"
+          stroke="currentColor"
+          strokeOpacity="0.45"
+          strokeWidth="1.25"
+          strokeDasharray="3 4"
+          strokeLinecap="round"
+        />
+
+        <circle cx="8" cy="23" r="2" fill="currentColor" fillOpacity="0.3" />
+        <circle
+          cx="190"
+          cy="7"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity={state === "landed" ? "0.75" : "0.25"}
+          strokeWidth="1.25"
+        />
+
+        {/* Airliner from above — nose at +x so offset-rotate points it down the
+            route. Drawn as one closed silhouette: nose, swept wings, tailplane,
+            tail cone, then the mirror of all four back up the other side. */}
+        <g className="plane-craft">
+          <path
+            d="M 7.2 0
+               C 7.2 -0.64 6 -1.1 4.25 -1.15
+               L 1.36 -1.15 L -2.55 -5.45 L -3.75 -5.45 L -1.87 -1.28
+               L -4.6 -1.28 L -6.1 -3.06 L -7 -3.06 L -6.3 -1.15
+               L -7.2 -0.47 L -7.2 0.47
+               L -6.3 1.15 L -7 3.06 L -6.1 3.06 L -4.6 1.28
+               L -1.87 1.28 L -3.75 5.45 L -2.55 5.45 L 1.36 1.15
+               L 4.25 1.15
+               C 6 1.1 7.2 0.64 7.2 0 Z"
+            fill="currentColor"
+          />
+        </g>
+      </svg>
+    </span>
   );
 }
 
