@@ -268,8 +268,13 @@ function buildOne(
  *
  * Pinned items are in every proposal by construction, so counting them would
  * make a round of five outfits around one fixed jacket look like five copies of
- * each other and collapse the round to a single proposal. The bar also can't
- * exceed the number of free pieces there are to differ by.
+ * each other and collapse the round to a single proposal.
+ *
+ * The bar also scales down for short outfits. "Differ by two" is right for a
+ * three-piece look, but on a focused two-piece round — jacket and shoes, say —
+ * it would demand a distinct jacket *and* a distinct pair of shoes for every
+ * proposal, so a closet with three jackets could never fill a round of eight.
+ * One free piece changing is enough to make two short outfits worth comparing.
  */
 function distinctEnough(
   candidate: Proposal,
@@ -277,8 +282,10 @@ function distinctEnough(
   pinned: ReadonlySet<string> = new Set(),
 ): boolean {
   const free = candidate.itemIds.filter((id) => !pinned.has(id));
-  const bar = Math.min(MIN_DISTINCT_ITEMS, free.length);
-  if (bar === 0) return existing.length === 0;
+  // Everything was pinned: there is exactly one such outfit, so only the first
+  // proposal can be accepted.
+  if (free.length === 0) return existing.length === 0;
+  const bar = Math.min(MIN_DISTINCT_ITEMS, Math.max(1, free.length - 1));
   return existing.every((other) => {
     const overlap = free.filter((id) => other.itemIds.includes(id)).length;
     return free.length - overlap >= bar;
