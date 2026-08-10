@@ -6,8 +6,9 @@
  * Three tabs over one closet, in the order the work happens: let the model
  * propose (Smart Generator), do it yourself (Manual compose), or teach it (Train
  * your stylist). What used to be the "Today" tab is folded in rather than kept
- * as a fourth: the weather and today's picks sit in the generator's own left
- * column under the spin dial, and the standing rules live with the trainer.
+ * as a fourth: the weather sits in the generator's own left column under the
+ * spin dial, today's picks span the full width below its columns, and the
+ * standing rules live with the trainer.
  *
  * Notes are held here rather than in either panel because both write them — the
  * trainer through its rule box, the daily picks through a per-proposal tip — and
@@ -18,7 +19,7 @@ import { useCallback, useState, useTransition } from "react";
 import { OutfitBuilder, type SavedOutfit } from "./outfit-builder";
 import { RandomOutfitBuilder, type RandomOutfitItem } from "./random-outfit-builder";
 import { StylistTrainer } from "./stylist-trainer";
-import { DailyPicks } from "./daily-picks";
+import { TodaysPicks, WeatherCard, useDailySlate } from "./daily-picks";
 import { StyleRulesPanel } from "./style-rules-panel";
 import type { Color } from "@/lib/json";
 import type { OutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
@@ -121,6 +122,15 @@ export function OutfitStudio({
     setNotes((prev) => [note, ...prev]);
   }, []);
 
+  // One slate feeding two places: the weather card in the generator's sidebar
+  // and the picks across the full width below it.
+  const daily = useDailySlate({
+    initialSlate,
+    initialPending,
+    onModelChanged,
+    onNoteAdded,
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -149,15 +159,8 @@ export function OutfitStudio({
           initialAutoPopulateRules={outfitAutoPopulateRules}
           initialStartupRules={outfitStartupRules}
           signalsNonce={signalsNonce}
-          sidebarFooter={
-            <DailyPicks
-              initialSlate={initialSlate}
-              initialPending={initialPending}
-              temperatureUnit={temperatureUnit}
-              onModelChanged={onModelChanged}
-              onNoteAdded={onNoteAdded}
-            />
-          }
+          sidebarFooter={<WeatherCard daily={daily} temperatureUnit={temperatureUnit} />}
+          footer={<TodaysPicks daily={daily} />}
         />
       ) : tab === "compose" ? (
         <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />

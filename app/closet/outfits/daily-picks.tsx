@@ -57,16 +57,22 @@ const BAND_COPY: Record<string, string> = {
   cold: "Cold",
 };
 
-export function DailyPicks({
+/**
+ * One slate, two places on the page.
+ *
+ * The weather card sits in the generator's sidebar and the picks span the full
+ * width beneath it, but they are the same fetch and the same busy flag — so the
+ * state lives in a hook the page owns rather than inside either view. Two copies
+ * would mean two forecasts, and a "Refresh" in one that the other ignored.
+ */
+export function useDailySlate({
   initialSlate,
   initialPending,
-  temperatureUnit,
   onModelChanged,
   onNoteAdded,
 }: {
   initialSlate: DailySlateResponse;
   initialPending: PendingWear[];
-  temperatureUnit: TemperatureUnit;
   /** Learned something — the generator's smart spin should re-pull its signals. */
   onModelChanged: () => void;
   /** A per-proposal tip is still a note; the trainer owns the list that shows it. */
@@ -222,41 +228,80 @@ export function DailyPicks({
     return () => clearTimeout(timer);
   }, [note]);
 
+  return {
+    context,
+    proposals,
+    pending,
+    busy,
+    note,
+    confirming,
+    setConfirming,
+    tipFor,
+    setTipFor,
+    onWear,
+    onReroll,
+    onDismiss,
+    onSaveLocation,
+    onRefresh: () => refresh(rejected),
+    onTip,
+    onConfirmWear,
+    onRejectWear,
+  };
+}
+
+export type DailySlateState = ReturnType<typeof useDailySlate>;
+
+/**
+ * Today's three looks, full width beneath the builder's columns.
+ *
+ * Wide rather than tucked in a sidebar because this is where the training data
+ * comes from: "Wearing this" writes a confidence-1 wear *and* `chosen ≻ the
+ * other two` under identical context, which is the single most informative event
+ * the model ever sees. Cramped into 300px it read as a widget; across the page
+ * it reads as the question it is.
+ */
+export function TodaysPicks({ daily }: { daily: DailySlateState }) {
+  const {
+    proposals,
+    pending,
+    busy,
+    note,
+    confirming,
+    setConfirming,
+    tipFor,
+    setTipFor,
+    onWear,
+    onReroll,
+    onDismiss,
+    onTip,
+    onConfirmWear,
+    onRejectWear,
+  } = daily;
+
   return (
     <div className="space-y-4">
-      <WeatherCard
-        context={context}
-        temperatureUnit={temperatureUnit}
-        busy={busy}
-        onSave={onSaveLocation}
-        onRefresh={() => refresh(rejected)}
-      />
-
-      {note ? (
-        <p aria-live="polite" className="rounded-xl bg-paper-warm px-3 py-2 text-xs text-ink-muted">
-          {note}
-        </p>
-      ) : null}
-
-      <section className="rounded-2xl border border-ink/10 bg-white p-4">
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="font-serif text-lg">Today&rsquo;s picks</h2>
-          <span className="text-[11px] uppercase tracking-wide text-ink-muted">
-            {proposals.length > 0 ? `${proposals.length} looks` : "—"}
+      <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-serif text-xl">Today&rsquo;s picks</h2>
+          <span className="text-xs text-ink-muted">
+            Tell me which one you wear and everything else here gets better.
           </span>
         </div>
-        <p className="mt-1 text-xs text-ink-muted">
-          Tell me which one you wear and everything else here gets better.
-        </p>
+
+        {note ? (
+          <p aria-live="polite" className="mt-3 rounded-xl bg-paper-warm px-3 py-2 text-xs text-ink-muted">
+            {note}
+          </p>
+        ) : null}
 
         {proposals.length === 0 ? (
           <EmptyState />
         ) : (
-          <ul className="mt-3 space-y-3">
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {proposals.map((proposal, index) => (
-              <li key={proposal.key} className="rounded-xl border border-ink/10 p-2.5">
+              <li key={proposal.key} className="rounded-xl border border-ink/10 p-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <h3 className="text-xs font-medium text-ink">
+                  <h3 className="text-sm font-medium text-ink">
                     {STRATEGY_LABEL[proposal.strategy] ?? `Option ${index + 1}`}
                   </h3>
                   <span className="text-[10px] uppercase tracking-wide text-ink-muted">
@@ -264,7 +309,7 @@ export function DailyPicks({
                   </span>
                 </div>
 
-                <ul className="mt-2 flex flex-wrap gap-1.5">
+                <ul className="mt-2 flex flex-wrap gap-2">
                   {proposal.items.map((item) => (
                     <li key={item.id}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -272,14 +317,14 @@ export function DailyPicks({
                         src={imageUrl(item.imagePath)}
                         alt={item.name}
                         title={item.name}
-                        className="h-14 w-14 rounded-lg border border-ink/10 bg-paper object-cover"
+                        className="h-20 w-20 rounded-lg border border-ink/10 bg-paper object-cover"
                       />
                     </li>
                   ))}
                 </ul>
 
                 {confirming === proposal.key ? (
-                  <div className="mt-2">
+                  <div className="mt-3">
                     <p className="text-[10px] uppercase tracking-wide text-ink-muted">What for?</p>
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {OCCASIONS.map((occasion) => (
@@ -296,12 +341,12 @@ export function DailyPicks({
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => setConfirming(proposal.key)}
-                      className="rounded-full border border-ink bg-ink px-3 py-1 text-[11px] text-paper transition hover:opacity-90 disabled:opacity-50"
+                      className="rounded-full border border-ink bg-ink px-3.5 py-1 text-xs text-paper transition hover:opacity-90 disabled:opacity-50"
                     >
                       Wearing this
                     </button>
@@ -309,7 +354,7 @@ export function DailyPicks({
                       type="button"
                       disabled={busy}
                       onClick={() => setTipFor(tipFor === proposal.key ? null : proposal.key)}
-                      className="text-[11px] text-ink-muted underline disabled:opacity-50"
+                      className="text-xs text-ink-muted underline disabled:opacity-50"
                     >
                       Any tips?
                     </button>
@@ -325,12 +370,12 @@ export function DailyPicks({
         )}
 
         {proposals.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               disabled={busy}
               onClick={onReroll}
-              className="rounded-full border border-ink/15 bg-white px-3 py-1 text-[11px] text-ink transition hover:bg-paper-warm disabled:opacity-50"
+              className="rounded-full border border-ink/15 bg-white px-4 py-1.5 text-xs text-ink transition hover:bg-paper-warm disabled:opacity-50"
             >
               Something else
             </button>
@@ -338,7 +383,7 @@ export function DailyPicks({
               type="button"
               disabled={busy}
               onClick={onDismiss}
-              className="rounded-full border border-ink/15 bg-white px-3 py-1 text-[11px] text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
+              className="rounded-full border border-ink/15 bg-white px-4 py-1.5 text-xs text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
             >
               None of these
             </button>
@@ -365,19 +410,14 @@ export function DailyPicks({
  * or nothing at all — because the scorer treats a missing band as neutral rather
  * than guessing, and the user should know when suggestions are weather-blind.
  */
-function WeatherCard({
-  context,
+export function WeatherCard({
+  daily,
   temperatureUnit,
-  busy,
-  onSave,
-  onRefresh,
 }: {
-  context: DailySlateResponse["context"];
+  daily: DailySlateState;
   temperatureUnit: TemperatureUnit;
-  busy: boolean;
-  onSave: (value: string) => void;
-  onRefresh: () => void;
 }) {
+  const { context, busy, onSaveLocation: onSave, onRefresh } = daily;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 

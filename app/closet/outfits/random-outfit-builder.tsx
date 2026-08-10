@@ -107,6 +107,13 @@ type Props = {
    * they sit in.
    */
   sidebarFooter?: ReactNode;
+  /**
+   * Rendered full width *below* the builder's columns — the sidebar, the frame
+   * and the rules stack. Today's picks go here rather than in the sidebar: they
+   * are the page's most informative interaction, and 300px made them read as a
+   * widget instead of a question.
+   */
+  footer?: ReactNode;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -136,6 +143,7 @@ export function RandomOutfitBuilder({
   initialStartupRules,
   signalsNonce,
   sidebarFooter,
+  footer,
 }: Props) {
   // Carries the attributes the Layer 1 scorer reads, not just the ones the slot
   // rules need — see lib/outfit/compatibility.ts.
@@ -1593,6 +1601,7 @@ export function RandomOutfitBuilder({
         </div>
       </div>
     )}
+    {footer ? <div className="mt-8">{footer}</div> : null}
     </>
   );
 }
