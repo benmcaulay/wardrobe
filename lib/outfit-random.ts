@@ -1,11 +1,21 @@
 import { normalizeCategoryName, isNoneCategoryStored } from "@/lib/categories";
 import { normalizeColorName } from "@/lib/colors";
-import type { Color } from "@/lib/json";
+import type { Color, Season } from "@/lib/json";
+import { scoreAddition, type ScoringContext } from "@/lib/outfit/compatibility";
+import { DEFAULT_TEMPERATURE, scoredOrder } from "@/lib/outfit/sampling";
 
 export type OutfitPickItem = {
   id: string;
   category: string;
   colors: Color[];
+  // Attributes the Layer 1 scorer reads (lib/outfit/compatibility.ts). All
+  // optional: callers that only build slot assignments, and the tests that
+  // predate scoring, keep working unchanged and simply get uniform sampling.
+  subcategory?: string | null;
+  name?: string | null;
+  material?: string | null;
+  pattern?: string | null;
+  season?: Season[];
 };
 
 export type CategoryRule = {
@@ -152,10 +162,27 @@ function shuffle<T>(arr: T[]): T[] {
   return out;
 }
 
+/**
+ * Turns the uniform shuffle into compatibility-weighted sampling.
+ *
+ * Opt-in so the slot/colour-rule machinery — and the tests that pin it down —
+ * behave exactly as before when omitted. The hard constraints are unchanged
+ * either way: scoring only reorders which valid candidates get tried first, it
+ * never admits a combination the rules reject.
+ */
+export type OutfitScoringOptions = {
+  context?: ScoringContext;
+  /** Higher = more adventurous. See DEFAULT_TEMPERATURE. */
+  temperature?: number;
+  /** Injectable for tests; defaults to Math.random. */
+  rng?: () => number;
+};
+
 export function pickRandomOutfit(
   items: OutfitPickItem[],
   slots: OutfitSlotInput[],
   colorRules: ColorRule[],
+  scoring?: OutfitScoringOptions,
 ): Map<string, string> | null {
   if (slots.length === 0) return null;
 
@@ -202,9 +229,23 @@ export function pickRandomOutfit(
     }
 
     const slot = orderedOpen[index]!;
-    const candidates = shuffle(
-      pool.filter((i) => !used.has(i.id) && itemMatchesCategories(i, slot.categories)),
+    const eligible = pool.filter(
+      (i) => !used.has(i.id) && itemMatchesCategories(i, slot.categories),
     );
+
+    // Score each candidate against what is already placed, then sample an
+    // order from that. Good pieces come up first without the button becoming
+    // deterministic — see lib/outfit/sampling.ts.
+    const candidates = scoring
+      ? scoredOrder(
+          eligible.map((item) => ({
+            item,
+            score: scoreAddition(picked, item, scoring.context),
+          })),
+          scoring.rng ?? Math.random,
+          scoring.temperature ?? DEFAULT_TEMPERATURE,
+        )
+      : shuffle(eligible);
 
     for (const pick of candidates) {
       used.add(pick.id);

@@ -24,6 +24,12 @@ tmp/
 fixtures/ghost/*
 !fixtures/ghost/README.md
 
+# on-device embedding model + ONNX runtime, staged into /public by
+# `pnpm embedding:fetch` (runs as part of `build`). ~73 MB of binary that would
+# otherwise sit in git history forever and be re-cloned by everyone.
+public/models/
+public/ort/
+
 # logs
 *.log
 npm-debug.log*

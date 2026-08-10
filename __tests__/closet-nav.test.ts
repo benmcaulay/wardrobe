@@ -101,10 +101,13 @@ describe("CLOSET_NAV", () => {
     // Guards against a typo'd href shipping as a dead link.
     const known = new Set([
       "/closet",
+      "/closet/today",
       "/closet/scan",
+      "/closet/wear-scan",
       "/closet/try-on",
       "/closet/outfits",
       "/closet/smartpakker",
+      "/closet/lenses",
       "/closet/sell",
       "/closet/wishlist",
       "/closet/share",

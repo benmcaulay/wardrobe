@@ -42,6 +42,9 @@ model User {
   creditPurchases   CreditPurchase[]
   budgets           Budget[]
   shareLinks        ShareLink[]
+  wearEvents        WearEvent[]
+  preferenceEvents  PreferenceEvent[]
+  styleNotes        StyleNote[]
 }
 
 // An unlisted public link to one item, one outfit, or the wishlist.
@@ -213,8 +216,20 @@ model WardrobeItem {
   purchasedCents    Int?
   priceHistory      String?           // JSON: { cents: number; at: string }[] — oldest first
   priceCheckedAt    DateTime?
+  // Wear history. `timesWorn` and `lastWornAt` predate WearEvent and are now
+  // denormalized mirrors of it — recomputed by lib/wear/rollup.ts, never
+  // incremented directly. `timesWorn` stays the *integer count of confident
+  // wears* so user-facing copy ("worn 4 times") remains literally true;
+  // `effectiveWears` is the confidence-weighted sum that models should read,
+  // since a photo-inferred wear is evidence, not a fact.
   timesWorn         Int               @default(0)
+  effectiveWears    Float             @default(0)
   lastWornAt        DateTime?
+  // Set when the user marks an item exempt from dormancy surfacing. No UI yet
+  // (see docs/OUTFIT_INTELLIGENCE.md "Settled scope") — the field ships early
+  // because the scoring suppression rules and the protect-rate guardrail both
+  // read it, and retrofitting it later would mean a migration mid-feature.
+  protectedAt       DateTime?
   // Packing estimates (SmartPakker). Null = derive from the heuristic table in
   // lib/packing/estimate.ts; populated = manual or (future) AI override.
   weightGrams       Int?
@@ -224,6 +239,8 @@ model WardrobeItem {
   createdAt         DateTime          @default(now())
   tryOns            TryOnGeneration[]
   saleListing       SaleListing?
+  embedding         ItemEmbedding?
+  wearEvents        WearEventItem[]
 
   @@index([userId])
   @@index([userId, category])
@@ -420,4 +437,164 @@ model PackingTrip {
   updatedAt   DateTime @updatedAt
 
   @@index([userId])
+}
+
+// ── Outfit intelligence (docs/OUTFIT_INTELLIGENCE.md) ────────────────────────
+
+// One occasion of wearing one or more items. This is the foundation of the
+// recommendation system: every model downstream is a function of the wear
+// *sequence*, and a scalar counter is a lossy projection of a sequence that
+// cannot be recovered after the fact.
+//
+// Wears are not booleans. Camera-roll inference emits low-confidence rows that
+// the user can later confirm (confidence → 1, `confirmedAt` set), so anything
+// aggregating this table must weight by `confidence` rather than count rows.
+model WearEvent {
+  id       String          @id @default(cuid())
+  userId   String
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Day-grained on purpose: nobody knows what hour they put a coat on, and a
+  /// false precision here would leak into the recurrence model in §6.
+  wornOn   DateTime        @db.Date
+  /// A join table rather than the JSON-array convention used by Outfit.itemIds.
+  /// Per-item history is the hottest read in the system — every rollup, every
+  /// dormancy score, every recurrence gap walks it — and a JSON string can only
+  /// be searched with an unindexed LIKE. The schema note at the top of this file
+  /// already flags JSON columns as a SQLite holdover to be undone; this is a
+  /// table new enough to just start correct.
+  items    WearEventItem[]
+  outfitId String?
+
+  /// WearSource in lib/wear/signals.ts — "explicit" | "photo" | "packing" | "backfill".
+  source      String
+  confidence  Float     @default(1)
+  confirmedAt DateTime?
+
+  // Context. The reason this table exists rather than a counter: "what should I
+  // wear" is an inherently conditional question, and without context you can
+  // only ever learn an unconditional preference.
+  tempHighC   Float?
+  climateBand String? // ClimateBand from lib/services/weather.ts
+  precipMm    Float?
+  occasion    String? // Occasion in lib/wear/occasions.ts
+  /// Owner id from the stylePrefs roster. Wears do NOT cross-train affinity
+  /// between household members — B wearing a coat says nothing about A's taste.
+  wearerId    String?
+  placeLabel  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, wornOn])
+  @@index([userId, source])
+  @@index([outfitId])
+}
+
+// Which items were worn on one occasion. The pair is also the set-level record:
+// grouping by wearEventId gives "these were worn together", which is what
+// compatibility learns from, while the itemId index gives per-item history.
+model WearEventItem {
+  wearEventId String
+  wearEvent   WearEvent    @relation(fields: [wearEventId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([wearEventId, itemId])
+  @@index([itemId])
+}
+
+// A user *choice* about a suggestion, as opposed to a behaviour. Kept separate
+// from WearEvent because these are contrastive — a reroll means "this one, not
+// that one, under identical context", which is the input a Bradley-Terry model
+// wants and is worth several times its weight in wear counts.
+//
+// `policyId`/`propensity` exist from day one so a future ranker can be scored
+// against logged data (IPS/SNIPS) instead of needing a live A/B test. They cost
+// one column each now and are impossible to reconstruct later.
+model PreferenceEvent {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// PreferenceKind in lib/wear/signals.ts.
+  kind        String
+  /// JSON: string[] — the items the choice was *about*.
+  itemIds     String
+  /// JSON: string[] — for contrastive kinds, what was passed over. Empty otherwise.
+  rejectedIds String  @default("[]")
+  contextJson String?
+
+  policyId   String?
+  propensity Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, kind])
+  @@index([userId, createdAt])
+}
+
+// Cached image embedding for one item.
+//
+// Deliberately NOT pgvector: inference and scoring both run on-device, so the
+// server never computes a similarity — it is a sync store that keeps a second
+// device from re-embedding the whole closet. Raw little-endian Float32 bytes
+// (512 dims → 2 KB) needs no extension and no docker-compose change. If a
+// server-side similarity need ever appears, adding pgvector is its own
+// migration rather than a dependency taken on speculatively.
+model ItemEmbedding {
+  itemId    String       @id
+  item      WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  vector    Bytes
+  dims      Int          @default(512)
+  /// Encoder identity, e.g. "mobileclip-s2-int8" — rows are invalidated when
+  /// this changes, since vectors from different encoders are not comparable.
+  model     String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([model])
+}
+
+// A one-off styling tip in the user's own words, captured against the outfit
+// that was on screen — "don't put that hat with that shirt".
+//
+// The note text is kept verbatim alongside the parsed rules so the UI can show
+// *why* a rule exists in the words the user chose, and so notes can be
+// re-parsed if the parser improves without asking anyone to retype anything.
+//
+// `subjectIds` is what makes demonstratives tractable: because we know which
+// garments were visible, "that hat" resolves to an id without pronoun
+// resolution. It is also the allow-list the parser's output is validated
+// against — a rule naming anything else is discarded.
+model StyleNote {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Exactly what the user typed.
+  text       String
+  /// How the note's garment references are resolved.
+  ///   "outfit" — written about a specific on-screen proposal; `subjectIds`
+  ///              holds exactly those garments and is the allow-list forever.
+  ///   "closet" — written in the general tip box with nothing on screen, so it
+  ///              resolves against the whole wardrobe. `subjectIds` is empty and
+  ///              validation runs against the *current* closet instead, which
+  ///              means a rule naming a deleted garment drops out on its own.
+  scope      String @default("outfit")
+  /// JSON: string[] of WardrobeItem ids visible when it was written. Empty for
+  /// closet-scoped notes.
+  subjectIds String
+  /// JSON: StyleRule[] from lib/outfit/style-rules.ts. Empty when the note
+  /// didn't resolve to anything actionable — kept anyway, since the text is
+  /// still a record of intent and may parse later.
+  rules      String @default("[]")
+  /// Plain-language restatement shown back for confirmation.
+  summary    String?
+  /// "ai" | "keywords" — how the rules were derived.
+  source     String @default("keywords")
+
+  /// Cleared to switch a note off without deleting what the user wrote.
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([userId, active])
 }

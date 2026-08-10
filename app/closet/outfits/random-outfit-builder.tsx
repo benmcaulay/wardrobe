@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { Color } from "@/lib/json";
+import { decode, type Color, type Season } from "@/lib/json";
 import { isNoneCategoryStored, normalizeCategoryName } from "@/lib/categories";
 import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
@@ -106,8 +106,20 @@ export function RandomOutfitBuilder({
   initialAutoPopulateRules,
   initialStartupRules,
 }: Props) {
+  // Carries the attributes the Layer 1 scorer reads, not just the ones the slot
+  // rules need — see lib/outfit/compatibility.ts.
   const pickPool = useMemo(
-    () => items.map((i) => ({ id: i.id, category: i.category, colors: i.colors })),
+    () =>
+      items.map((i) => ({
+        id: i.id,
+        category: i.category,
+        colors: i.colors,
+        subcategory: i.subcategory,
+        name: i.name,
+        material: i.material,
+        pattern: i.pattern,
+        season: decode<Season[]>(i.season, []),
+      })),
     [items],
   );
 
@@ -466,7 +478,11 @@ export function RandomOutfitBuilder({
     setSpinning(true);
     setSpinError(null);
     try {
-      const assignment = pickRandomOutfit(pickPool, slotInputs, colorRules);
+      // Scored sampling rather than a uniform shuffle: the hard slot and colour
+      // rules are unchanged, but compatible pieces now come up first. Still
+      // stochastic, because this button gets pressed repeatedly and returning
+      // the same "best" outfit every time would make it useless.
+      const assignment = pickRandomOutfit(pickPool, slotInputs, colorRules, {});
       if (!assignment) {
         const after = diagnoseOutfitFill(pickPool, slotInputs, categoryRules, colorRules);
         setSpinError(

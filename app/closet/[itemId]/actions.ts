@@ -7,6 +7,8 @@ import { prisma } from "@/lib/db";
 import { encode, parseStylePrefs } from "@/lib/json";
 import { getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
 import { deleteUpload } from "@/lib/uploads";
+import { recordWear } from "@/lib/wear/record";
+import { wornOnFromISODate, wornOnFromLocalDate } from "@/lib/wear/rollup";
 import type { ItemFormValue } from "@/lib/types";
 
 export type UpdateItemInput = ItemFormValue & { itemId: string };
@@ -55,16 +57,33 @@ export async function updateItem(input: UpdateItemInput): Promise<ActionResponse
   return { ok: true };
 }
 
-export async function wearToday(itemId: string): Promise<ActionResponse> {
+/**
+ * Log an explicit wear.
+ *
+ * Writes a WearEvent and lets the rollup derive `timesWorn`/`lastWornAt` rather
+ * than incrementing them — see lib/wear/record.ts for why the counters are
+ * strictly derived now.
+ *
+ * `wornOnISO` is the caller's *local* calendar date ("YYYY-MM-DD"). Which day a
+ * wear belongs to is a question only the user's timezone can answer, and
+ * resolving it from the server clock would push evening wears in western
+ * timezones onto the following day.
+ */
+export async function wearToday(itemId: string, wornOnISO?: string): Promise<ActionResponse> {
   const user = await requireUser();
   await assertOwned(itemId, user.id);
-  await prisma.wardrobeItem.update({
-    where: { id: itemId },
-    data: {
-      timesWorn: { increment: 1 },
-      lastWornAt: new Date(),
-    },
+
+  const wornOn =
+    (wornOnISO ? wornOnFromISODate(wornOnISO) : null) ?? wornOnFromLocalDate(new Date());
+
+  await recordWear({
+    userId: user.id,
+    itemIds: [itemId],
+    wornOn,
+    source: "explicit",
   });
+
+  revalidatePath("/closet");
   revalidatePath(`/closet/${itemId}`);
   return { ok: true };
 }
