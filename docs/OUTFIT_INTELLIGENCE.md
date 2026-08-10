@@ -496,6 +496,14 @@ arithmetic comfortable would just hide the variance.
 No sell recommendations. Four independent lenses, deliberately **never fused into
 a single score** and never shown in the same card.
 
+These now render as a section of the Sell page (`/closet/sell`) rather than their
+own route. That raises the stakes on the rule above rather than relaxing it: the
+surrounding page is about money, so the adjacency already implies an action the
+lenses must not make. The section sits below a hard rule with its own standfirst
+— "Observations only. What to do about any of it is yours to decide." — and
+nothing inside it may grow a CTA, a combined score, or an ordering that reads as
+a queue.
+
 ### Lens 1 — Dormancy
 
 Discrete-time hazard model of time-to-next-wear. Features: category base rate,

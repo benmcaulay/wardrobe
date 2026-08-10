@@ -14,6 +14,7 @@ import {
   startOfMonthMs,
   type MetricPlacement,
 } from "@/lib/sell/metrics";
+import { getClosetLenses } from "@/lib/actions/closet-lenses";
 import { SellLanding } from "./sell-landing";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export default async function SellPage() {
   const user = await requireUser();
   const nowMs = Date.now();
 
-  const [dbUser, untriaged, listings, placementRows] = await Promise.all([
+  const [dbUser, untriaged, listings, placementRows, lenses] = await Promise.all([
     prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
     // Pieces with no sale decision yet — the triage queue, and the raw material
     // for "still on the table".
@@ -57,6 +58,7 @@ export default async function SellPage() {
         soldAt: true,
       },
     }),
+    getClosetLenses(),
   ]);
 
   const feeOverrides = readFeeOverrides(parseStylePrefs(dbUser?.stylePrefs));
@@ -132,6 +134,7 @@ export default async function SellPage() {
         label: [l.item.brand, l.item.name].filter(Boolean).join(" ") || l.item.name,
         askingCents: l.askingCents,
       }))}
+      lenses={lenses}
     />
   );
 }

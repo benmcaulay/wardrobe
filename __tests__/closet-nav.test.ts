@@ -105,7 +105,6 @@ describe("CLOSET_NAV", () => {
       "/closet/try-on",
       "/closet/outfits",
       "/closet/smartpakker",
-      "/closet/lenses",
       "/closet/sell",
       "/closet/wishlist",
       "/closet/share",
