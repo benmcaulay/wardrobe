@@ -9,6 +9,12 @@
  * decluttering language anywhere in this file, and the three sections are
  * visually separate so nobody reads dormancy and resale value as one verdict.
  *
+ * That restraint matters more now than it did, because this lives on the Sell
+ * page: the surrounding context already implies an action, so nothing in here
+ * may add one. No CTA, no "list it", no ordering that reads as a queue. The
+ * caller is responsible for keeping the section visibly apart from the earnings
+ * above it — see the divider and standfirst in sell-landing.tsx.
+ *
  * The dormancy section refuses to render at all until there is enough wear
  * history for it to mean something. On a young closet every garment is
  * technically dormant, which makes the statement both useless and accusatory —

@@ -9,6 +9,8 @@ import { formatCents, STALE_AFTER_DAYS } from "@/lib/sale-listing";
 import { formatDays, type EarningsSummary, type Opportunity, type PlatformStats } from "@/lib/sell/metrics";
 import { fadeUp, staggerContainer } from "@/lib/ui-motion";
 import { LogSaleSheet, type SellableItem } from "./log-sale-sheet";
+import { LensesClient } from "./lenses-client";
+import type { ClosetLenses } from "@/lib/actions/closet-lenses";
 
 type Props = {
   earnings: EarningsSummary;
@@ -20,11 +22,22 @@ type Props = {
   staleCount: number;
   currency: string;
   sellable: SellableItem[];
+  lenses: ClosetLenses;
 };
 
 export function SellLanding(props: Props) {
-  const { earnings, thisMonth, opportunity, platforms, timing, counts, staleCount, currency, sellable } =
-    props;
+  const {
+    earnings,
+    thisMonth,
+    opportunity,
+    platforms,
+    timing,
+    counts,
+    staleCount,
+    currency,
+    sellable,
+    lenses,
+  } = props;
   const reduce = useReducedMotion();
   const [logOpen, setLogOpen] = useState(false);
 
@@ -198,6 +211,23 @@ export function SellLanding(props: Props) {
           </motion.p>
         )}
       </motion.div>
+
+      {/* ── Closet health ────────────────────────────────────────────────────
+          Below a hard rule, with its own standfirst, because the page above it
+          is about money and this is not. These are observations — quietest
+          pieces, near-duplicates, what has held its value — and on a page
+          titled Sell it would be very easy to read them as a list of things to
+          get rid of. The divider and the "yours to decide" line are the whole
+          mitigation; see lenses-client.tsx for why none of it may grow a CTA. */}
+      <section className="mt-14 border-t border-ink/10 pt-8">
+        <h2 className="font-serif text-2xl tracking-tight">Your closet, looked at</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Observations only. What to do about any of it is yours to decide.
+        </p>
+        <div className="mt-5">
+          <LensesClient lenses={lenses} />
+        </div>
+      </section>
 
       <LogSaleSheet
         open={logOpen}
