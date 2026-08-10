@@ -45,7 +45,6 @@ import {
 } from "@/lib/outfit-slot-defaults";
 import {
   SPIN_MODES,
-  SPIN_MODE_HINTS,
   SPIN_MODE_LABELS,
   spinScoringOptions,
   type SpinMode,
@@ -101,12 +100,12 @@ type Props = {
    */
   signalsNonce: number;
   /**
-   * Today's weather and picks, rendered inside this component's existing left
-   * column rather than beside it. Passed in as a node so the builder doesn't
-   * have to know anything about slates or forecasts — it just owns the column
-   * they sit in.
+   * Rendered at the bottom of the rules column, under the colour rules. That is
+   * where the weather card lives: it is another constraint on the outfit, not a
+   * dashboard widget. Passed as a node so the builder needs to know nothing
+   * about forecasts — it just owns the column.
    */
-  sidebarFooter?: ReactNode;
+  rulesFooter?: ReactNode;
   /**
    * Rendered full width *below* the builder's columns — the sidebar, the frame
    * and the rules stack. Today's picks go here rather than in the sidebar: they
@@ -142,7 +141,7 @@ export function RandomOutfitBuilder({
   initialAutoPopulateRules,
   initialStartupRules,
   signalsNonce,
-  sidebarFooter,
+  rulesFooter,
   footer,
 }: Props) {
   // Carries the attributes the Layer 1 scorer reads, not just the ones the slot
@@ -193,7 +192,6 @@ export function RandomOutfitBuilder({
   const [spinMode, setSpinMode] = useState<SpinMode>("smart");
   const [affinity, setAffinity] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [band, setBand] = useState<ClimateBand | null>(null);
-  const [signalsLoaded, setSignalsLoaded] = useState(false);
   const [previewItem, setPreviewItem] = useState<RandomOutfitItem | null>(null);
   const [layerOrder, setLayerOrder] = useState<string[]>(initialLayerOrder);
   const layerOrderRef = useRef(layerOrder);
@@ -370,8 +368,6 @@ export function RandomOutfitBuilder({
       } catch {
         // A smart spin without signals still scores on compatibility, which is
         // strictly better than falling back to a shuffle the user didn't ask for.
-      } finally {
-        if (!cancelled) setSignalsLoaded(true);
       }
     })();
     return () => {
@@ -888,24 +884,12 @@ export function RandomOutfitBuilder({
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
-              {SPIN_MODE_HINTS[spinMode]}
-              {spinMode === "smart" && !signalsLoaded ? " (loading what I know…)" : ""}
-              {spinMode === "smart" && signalsLoaded && affinity.size === 0
-                ? " Nothing learned yet — train me and this gets sharper."
-                : ""}
-            </p>
           </div>
           {spinError && (
             <p role="alert" className="text-xs text-red-700 text-center">
               {spinError}
             </p>
           )}
-          {sidebarFooter ? (
-            <div data-keep-selection className="w-full">
-              {sidebarFooter}
-            </div>
-          ) : null}
           {spinHint && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-2 text-center">
               {spinHint}
@@ -1478,6 +1462,8 @@ export function RandomOutfitBuilder({
             + Add color rule
           </button>
         </div>
+
+        {rulesFooter}
 
         {selected && (
           <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">

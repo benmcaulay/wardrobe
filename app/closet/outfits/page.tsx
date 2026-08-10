@@ -13,20 +13,19 @@ import {
   sanitizeVisualLayers,
 } from "@/lib/outfit-slot-defaults";
 import { readTemperatureUnit } from "@/lib/temperature";
-import { getDailySlate } from "@/lib/actions/daily-outfit";
+import { getDailyContext } from "@/lib/actions/daily-outfit";
 import { listPendingWears } from "@/lib/actions/wear-confirm";
 import { listStyleNotes } from "@/lib/actions/style-notes";
 import { OutfitStudio } from "./outfit-studio";
 import type { SavedOutfit } from "./outfit-builder";
 import type { RandomOutfitItem } from "./random-outfit-builder";
 
-// The daily slate reads today's forecast and the preference log, so this page
-// can't be static.
+// Reads today's forecast and the preference log, so this page can't be static.
 export const dynamic = "force-dynamic";
 
 export default async function OutfitsPage() {
   const user = await requireUser();
-  const [items, layouts, dbUser, slate, pending, notes] = await Promise.all([
+  const [items, layouts, dbUser, dailyContext, pending, notes] = await Promise.all([
     prisma.wardrobeItem.findMany({
       where: { userId: user.id, isWishlist: false },
       orderBy: { createdAt: "desc" },
@@ -64,9 +63,9 @@ export default async function OutfitsPage() {
       where: { id: user.id },
       select: { stylePrefs: true },
     }),
-    // Rendered with the server's idea of "today"; DailyColumn re-pulls on mount
-    // with the user's own date, which is the only clock that can answer it.
-    getDailySlate(),
+    // Rendered with the server's idea of "today"; the weather card re-pulls on
+    // mount with the user's own date, the only clock that can answer it.
+    getDailyContext(),
     listPendingWears(),
     listStyleNotes(),
   ]);
@@ -128,7 +127,7 @@ export default async function OutfitsPage() {
         outfitLayerArrangements={outfitLayerArrangements}
         outfitAutoPopulateRules={outfitAutoPopulateRules}
         outfitStartupRules={outfitStartupRules}
-        initialSlate={slate}
+        initialContext={dailyContext}
         initialPending={pending}
         initialNotes={notes}
         temperatureUnit={readTemperatureUnit(prefs.temperatureUnit)}

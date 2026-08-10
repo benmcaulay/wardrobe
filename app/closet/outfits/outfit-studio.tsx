@@ -6,26 +6,23 @@
  * Three tabs over one closet, in the order the work happens: let the model
  * propose (Smart Generator), do it yourself (Manual compose), or teach it (Train
  * your stylist). What used to be the "Today" tab is folded in rather than kept
- * as a fourth: the weather sits in the generator's own left column under the
- * spin dial, today's picks span the full width below its columns, and the
- * standing rules live with the trainer.
- *
- * Notes are held here rather than in either panel because both write them — the
- * trainer through its rule box, the daily picks through a per-proposal tip — and
- * two copies of that list would disagree the moment you used both.
+ * as a fourth: the weather card joins the generator's rules column (it is another
+ * constraint on the outfit, like a colour rule), and styling tips live with the
+ * trainer.
  */
 
 import { useCallback, useState, useTransition } from "react";
 import { OutfitBuilder, type SavedOutfit } from "./outfit-builder";
 import { RandomOutfitBuilder, type RandomOutfitItem } from "./random-outfit-builder";
 import { StylistTrainer } from "./stylist-trainer";
-import { TodaysPicks, WeatherCard, useDailySlate } from "./daily-picks";
+import { WeatherCard, useDailyWeather } from "./weather-card";
+import { PendingWearsCard } from "./pending-wears";
 import { StyleRulesPanel } from "./style-rules-panel";
 import type { Color } from "@/lib/json";
 import type { OutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
 import type { CategoryRule } from "@/lib/outfit-random";
 import type { TemperatureUnit } from "@/lib/temperature";
-import type { DailySlateResponse } from "@/lib/actions/daily-outfit";
+import type { DailyContext } from "@/lib/actions/daily-outfit";
 import type { PendingWear } from "@/lib/actions/wear-confirm";
 import { addStyleNote, deactivateStyleNote, type SavedNote } from "@/lib/actions/style-notes";
 
@@ -55,7 +52,7 @@ type Props = {
   outfitLayerArrangements: Record<string, string[]>;
   outfitAutoPopulateRules: boolean;
   outfitStartupRules: CategoryRule[];
-  initialSlate: DailySlateResponse;
+  initialContext: DailyContext;
   initialPending: PendingWear[];
   initialNotes: SavedNote[];
   temperatureUnit: TemperatureUnit;
@@ -72,7 +69,7 @@ export function OutfitStudio({
   outfitLayerArrangements,
   outfitAutoPopulateRules,
   outfitStartupRules,
-  initialSlate,
+  initialContext,
   initialPending,
   initialNotes,
   temperatureUnit,
@@ -118,18 +115,7 @@ export function OutfitStudio({
     [onModelChanged],
   );
 
-  const onNoteAdded = useCallback((note: SavedNote) => {
-    setNotes((prev) => [note, ...prev]);
-  }, []);
-
-  // One slate feeding two places: the weather card in the generator's sidebar
-  // and the picks across the full width below it.
-  const daily = useDailySlate({
-    initialSlate,
-    initialPending,
-    onModelChanged,
-    onNoteAdded,
-  });
+  const weather = useDailyWeather({ initialContext, onChanged: onModelChanged });
 
   return (
     <div className="space-y-6">
@@ -159,8 +145,10 @@ export function OutfitStudio({
           initialAutoPopulateRules={outfitAutoPopulateRules}
           initialStartupRules={outfitStartupRules}
           signalsNonce={signalsNonce}
-          sidebarFooter={<WeatherCard daily={daily} temperatureUnit={temperatureUnit} />}
-          footer={<TodaysPicks daily={daily} />}
+          rulesFooter={<WeatherCard weather={weather} temperatureUnit={temperatureUnit} />}
+          footer={
+            <PendingWearsCard initialPending={initialPending} onConfirmed={onModelChanged} />
+          }
         />
       ) : tab === "compose" ? (
         <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />
