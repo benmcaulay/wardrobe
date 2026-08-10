@@ -8,6 +8,7 @@ import { encode } from "@/lib/json";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { virtualTryOnUsesAppCredits } from "@/lib/services/virtualTryOn";
 import { enqueueJob, getJobForUser, type VirtualTryOnJobResult } from "@/lib/jobs/queue";
+import { recordPreference } from "@/lib/wear/record";
 
 const REAL_VTON = process.env.USE_REAL_VIRTUAL_TRYON === "true";
 const MAX_PERSON_PHOTOS = 5;
@@ -200,6 +201,17 @@ export async function saveOutfit(
       itemIds: encode(itemIds),
     },
   });
+
+  // Saving an outfit is a compatibility observation — "these go together" —
+  // and only weakly an affinity one. The weighting lives in lib/wear/signals.ts
+  // so no call site has to get that distinction right on its own.
+  await recordPreference({
+    userId: user.id,
+    kind: "save",
+    itemIds,
+    context: { outfitId: created.id, surface: "try-on" },
+  });
+
   revalidatePath("/closet/try-on");
   return { ok: true, id: created.id };
 }

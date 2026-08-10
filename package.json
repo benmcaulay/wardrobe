@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "tsx scripts/fetch-embedding-model.ts && next build",
+    "embedding:fetch": "tsx scripts/fetch-embedding-model.ts",
     "start": "next start",
     "worker": "tsx scripts/worker.ts",
     "lint": "next lint",
@@ -14,13 +15,18 @@
     "ghost:bakeoff": "node --env-file=.env --import tsx scripts/ghost-bakeoff.ts",
     "test:s3": "tsx scripts/verify-s3.ts",
     "test:jobs": "tsx scripts/verify-jobs.ts",
+    "test:embedding": "tsx scripts/verify-embedding.ts",
     "db:backup": "tsx scripts/db-backup.ts",
+    "db:backfill-wears": "tsx --env-file=.env scripts/backfill-wear-events.ts",
     "db:migrate-from-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "postinstall": "prisma generate",
     "mac-photos:scan": "tsx --env-file=.env scripts/mac-photos-scan.ts",
-    "test:stripe": "tsx scripts/verify-stripe.ts"
+    "test:stripe": "tsx scripts/verify-stripe.ts",
+    "benchmark:wear-retrieval": "tsx --env-file=.env scripts/benchmark-wear-retrieval.ts",
+    "calibrate:wear-match": "tsx --env-file=.env scripts/calibrate-wear-match.ts",
+    "benchmark:style-text": "tsx --env-file=.env scripts/benchmark-style-text.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -43,6 +49,7 @@
     "@aws-sdk/client-s3": "^3.1066.0",
     "@aws-sdk/s3-request-presigner": "^3.1066.0",
     "@fal-ai/client": "^1.10.0",
+    "@huggingface/transformers": "^4.2.0",
     "@prisma/client": "^5.22.0",
     "@sentry/node": "^8.55.2",
     "adm-zip": "^0.5.17",

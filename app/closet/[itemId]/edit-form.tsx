@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
 import type { ItemFormValue } from "@/lib/types";
 import type { Color, Owner } from "@/lib/json";
+import { wornOnFromLocalDate, wornOnToISODate } from "@/lib/wear/rollup";
 import { updateItem, wearToday, deleteItem } from "./actions";
 
 const AUTOSAVE_MS = 600;
@@ -70,8 +71,11 @@ export function EditForm({ itemId, initial, categories, styleTagsList, ownersLis
   }, [value, itemId, router]);
 
   async function onWear() {
+    // Resolve "today" here, in the user's timezone — the server can only see
+    // its own clock, and a wear logged in the evening would land on tomorrow.
+    const today = wornOnToISODate(wornOnFromLocalDate(new Date()));
     startTransition(async () => {
-      await wearToday(itemId);
+      await wearToday(itemId, today);
       router.refresh();
     });
   }

@@ -47,6 +47,17 @@ export type StylePrefs = {
    * is always stored in Celsius. See lib/temperature.ts.
    */
   temperatureUnit?: string;
+  /**
+   * Where the user usually gets dressed, as a place name for Open-Meteo
+   * geocoding ("San Diego"). Powers the weather context on the daily outfit
+   * proposal.
+   *
+   * Stored rather than read from the browser because next.config.mjs denies
+   * geolocation at the Permissions-Policy header, and a typed city is a much
+   * smaller ask than reversing that for a nicety. Absent is fine: the climate
+   * term returns neutral and the other Layer 1 terms decide.
+   */
+  homeLocation?: string;
   /** Manual item order within category + primary-color groups (group key → item ids). */
   closetGroupOrders?: Record<string, string[]>;
   /** Default canvas placement per outfit slot category rule (signature → layout). */

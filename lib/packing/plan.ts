@@ -242,7 +242,9 @@ export function garmentWarmth(item: PackableItem): number {
   return 0.5;
 }
 
-const DESIRED_WARMTH: Record<ClimateBand, number> = {
+/** Exported for lib/outfit/climate.ts, which needs the same tuned targets —
+ *  duplicating the table would let the two drift apart silently. */
+export const DESIRED_WARMTH: Record<ClimateBand, number> = {
   hot: 0,
   warm: 0.7,
   mild: 1.4,
