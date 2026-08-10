@@ -3,14 +3,22 @@ import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs, NONE_CATEGORY } from "@/lib/categories";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
-import { ScanClient } from "./scan-client";
+import { getScanReadiness } from "@/lib/actions/wear-scan";
+import { ScanModes } from "./scan-modes";
+
+// The wear-scan mode reports how much of the closet is embedded, which changes
+// as pieces are added, so this can't be static.
+export const dynamic = "force-dynamic";
 
 export default async function CameraRollScanPage() {
   const user = await requireUser();
-  const dbUser = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: { credits: true, stylePrefs: true },
-  });
+  const [dbUser, readiness] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: user.id },
+      select: { credits: true, stylePrefs: true },
+    }),
+    getScanReadiness(),
+  ]);
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = [NONE_CATEGORY, ...getCategoriesListFromPrefs(prefs)];
   const realGhost = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
@@ -22,17 +30,12 @@ export default async function CameraRollScanPage() {
           ← Closet
         </Link>
       </nav>
-      <header className="mb-8">
-        <h1 className="font-serif text-4xl tracking-tight">Scan camera roll</h1>
-        <p className="text-ink-muted mt-2">
-          Bulk-import clothing from Apple Photos or your camera roll — we detect garments and let you
-          review before anything hits your closet, then ghost the pieces you keep.
-        </p>
-      </header>
-      <ScanClient
+      <ScanModes
         credits={dbUser?.credits ?? 0}
         realGhost={realGhost}
         categories={categories}
+        embedded={readiness.embedded}
+        total={readiness.total}
       />
     </main>
   );

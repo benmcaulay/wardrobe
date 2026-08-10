@@ -459,10 +459,10 @@ Surface B is the data engine — it manufactures the contrastive choice data tha
 Layer 2 needs. Surface A is what makes the product feel smart immediately. Ship A
 first, B second.
 
-### Surface B as built — `/closet/today`
+### Surface B as built — the Outfits page (`/closet/outfits`)
 
 `lib/outfit/slate.ts` (pure) + `lib/actions/daily-outfit.ts` +
-`app/closet/today/`. Three distinct proposals; accept writes a confidence-1
+`app/closet/outfits/`. Three distinct proposals; accept writes a confidence-1
 `WearEvent` with weather and occasion attached *plus* an `accept`
 `PreferenceEvent` carrying the rejected sets; reroll writes the comparison
 alone.
@@ -574,7 +574,7 @@ permission ask is heavy and the camera roll carries enough.
 2. **Packing.** Items in a `PackingBag` over trip dates are weak positive
    evidence. Nearly free.
 
-### Built — `/closet/wear-scan`
+### Built — the wear-scan mode of `/closet/scan`
 
 `lib/wear/exif.ts` → `lib/wear/photo-match.ts` → `lib/wear/photo-scan.ts`, with
 cropping and embedding in the worker and `lib/actions/wear-scan.ts` as the only
@@ -763,7 +763,7 @@ garments.
 
 ## 10. Training rounds
 
-"Help me get better", below the daily proposal on `/closet/today`.
+"Train your stylist", a tab on `/closet/outfits`.
 
 ### Why this is the highest-leverage surface in the system
 

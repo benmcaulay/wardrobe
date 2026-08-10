@@ -24,10 +24,9 @@ export type ClosetNavItem = {
 
 export const CLOSET_NAV: readonly ClosetNavItem[] = [
   { href: "/closet", label: "Closet", hint: "Everything you own", icon: "closet", exact: true },
-  { href: "/closet/scan", label: "Scan roll", hint: "Find garments in your camera roll", icon: "scan" },
-  { href: "/closet/wear-scan", label: "Find past wears", hint: "Match your photos against what you own", icon: "clock" },
+  { href: "/closet/scan", label: "Scan roll", hint: "Import garments, or find past wears", icon: "scan" },
   { href: "/closet/try-on", label: "Try on", hint: "See it on you first", icon: "camera" },
-  { href: "/closet/outfits", label: "Outfits", hint: "Today's picks, spins, and training", icon: "hanger" },
+  { href: "/closet/outfits", label: "Outfits", hint: "Spin, compose, and train your stylist", icon: "hanger" },
   { href: "/closet/smartpakker", label: "Trip packing", hint: "Pack for the weather", icon: "suitcase" },
   { href: "/closet/lenses", label: "Closet health", hint: "What's quiet, what's doubled up", icon: "chart" },
   { href: "/closet/sell", label: "Sell", hint: "What you've made, and what's left to list", icon: "tag" },

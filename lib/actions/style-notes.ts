@@ -88,7 +88,7 @@ export async function addStyleNote(
     select: { id: true, text: true, summary: true, source: true, createdAt: true },
   });
 
-  revalidatePath("/closet/today");
+  revalidatePath("/closet/outfits");
   return {
     ok: true,
     understood: parsed.rules.length > 0,
@@ -133,6 +133,6 @@ export async function deactivateStyleNote(
   });
   if (result.count === 0) return { ok: false, error: "That note no longer exists." };
 
-  revalidatePath("/closet/today");
+  revalidatePath("/closet/outfits");
   return { ok: true };
 }

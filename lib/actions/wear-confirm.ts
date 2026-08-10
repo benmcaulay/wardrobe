@@ -93,7 +93,7 @@ export async function confirmPendingWear(
   const ok = await confirmWear(user.id, wearEventId, parseOccasion(occasion));
   if (!ok) return { ok: false, error: "That wear no longer exists." };
 
-  revalidatePath("/closet/today");
+  revalidatePath("/closet/outfits");
   revalidatePath("/closet");
   return { ok: true };
 }
@@ -111,7 +111,7 @@ export async function rejectPendingWear(wearEventId: string): Promise<ConfirmRes
   const ok = await deleteWear(user.id, wearEventId);
   if (!ok) return { ok: false, error: "That wear no longer exists." };
 
-  revalidatePath("/closet/today");
+  revalidatePath("/closet/outfits");
   revalidatePath("/closet");
   return { ok: true };
 }
