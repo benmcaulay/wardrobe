@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { decode, type Color, type Season } from "@/lib/json";
+import { wornOnFromLocalDate, wornOnToISODate } from "@/lib/wear/rollup";
 import { isNoneCategoryStored, normalizeCategoryName } from "@/lib/categories";
 import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
@@ -42,6 +43,15 @@ import {
   type ComboLayout,
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
+import {
+  SPIN_MODES,
+  SPIN_MODE_HINTS,
+  SPIN_MODE_LABELS,
+  spinScoringOptions,
+  type SpinMode,
+} from "@/lib/outfit/spin-mode";
+import { getSpinSignals } from "@/lib/actions/daily-outfit";
+import type { ClimateBand } from "@/lib/services/weather";
 import { saveOutfitLayout } from "./actions";
 
 export type RandomOutfitItem = {
@@ -83,6 +93,20 @@ type Props = {
   initialLayerArrangements: Record<string, string[]>;
   initialAutoPopulateRules: boolean;
   initialStartupRules: CategoryRule[];
+  /**
+   * Bumped whenever something elsewhere on the page taught the model. A smart
+   * spin reads a client-side copy of the affinity map, so it needs to know when
+   * that copy is stale — otherwise you could train for ten minutes and keep
+   * spinning against the model as it was when the page loaded.
+   */
+  signalsNonce: number;
+  /**
+   * Today's weather and picks, rendered inside this component's existing left
+   * column rather than beside it. Passed in as a node so the builder doesn't
+   * have to know anything about slates or forecasts — it just owns the column
+   * they sit in.
+   */
+  sidebarFooter?: ReactNode;
 };
 
 const BASE_PIECE_SIZE = 180;
@@ -95,6 +119,11 @@ const FRAME_HEIGHT = 960;
 const FRAME_GUTTER = 24;
 const SLOT_ICON_SIZE = 72;
 
+/** The caller's own calendar date, so the band is today's where *they* are. */
+function localISODate(): string {
+  return wornOnToISODate(wornOnFromLocalDate(new Date()));
+}
+
 export function RandomOutfitBuilder({
   items,
   colorOptions,
@@ -105,6 +134,8 @@ export function RandomOutfitBuilder({
   initialLayerArrangements,
   initialAutoPopulateRules,
   initialStartupRules,
+  signalsNonce,
+  sidebarFooter,
 }: Props) {
   // Carries the attributes the Layer 1 scorer reads, not just the ones the slot
   // rules need — see lib/outfit/compatibility.ts.
@@ -145,6 +176,16 @@ export function RandomOutfitBuilder({
   } | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [spinError, setSpinError] = useState<string | null>(null);
+  /**
+   * Which engine fills the open slots. Smart is the default — it's the whole
+   * point of having trained a model — but random stays one tap away, because
+   * "surprise me" is a real thing to want from a spin button and a ranked
+   * generator can't do it.
+   */
+  const [spinMode, setSpinMode] = useState<SpinMode>("smart");
+  const [affinity, setAffinity] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const [band, setBand] = useState<ClimateBand | null>(null);
+  const [signalsLoaded, setSignalsLoaded] = useState(false);
   const [previewItem, setPreviewItem] = useState<RandomOutfitItem | null>(null);
   const [layerOrder, setLayerOrder] = useState<string[]>(initialLayerOrder);
   const layerOrderRef = useRef(layerOrder);
@@ -303,6 +344,32 @@ export function RandomOutfitBuilder({
     }
     void saveOutfitStartupRules(autoPopulateRules, autoPopulateRules ? categoryRules : []);
   }, [autoPopulateRules, categoryRules]);
+
+  /**
+   * Pull the learned affinity and today's band once, then again whenever the
+   * model moves. Spinning itself stays local so the button feels immediate; see
+   * getSpinSignals for why the model comes to the client rather than the other
+   * way round.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const signals = await getSpinSignals(localISODate());
+        if (cancelled) return;
+        setAffinity(new Map(Object.entries(signals.affinity)));
+        setBand(signals.context.band);
+      } catch {
+        // A smart spin without signals still scores on compatibility, which is
+        // strictly better than falling back to a shuffle the user didn't ask for.
+      } finally {
+        if (!cancelled) setSignalsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [signalsNonce]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -478,11 +545,17 @@ export function RandomOutfitBuilder({
     setSpinning(true);
     setSpinError(null);
     try {
-      // Scored sampling rather than a uniform shuffle: the hard slot and colour
-      // rules are unchanged, but compatible pieces now come up first. Still
-      // stochastic, because this button gets pressed repeatedly and returning
-      // the same "best" outfit every time would make it useless.
-      const assignment = pickRandomOutfit(pickPool, slotInputs, colorRules, {});
+      // The mode decides the order candidates are tried in, never which
+      // combinations are legal: slot rules, colour rules and locked pieces bind
+      // identically either way. Locked slots are already assigned before
+      // scoring starts, so a smart spin scores the open ones *against what's
+      // locked* — which is what makes it complete an outfit around a piece.
+      const assignment = pickRandomOutfit(
+        pickPool,
+        slotInputs,
+        colorRules,
+        spinScoringOptions(spinMode, { affinity, band }),
+      );
       if (!assignment) {
         const after = diagnoseOutfitFill(pickPool, slotInputs, categoryRules, colorRules);
         setSpinError(
@@ -728,7 +801,7 @@ export function RandomOutfitBuilder({
   return (
     <>
     <div className="flex flex-col gap-8 md:flex-row md:flex-wrap md:items-start md:justify-evenly md:gap-y-8 md:gap-x-0">
-        <div data-keep-selection className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[300px] md:shrink-0 md:flex-col md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
+        <div data-keep-selection className="w-full flex flex-row flex-wrap items-center justify-center gap-3 pt-2 md:w-[300px] md:shrink-0 md:flex-col md:flex-nowrap md:items-stretch md:sticky md:top-6 md:self-start md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto md:pr-1">
           <button
             type="button"
             onClick={() => void spin()}
@@ -784,11 +857,47 @@ export function RandomOutfitBuilder({
               Clear items
             </button>
           )}
+          <div data-keep-selection className="w-full">
+            <div
+              role="radiogroup"
+              aria-label="Spin engine"
+              className="flex w-full rounded-full border border-ink/10 bg-paper-warm p-1"
+            >
+              {SPIN_MODES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={spinMode === option}
+                  onClick={() => setSpinMode(option)}
+                  className={`flex-1 rounded-full px-3 py-1.5 text-xs tracking-wide transition ${
+                    spinMode === option
+                      ? "bg-ink text-paper shadow-sm"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {SPIN_MODE_LABELS[option]}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
+              {SPIN_MODE_HINTS[spinMode]}
+              {spinMode === "smart" && !signalsLoaded ? " (loading what I know…)" : ""}
+              {spinMode === "smart" && signalsLoaded && affinity.size === 0
+                ? " Nothing learned yet — train me and this gets sharper."
+                : ""}
+            </p>
+          </div>
           {spinError && (
             <p role="alert" className="text-xs text-red-700 text-center">
               {spinError}
             </p>
           )}
+          {sidebarFooter ? (
+            <div data-keep-selection className="w-full">
+              {sidebarFooter}
+            </div>
+          ) : null}
           {spinHint && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-2 text-center">
               {spinHint}
