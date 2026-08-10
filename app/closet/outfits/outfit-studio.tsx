@@ -1,13 +1,47 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * The Outfits page shell.
+ *
+ * Three tabs over one closet, in the order the work happens: let the model
+ * propose (Smart Generator), do it yourself (Manual compose), or teach it (Train
+ * your stylist). What used to be the "Today" tab is folded in rather than kept
+ * as a fourth: the weather and today's picks sit in the generator's own left
+ * column under the spin dial, and the standing rules live with the trainer.
+ *
+ * Notes are held here rather than in either panel because both write them — the
+ * trainer through its rule box, the daily picks through a per-proposal tip — and
+ * two copies of that list would disagree the moment you used both.
+ */
+
+import { useCallback, useState, useTransition } from "react";
 import { OutfitBuilder, type SavedOutfit } from "./outfit-builder";
 import { RandomOutfitBuilder, type RandomOutfitItem } from "./random-outfit-builder";
+import { StylistTrainer } from "./stylist-trainer";
+import { DailyPicks } from "./daily-picks";
+import { StyleRulesPanel } from "./style-rules-panel";
 import type { Color } from "@/lib/json";
 import type { OutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
 import type { CategoryRule } from "@/lib/outfit-random";
+import type { TemperatureUnit } from "@/lib/temperature";
+import type { DailySlateResponse } from "@/lib/actions/daily-outfit";
+import type { PendingWear } from "@/lib/actions/wear-confirm";
+import { addStyleNote, deactivateStyleNote, type SavedNote } from "@/lib/actions/style-notes";
 
-type Tab = "random" | "compose";
+type Tab = "generate" | "compose" | "train";
+
+const TAB_LABELS: Record<Tab, string> = {
+  generate: "Smart Generator",
+  compose: "Manual compose",
+  train: "Train your stylist",
+};
+
+const TAB_BLURB: Record<Tab, string> = {
+  generate:
+    "Spin outfits from your rules — smart, or genuinely random. Lock a piece and it builds around it.",
+  compose: "Place pieces on the frame yourself and save the look.",
+  train: "Answer a few rounds, or just tell me a rule. Everything else here gets sharper.",
+};
 
 type Props = {
   items: RandomOutfitItem[];
@@ -20,6 +54,10 @@ type Props = {
   outfitLayerArrangements: Record<string, string[]>;
   outfitAutoPopulateRules: boolean;
   outfitStartupRules: CategoryRule[];
+  initialSlate: DailySlateResponse;
+  initialPending: PendingWear[];
+  initialNotes: SavedNote[];
+  temperatureUnit: TemperatureUnit;
 };
 
 export function OutfitStudio({
@@ -33,29 +71,73 @@ export function OutfitStudio({
   outfitLayerArrangements,
   outfitAutoPopulateRules,
   outfitStartupRules,
+  initialSlate,
+  initialPending,
+  initialNotes,
+  temperatureUnit,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("random");
+  const [tab, setTab] = useState<Tab>("generate");
+  const [notes, setNotes] = useState<SavedNote[]>(initialNotes);
+  const [noteBusy, startNoteTransition] = useTransition();
+
+  /**
+   * One counter, incremented by anything that teaches the model — a logged wear,
+   * a training answer, a new rule. The generator watches it to re-pull the
+   * affinity map it spins against. A shared nonce beats each surface polling on
+   * its own timer: the model only moves when someone tells it something, and
+   * these are exactly those moments.
+   */
+  const [signalsNonce, setSignalsNonce] = useState(0);
+  const onModelChanged = useCallback(() => setSignalsNonce((n) => n + 1), []);
+
+  const onAddRule = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      startNoteTransition(async () => {
+        // No subjects: the action reads that as closet scope, so a habit like
+        // "I don't wear boots with shorts" resolves against the whole wardrobe
+        // rather than one outfit.
+        const result = await addStyleNote(text, []);
+        if (!result.ok) return;
+        setNotes((prev) => [result.note, ...prev]);
+        onModelChanged();
+      });
+    },
+    [onModelChanged],
+  );
+
+  const onForgetRule = useCallback(
+    (id: string) => {
+      startNoteTransition(async () => {
+        await deactivateStyleNote(id);
+        setNotes((prev) => prev.filter((n) => n.id !== id));
+        onModelChanged();
+      });
+    },
+    [onModelChanged],
+  );
+
+  const onNoteAdded = useCallback((note: SavedNote) => {
+    setNotes((prev) => [note, ...prev]);
+  }, []);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <header>
           <h1 className="font-serif text-4xl tracking-tight">Outfits</h1>
-          <p className="text-ink-muted mt-2 max-w-xl">
-            Spin random outfits from rules, place category slots on the frame, or compose manually.
-          </p>
+          <p className="text-ink-muted mt-2 max-w-xl">{TAB_BLURB[tab]}</p>
         </header>
         <div className="flex gap-1 rounded-full border border-ink/10 bg-paper-warm p-1 w-fit shrink-0">
-          <TabButton active={tab === "random"} onClick={() => setTab("random")}>
-            Random generator
-          </TabButton>
-          <TabButton active={tab === "compose"} onClick={() => setTab("compose")}>
-            Manual compose
-          </TabButton>
+          {(["generate", "compose", "train"] as const).map((option) => (
+            <TabButton key={option} active={tab === option} onClick={() => setTab(option)}>
+              {TAB_LABELS[option]}
+            </TabButton>
+          ))}
         </div>
       </div>
 
-      {tab === "random" ? (
+      {tab === "generate" ? (
         <RandomOutfitBuilder
           items={items}
           colorOptions={colorOptions}
@@ -66,9 +148,33 @@ export function OutfitStudio({
           initialLayerArrangements={outfitLayerArrangements}
           initialAutoPopulateRules={outfitAutoPopulateRules}
           initialStartupRules={outfitStartupRules}
+          signalsNonce={signalsNonce}
+          sidebarFooter={
+            <DailyPicks
+              initialSlate={initialSlate}
+              initialPending={initialPending}
+              temperatureUnit={temperatureUnit}
+              onModelChanged={onModelChanged}
+              onNoteAdded={onNoteAdded}
+            />
+          }
         />
-      ) : (
+      ) : tab === "compose" ? (
         <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />
+      ) : (
+        <StylistTrainer
+          items={items}
+          colorOptions={colorOptions}
+          onLearned={onModelChanged}
+          rulesPanel={
+            <StyleRulesPanel
+              notes={notes}
+              busy={noteBusy}
+              onAdd={onAddRule}
+              onForget={onForgetRule}
+            />
+          }
+        />
       )}
     </div>
   );

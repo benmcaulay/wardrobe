@@ -111,8 +111,24 @@ function toScorable(row: ScoringRow) {
   };
 }
 
+/**
+ * Which calendar day to fetch the weather for.
+ *
+ * The caller's local date, when it sends one. The server clock can't answer
+ * this: at 18:00 in California it is already tomorrow in UTC, so a server-dated
+ * "today" would quietly hand the user tomorrow's forecast all evening.
+ */
+function localDay(localISODate?: string): Date {
+  if (localISODate && /^\d{4}-\d{2}-\d{2}$/.test(localISODate)) {
+    const [y, m, d] = localISODate.split("-").map(Number);
+    const parsed = new Date(Date.UTC(y, m - 1, d));
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+
 /** Today's weather where the user gets dressed. Never throws. */
-export async function getDailyContext(): Promise<DailyContext> {
+export async function getDailyContext(localISODate?: string): Promise<DailyContext> {
   const user = await requireUser();
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
@@ -124,7 +140,7 @@ export async function getDailyContext(): Promise<DailyContext> {
     return { location, band: null, highC: null, rainChance: null, source: "none" };
   }
 
-  const today = new Date();
+  const today = localDay(localISODate);
   const summary = await getClimateSummary({ destination: location, start: today, end: today });
 
   // "unknown" means the provider had nothing — report it rather than passing a
@@ -160,8 +176,34 @@ export async function setHomeLocation(
     where: { id: user.id },
     data: { stylePrefs: encode({ ...prefs, homeLocation: trimmed || undefined }) },
   });
-  revalidatePath("/closet/today");
+  revalidatePath("/closet/outfits");
   return { ok: true };
+}
+
+export type SpinSignalsResponse = {
+  context: DailyContext;
+  /**
+   * Item id → learned affinity, 0..1. A plain object rather than a Map because
+   * this crosses the server-action boundary; the client rebuilds the Map.
+   */
+  affinity: Record<string, number>;
+};
+
+/**
+ * Everything a smart spin needs, fetched once so spinning itself stays local.
+ *
+ * The generator's spin button is pressed repeatedly and has to feel immediate,
+ * so the model goes to the client rather than the spin coming to the server. The
+ * affinity map is a few hundred numbers — cheaper to ship once than to round-trip
+ * per press, and it means a smart spin still works while the network is away.
+ */
+export async function getSpinSignals(localISODate?: string): Promise<SpinSignalsResponse> {
+  const user = await requireUser();
+  const [context, personal] = await Promise.all([
+    getDailyContext(localISODate),
+    buildAffinity(user.id),
+  ]);
+  return { context, affinity: Object.fromEntries(personal.affinity) };
 }
 
 function proposalKey(itemIds: readonly string[]): string {
@@ -176,11 +218,14 @@ function proposalKey(itemIds: readonly string[]): string {
  * piece somebody just rejected reads as not listening, and the cost of dropping
  * it for one day is negligible.
  */
-export async function getDailySlate(rejectedIds: string[] = []): Promise<DailySlateResponse> {
+export async function getDailySlate(
+  rejectedIds: string[] = [],
+  localISODate?: string,
+): Promise<DailySlateResponse> {
   const user = await requireUser();
   const [rows, context, personal, rules] = await Promise.all([
     loadWearablePool(user.id),
-    getDailyContext(),
+    getDailyContext(localISODate),
     buildAffinity(user.id),
     loadStyleRules(user.id),
   ]);
@@ -273,7 +318,7 @@ export async function acceptProposal(input: SlateDecisionInput): Promise<Decisio
     propensity: input.propensity ?? null,
   });
 
-  revalidatePath("/closet/today");
+  revalidatePath("/closet/outfits");
   revalidatePath("/closet");
   return { ok: true };
 }

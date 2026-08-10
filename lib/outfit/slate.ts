@@ -105,6 +105,33 @@ export function slotsForBand(band: string | null | undefined): SlateSlot[] {
   return BASE_SLOTS;
 }
 
+/**
+ * Slots that can actually seat every pinned item.
+ *
+ * Pin a hat and the base top/bottom/shoes shape has nowhere to put it, so the
+ * proposal would be discarded for missing its own pin. This adds a slot for any
+ * kind the base shape doesn't already cover — optional, so an unpinnable extra
+ * never fails a proposal on its own.
+ */
+export function slotsForPinned(
+  items: readonly SlateCandidate[],
+  pinnedIds: readonly string[],
+  base: readonly SlateSlot[],
+): SlateSlot[] {
+  if (pinnedIds.length === 0) return [...base];
+  const pinned = new Set(pinnedIds);
+  const covered = new Set(base.map((slot) => slot.kind));
+  const extra: SlateSlot[] = [];
+  for (const item of items) {
+    if (!pinned.has(item.id)) continue;
+    const kind = classifyGarmentKind(item);
+    if (covered.has(kind)) continue;
+    covered.add(kind);
+    extra.push({ kind, optional: true });
+  }
+  return [...base, ...extra];
+}
+
 /** How many items two proposals must differ by to count as genuinely distinct. */
 export const MIN_DISTINCT_ITEMS = 2;
 
@@ -159,6 +186,13 @@ export type SlateOptions = {
    * we know least about, which is exactly what a preference model wants next.
    */
   uniformStrategy?: SlateStrategy;
+  /**
+   * Item ids that must appear in every proposal — "train me on this jacket".
+   * A proposal that can't seat one is discarded rather than returned without it.
+   * The caller is responsible for offering a slot of each pinned item's kind;
+   * `slotsForPinned` derives that.
+   */
+  pinned?: readonly string[];
 };
 
 /** Near-greedy: stable enough to feel like a considered pick, not frozen. */
@@ -173,6 +207,7 @@ function buildOne(
   strategy: SlateStrategy,
   rules: readonly AttributedRule[] = [],
   ruleContext: RuleContext = {},
+  pinned: ReadonlySet<string> = new Set(),
 ): Proposal | null {
   const placed: SlateCandidate[] = [];
   const used = new Set<string>();
@@ -185,6 +220,17 @@ function buildOne(
     if (candidates.length === 0) {
       if (slot.optional) continue;
       return null;
+    }
+
+    // A pinned piece takes its slot outright. Propensity is left alone rather
+    // than multiplied by 1/n: the user fixed this choice, so the policy didn't
+    // make it, and charging it to the policy would bias any off-policy estimate
+    // built from these logs.
+    const pin = candidates.find((item) => pinned.has(item.id));
+    if (pin) {
+      placed.push(pin);
+      used.add(pin.id);
+      continue;
     }
 
     const scores = candidates.map(
@@ -202,6 +248,13 @@ function buildOne(
 
   if (placed.length === 0) return null;
 
+  // Every pinned piece has to be on the frame. If a slot of its kind was taken
+  // or absent it isn't, and a "specialised" round that quietly dropped the
+  // piece you were training on would be worse than refusing to build one.
+  for (const id of pinned) {
+    if (!used.has(id)) return null;
+  }
+
   // Score the finished look, not the running marginals: those were computed
   // against partial outfits and would understate one whose pieces only cohere
   // once the last is in place. This is what the user is actually being offered.
@@ -210,10 +263,25 @@ function buildOne(
   return { strategy, itemIds: placed.map((item) => item.id), score: finalScore, propensity };
 }
 
-function distinctEnough(candidate: Proposal, existing: readonly Proposal[]): boolean {
+/**
+ * Distinctness is measured over the pieces the policy actually chose.
+ *
+ * Pinned items are in every proposal by construction, so counting them would
+ * make a round of five outfits around one fixed jacket look like five copies of
+ * each other and collapse the round to a single proposal. The bar also can't
+ * exceed the number of free pieces there are to differ by.
+ */
+function distinctEnough(
+  candidate: Proposal,
+  existing: readonly Proposal[],
+  pinned: ReadonlySet<string> = new Set(),
+): boolean {
+  const free = candidate.itemIds.filter((id) => !pinned.has(id));
+  const bar = Math.min(MIN_DISTINCT_ITEMS, free.length);
+  if (bar === 0) return existing.length === 0;
   return existing.every((other) => {
-    const overlap = candidate.itemIds.filter((id) => other.itemIds.includes(id)).length;
-    return candidate.itemIds.length - overlap >= MIN_DISTINCT_ITEMS;
+    const overlap = free.filter((id) => other.itemIds.includes(id)).length;
+    return free.length - overlap >= bar;
   });
 }
 
@@ -264,24 +332,32 @@ export function buildSlate(
     : context;
 
   const uniform = options.uniformStrategy;
+  const exploreStep = {
+    strategy: "explore" as SlateStrategy,
+    context: exploreContext,
+    temperature: options.temperature ?? DEFAULT_TEMPERATURE,
+  };
+  // Exactly `count` arms. Training rounds ask for up to eight of them; the
+  // daily slate asks for three and gets the safe/alternative/explore split.
+  // Anything past the third is another explore arm — beyond a safe pick and one
+  // genuine alternative there is nothing left for a fourth "safe" to say, and
+  // the extra breadth is worth more as exploration.
   const plan: { strategy: SlateStrategy; context: ScoringContext; temperature: number }[] = uniform
-    ? Array.from({ length: 3 }, () => ({
+    ? Array.from({ length: count }, () => ({
         strategy: uniform,
         context: uniform === "explore" ? exploreContext : context,
         temperature: options.temperature ?? DEFAULT_TEMPERATURE,
       }))
     : [
-    { strategy: "safe", context, temperature: options.temperature ?? SAFE_TEMPERATURE },
-    { strategy: "alternative", context, temperature: options.temperature ?? SAFE_TEMPERATURE },
-    {
-      strategy: "explore",
-      context: exploreContext,
-      temperature: options.temperature ?? DEFAULT_TEMPERATURE,
-    },
-  ];
+        { strategy: "safe" as SlateStrategy, context, temperature: options.temperature ?? SAFE_TEMPERATURE },
+        { strategy: "alternative" as SlateStrategy, context, temperature: options.temperature ?? SAFE_TEMPERATURE },
+        ...Array.from({ length: Math.max(0, count - 2) }, () => exploreStep),
+      ].slice(0, count);
+
+  const pinned = new Set(options.pinned ?? []);
 
   const out: Proposal[] = [];
-  for (let i = 0; i < Math.min(count, plan.length); i += 1) {
+  for (let i = 0; i < plan.length; i += 1) {
     const step = plan[i];
     let accepted: Proposal | null = null;
     let fallback: Proposal | null = null;
@@ -296,10 +372,11 @@ export function buildSlate(
         step.strategy,
         rules,
         ruleContext,
+        pinned,
       );
       if (!candidate) break;
       if (!fallback) fallback = candidate;
-      if (distinctEnough(candidate, out)) {
+      if (distinctEnough(candidate, out, pinned)) {
         accepted = candidate;
         break;
       }

@@ -29,7 +29,14 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { decode, type Color, type Season } from "@/lib/json";
 import { NEUTRAL_ANCHOR } from "@/lib/outfit/bradley-terry";
-import { buildSlate, BASE_SLOTS, SLATE_POLICY_ID } from "@/lib/outfit/slate";
+import { buildSlate, slotsForPinned, BASE_SLOTS, SLATE_POLICY_ID } from "@/lib/outfit/slate";
+import {
+  DEFAULT_SAMPLE_SIZE,
+  focusExclusions,
+  sampleSizeFor,
+  type TrainingFocus,
+  type TrainingMode,
+} from "@/lib/outfit/training-focus";
 import { loadStyleRules } from "@/lib/wear/style-rules-server";
 import { buildAffinity } from "@/lib/wear/affinity-server";
 import { recordPreference } from "@/lib/wear/record";
@@ -43,17 +50,35 @@ export type TrainingRound = {
   outfits: TrainingOutfit[];
   /** Comparisons recorded so far — the user's sense of progress. */
   answered: number;
+  /** Echoed back so the client can tell a clamped round from what it asked for. */
+  mode: TrainingMode;
+  sampleSize: number;
+};
+
+export type TrainingRoundInput = {
+  mode?: TrainingMode;
+  /** Outfits per round, 2–8 for pick/rate. Swipe is always 1. */
+  sampleSize?: number;
+  focus?: TrainingFocus;
 };
 
 /**
  * Build one round.
  *
- * `count` is 3 for pick-a-favourite and 1 for swipe. Deliberately weather- and
- * occasion-free: a training round is about taste in the abstract, and pinning
- * it to today's forecast would only teach the model about today.
+ * `sampleSize` outfits for pick/rate, one for swipe. Deliberately weather- and
+ * occasion-free: a training round is about taste in the abstract, and pinning it
+ * to today's forecast would only teach the model about today.
+ *
+ * Focus narrows it — pinned pieces appear in every outfit, category and colour
+ * filters restrict the free ones. Both are applied as exclusions before the
+ * slate is built, so the constraint is structural rather than a preference the
+ * sampler might overrule.
  */
-export async function getTrainingRound(count = 3): Promise<TrainingRound> {
+export async function getTrainingRound(input: TrainingRoundInput = {}): Promise<TrainingRound> {
   const user = await requireUser();
+  const mode = input.mode ?? "pick";
+  const focus = input.focus ?? {};
+  const count = sampleSizeFor(mode, input.sampleSize ?? DEFAULT_SAMPLE_SIZE);
 
   const [rows, personal, rules, answered] = await Promise.all([
     prisma.wardrobeItem.findMany({
@@ -79,30 +104,36 @@ export async function getTrainingRound(count = 3): Promise<TrainingRound> {
   ]);
 
   const byId = new Map(rows.map((row) => [row.id, row]));
-  const proposals = buildSlate(
-    rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      category: row.category,
-      subcategory: row.subcategory,
-      material: row.material,
-      pattern: row.pattern,
-      colors: decode<Color[]>(row.colors, []),
-      season: decode<Season[]>(row.season, []),
-    })),
-    BASE_SLOTS,
-    {
-      context: { affinity: personal.affinity },
-      posterior: personal.posterior,
-      rules,
-      // Every arm explores: the point is to learn, not to flatter.
-      uniformStrategy: "explore",
-      count: Math.max(1, Math.min(count, 3)),
-    },
-  );
+  const candidates = rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    subcategory: row.subcategory,
+    material: row.material,
+    pattern: row.pattern,
+    colors: decode<Color[]>(row.colors, []),
+    season: decode<Season[]>(row.season, []),
+  }));
+
+  // Only pin pieces the user actually owns and can wear — a stale id from the
+  // client would otherwise make every proposal fail its own pin check and
+  // return an empty round with no explanation.
+  const pinned = (focus.pinnedItemIds ?? []).filter((id) => byId.has(id));
+  const proposals = buildSlate(candidates, slotsForPinned(candidates, pinned, BASE_SLOTS), {
+    context: { affinity: personal.affinity },
+    posterior: personal.posterior,
+    rules,
+    // Every arm explores: the point is to learn, not to flatter.
+    uniformStrategy: "explore",
+    count,
+    pinned,
+    exclude: focusExclusions(candidates, { ...focus, pinnedItemIds: pinned }),
+  });
 
   return {
     answered,
+    mode,
+    sampleSize: count,
     outfits: proposals.map((proposal) => ({
       key: [...proposal.itemIds].sort().join(","),
       items: proposal.itemIds
