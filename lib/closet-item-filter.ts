@@ -4,7 +4,12 @@ import { parseMultiFilterParam } from "@/lib/closet-filter-params";
 import { parseColors, parseStringArray } from "@/lib/json";
 import { normalizeStyleTagName } from "@/lib/preferences";
 import { SHARED_OWNER_FILTER } from "@/lib/owners";
-import { readClosetSort, sortWardrobeItems, type SortOrders } from "@/lib/closet-sort";
+import {
+  readClosetSort,
+  sortWardrobeItems,
+  type SortableItem,
+  type SortOrders,
+} from "@/lib/closet-sort";
 
 /** URL param for “uncategorized” filter (empty string in DB). */
 export const FILTER_CATEGORY_NONE = "__none__";
@@ -122,10 +127,19 @@ function itemMatchesOwnerFilter(item: ClosetFilterableItem, owner: string): bool
 }
 
 /** Client-side mirror of server closet filters (instant, no navigation). */
-export function filterClosetItems(
-  items: ClosetFilterableItem[],
+/**
+ * Generic over the caller's row, not fixed to `ClosetFilterableItem`.
+ *
+ * Filtering reads a known set of fields and cares about nothing else, so it
+ * should hand back exactly what it was given. Pinning the return type to
+ * `ClosetFilterableItem` erased whatever else the caller's rows carried —
+ * which is why the closet grid couldn't read `imagePath` off its own items
+ * after filtering them.
+ */
+export function filterClosetItems<T extends ClosetFilterableItem>(
+  items: readonly T[],
   filters: ActiveFilters,
-): ClosetFilterableItem[] {
+): T[] {
   return items.filter((item) => {
     if (filters.brand && item.brand !== filters.brand) return false;
     if (!itemMatchesCategoryFilter(item, filters.categories)) return false;
@@ -138,11 +152,16 @@ export function filterClosetItems(
   });
 }
 
-export function filterSortClosetItems(
-  items: ClosetFilterableItem[],
+/**
+ * Filter then sort. The constraint is the intersection of what each half needs:
+ * filtering wants the filterable fields, sorting additionally wants a price and
+ * a created-at to order by.
+ */
+export function filterSortClosetItems<T extends ClosetFilterableItem & SortableItem>(
+  items: readonly T[],
   filters: ActiveFilters,
   sortOrders: SortOrders,
-): ClosetFilterableItem[] {
+): T[] {
   const filtered = filterClosetItems(items, filters);
   return sortWardrobeItems(filtered, filters.sort, sortOrders);
 }
