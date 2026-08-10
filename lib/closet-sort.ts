@@ -88,7 +88,7 @@ export function fieldFromSortKey(key: ClosetSortKey): { field: ClosetSortField; 
   }
 }
 
-type SortableItem = {
+export type SortableItem = {
   id: string;
   createdAt: Date;
   priceCents: number | null;
