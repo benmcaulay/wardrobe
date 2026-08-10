@@ -5,7 +5,10 @@ import {
   focusExclusions,
   focusIsEmpty,
   sampleSizeFor,
+  slotsForCategories,
 } from "@/lib/outfit/training-focus";
+import { BASE_SLOTS, buildSlate, type SlateCandidate } from "@/lib/outfit/slate";
+import { mulberry32 } from "@/lib/outfit/sampling";
 import { SMART_TEMPERATURE, readSpinMode, spinScoringOptions } from "@/lib/outfit/spin-mode";
 import type { OutfitPickItem } from "@/lib/outfit-random";
 
@@ -105,5 +108,94 @@ describe("readSpinMode", () => {
     expect(readSpinMode("smart")).toBe("smart");
     expect(readSpinMode(undefined)).toBe("smart");
     expect(readSpinMode("SMART")).toBe("smart");
+  });
+});
+
+describe("slotsForCategories", () => {
+  it("has no opinion when nothing is focused", () => {
+    expect(slotsForCategories(undefined)).toBeNull();
+    expect(slotsForCategories([])).toBeNull();
+  });
+
+  it("makes the chosen categories the shape of the outfit", () => {
+    // The bug this fixes: focusing on jacket + shoes used to keep the default
+    // top/bottom/shoes shape and filter the candidates, which emptied two
+    // required slots and returned nothing at all.
+    expect(slotsForCategories(["jacket", "shoes"])).toEqual([
+      { kind: "outerwear" },
+      { kind: "shoes" },
+    ]);
+  });
+
+  it("orders slots head-to-toe regardless of how they were picked", () => {
+    expect(slotsForCategories(["shoes", "hat", "pants", "shirt"])).toEqual([
+      { kind: "accessory" },
+      { kind: "top" },
+      { kind: "bottom" },
+      { kind: "shoes" },
+    ]);
+  });
+
+  it("collapses categories that are the same kind into one slot", () => {
+    // Two tops means "a top, from either" — not a shirt layered under a sweater.
+    expect(slotsForCategories(["shirt", "sweater/hoodie"])).toEqual([{ kind: "top" }]);
+    expect(slotsForCategories(["pants", "shorts"])).toEqual([{ kind: "bottom" }]);
+  });
+});
+
+describe("a focused round actually builds", () => {
+  const closet: SlateCandidate[] = [];
+  const push = (id: string, category: string, name: string) =>
+    closet.push({
+      id,
+      name,
+      category,
+      subcategory: null,
+      material: null,
+      pattern: null,
+      colors: [{ name: "Black", hex: "#000000" }],
+      season: [],
+    });
+  for (let i = 0; i < 3; i += 1) push(`jacket-${i}`, "jacket", `Jacket ${i}`);
+  for (let i = 0; i < 5; i += 1) push(`shoes-${i}`, "shoes", `Shoes ${i}`);
+  for (let i = 0; i < 5; i += 1) push(`shirt-${i}`, "shirt", `Shirt ${i}`);
+  for (let i = 0; i < 5; i += 1) push(`pants-${i}`, "pants", `Pants ${i}`);
+
+  it("returns jacket + shoes outfits for a jacket + shoes focus", () => {
+    const categories = ["jacket", "shoes"];
+    const out = buildSlate(closet, slotsForCategories(categories)!, {
+      count: 6,
+      exclude: focusExclusions(closet, { categories }),
+      uniformStrategy: "explore",
+      rng: mulberry32(5),
+    });
+
+    expect(out.length).toBeGreaterThan(1);
+    for (const proposal of out) {
+      expect(proposal.itemIds).toHaveLength(2);
+      expect(proposal.itemIds.some((id) => id.startsWith("jacket-"))).toBe(true);
+      expect(proposal.itemIds.some((id) => id.startsWith("shoes-"))).toBe(true);
+    }
+  });
+
+  it("fills a round of eight from only three jackets", () => {
+    // With "differ by two" on a two-piece outfit, three jackets could never
+    // produce more than three proposals.
+    const categories = ["jacket", "shoes"];
+    const out = buildSlate(closet, slotsForCategories(categories)!, {
+      count: 8,
+      exclude: focusExclusions(closet, { categories }),
+      uniformStrategy: "explore",
+      rng: mulberry32(11),
+    });
+    expect(out.length).toBeGreaterThan(3);
+    const keys = out.map((p) => [...p.itemIds].sort().join(","));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("still builds the default three-piece shape with no category focus", () => {
+    const out = buildSlate(closet, BASE_SLOTS, { count: 3, rng: mulberry32(3) });
+    expect(out).toHaveLength(3);
+    for (const proposal of out) expect(proposal.itemIds).toHaveLength(3);
   });
 });

@@ -13,7 +13,9 @@
  * exclusions in the scorer.
  */
 
+import { classifyGarmentKind, type GarmentKind } from "@/lib/categories";
 import { itemMatchesCategories, itemMatchesColorRule, type OutfitPickItem } from "@/lib/outfit-random";
+import type { SlateSlot } from "@/lib/outfit/slate";
 
 export type TrainingMode = "pick" | "rate" | "swipe";
 
@@ -58,6 +60,41 @@ export type TrainingFocus = {
   colorNames?: readonly string[];
 };
 
+/** Render order, so a focused round always reads head-to-toe. */
+const KIND_ORDER: readonly GarmentKind[] = [
+  "accessory",
+  "outerwear",
+  "top",
+  "dress",
+  "bottom",
+  "shoes",
+  "other",
+];
+
+/**
+ * The outfit shape a category focus asks for.
+ *
+ * This is the fix for what was a dead end: the filter used to narrow candidates
+ * while the round still demanded a top, a bottom *and* shoes, so focusing on
+ * "jacket + shoes" emptied two required slots and produced nothing at all. The
+ * categories you pick *are* the shape — pick jacket and shoes and you get jacket
+ * and shoes, which is the pairing you asked to be trained on.
+ *
+ * Categories collapse to one slot per garment kind: "shirt" and "sweater/hoodie"
+ * are both tops, so choosing both means "a top, from either of those", not two
+ * tops layered. Returns null when there is no category focus, and the caller
+ * falls back to the default top/bottom/shoes shape.
+ */
+export function slotsForCategories(categories: readonly string[] | undefined): SlateSlot[] | null {
+  if (!categories || categories.length === 0) return null;
+  const kinds = new Set<GarmentKind>();
+  for (const category of categories) {
+    kinds.add(classifyGarmentKind({ category }));
+  }
+  if (kinds.size === 0) return null;
+  return KIND_ORDER.filter((kind) => kinds.has(kind)).map((kind) => ({ kind }));
+}
+
 export function focusIsEmpty(focus: TrainingFocus): boolean {
   return (
     (focus.pinnedItemIds?.length ?? 0) === 0 &&
@@ -74,7 +111,10 @@ export function focusIsEmpty(focus: TrainingFocus): boolean {
  * removed the very piece you asked to train on would be self-defeating.
  */
 export function focusExclusions(
-  items: readonly OutfitPickItem[],
+  // Deliberately wider than OutfitPickItem: the caller has scorable items, whose
+  // colours are optional. Requiring them here forced a cast at the one call site
+  // that matters, which is a worse trade than normalising a missing list to [].
+  items: readonly FocusCandidate[],
   focus: TrainingFocus,
 ): Set<string> {
   const pinned = new Set(focus.pinnedItemIds ?? []);
@@ -82,8 +122,13 @@ export function focusExclusions(
   const colorNames = focus.colorNames ?? [];
   const excluded = new Set<string>();
 
-  for (const item of items) {
-    if (pinned.has(item.id)) continue;
+  for (const candidate of items) {
+    if (pinned.has(candidate.id)) continue;
+    const item: OutfitPickItem = {
+      id: candidate.id,
+      category: candidate.category,
+      colors: candidate.colors ?? [],
+    };
     if (categories.length > 0 && !itemMatchesCategories(item, categories)) {
       excluded.add(item.id);
       continue;
@@ -94,3 +139,9 @@ export function focusExclusions(
   }
   return excluded;
 }
+
+type FocusCandidate = {
+  id: string;
+  category: string;
+  colors?: OutfitPickItem["colors"];
+};

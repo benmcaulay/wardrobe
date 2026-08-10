@@ -34,6 +34,7 @@ import {
   DEFAULT_SAMPLE_SIZE,
   focusExclusions,
   sampleSizeFor,
+  slotsForCategories,
   type TrainingFocus,
   type TrainingMode,
 } from "@/lib/outfit/training-focus";
@@ -119,7 +120,11 @@ export async function getTrainingRound(input: TrainingRoundInput = {}): Promise<
   // client would otherwise make every proposal fail its own pin check and
   // return an empty round with no explanation.
   const pinned = (focus.pinnedItemIds ?? []).filter((id) => byId.has(id));
-  const proposals = buildSlate(candidates, slotsForPinned(candidates, pinned, BASE_SLOTS), {
+  // A category focus decides the outfit's shape, not just which pieces are
+  // eligible for a fixed one. Absent a focus the default top/bottom/shoes shape
+  // stands.
+  const shape = slotsForCategories(focus.categories) ?? BASE_SLOTS;
+  const proposals = buildSlate(candidates, slotsForPinned(candidates, pinned, shape), {
     context: { affinity: personal.affinity },
     posterior: personal.posterior,
     rules,
