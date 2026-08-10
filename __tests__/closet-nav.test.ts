@@ -102,7 +102,6 @@ describe("CLOSET_NAV", () => {
     const known = new Set([
       "/closet",
       "/closet/scan",
-      "/closet/wear-scan",
       "/closet/try-on",
       "/closet/outfits",
       "/closet/smartpakker",

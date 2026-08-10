@@ -1,28 +1,12 @@
-import Link from "next/link";
-import { getScanReadiness } from "@/lib/actions/wear-scan";
-import { WearScanClient } from "./wear-scan-client";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function WearScanPage() {
-  const { embedded, total } = await getScanReadiness();
-
-  return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-6">
-      <nav className="mb-4">
-        <Link href="/closet" className="text-sm text-ink-muted hover:text-ink">
-          ← Closet
-        </Link>
-      </nav>
-
-      <header className="mb-5">
-        <h1 className="font-display text-3xl text-ink">Find past wears</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Photos of you, matched against your closet — on this device, never uploaded.
-        </p>
-      </header>
-
-      <WearScanClient embedded={embedded} total={total} />
-    </main>
-  );
+/**
+ * "Find past wears" is now a mode on the camera-roll scan page.
+ *
+ * Kept as a redirect rather than deleted: it was its own nav entry for long
+ * enough to be bookmarked, and a 404 is a worse answer than the page the
+ * feature actually moved to.
+ */
+export default function WearScanPage() {
+  redirect("/closet/scan");
 }

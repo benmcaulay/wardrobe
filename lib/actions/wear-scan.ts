@@ -62,7 +62,7 @@ export type ScanCommitResponse =
  * Nothing here is presented to the user as fact: these land under
  * `CONFIDENT_WEAR_THRESHOLD`, so they contribute to `effectiveWears` but not to
  * the `timesWorn` count the interface renders, and they surface in the
- * confirmation queue on /closet/today. That separation is what allows matching
+ * confirmation queue on /closet/outfits. That separation is what allows matching
  * to be aggressive — a wrong guess costs a tap, not a false statement.
  */
 export async function commitScanFindings(

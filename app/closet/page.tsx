@@ -88,16 +88,22 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
     closetGroupOrders: prefs.closetGroupOrders,
   };
 
+  // Wishlist pieces aren't owned yet, so they aren't in the closet — they have
+  // their own page. Leaving them in here didn't just add tiles: they inflated the
+  // piece count and the wardrobe value, and put brands and colours you don't own
+  // into the filter menus. Every other surface (outfits, packing, try-on, sell,
+  // share) already filtered them out; this was the one that didn't.
+  const owned = { userId: user.id, isWishlist: false };
   const [allItems, allForFacets, totalCount] = await Promise.all([
     prisma.wardrobeItem.findMany({
-      where: { userId: user.id },
+      where: owned,
       orderBy: { createdAt: "desc" },
     }),
     prisma.wardrobeItem.findMany({
-      where: { userId: user.id },
+      where: owned,
       select: { category: true, brand: true, colors: true, styleTags: true },
     }),
-    prisma.wardrobeItem.count({ where: { userId: user.id } }),
+    prisma.wardrobeItem.count({ where: owned }),
   ]);
 
   const hasUncategorized = allForFacets.some((i) => isNoneCategoryStored(i.category));

@@ -9,7 +9,7 @@
  * roll in the first place.
  *
  * Findings land as low-confidence wears in the confirmation queue on
- * /closet/today rather than being written as fact here. Measured top-1
+ * /closet/outfits rather than being written as fact here. Measured top-1
  * retrieval is ~70% on an easier task than this one, so asserting matches
  * would be wrong often enough to make the whole feature untrustworthy.
  */
@@ -159,7 +159,7 @@ export function WearScanClient({
                 Nothing counts as worn until you say so.
               </p>
               <Link
-                href="/closet/today"
+                href="/closet/outfits"
                 className="mt-3 inline-block rounded-full border border-ink bg-ink px-4 py-1.5 text-xs text-paper"
               >
                 Review them
@@ -175,7 +175,7 @@ export function WearScanClient({
                 Re-scanning the same photos won&rsquo;t double-count a wear.
               </p>
               <Link
-                href="/closet/today"
+                href="/closet/outfits"
                 className="mt-3 inline-block rounded-full border border-ink bg-ink px-4 py-1.5 text-xs text-paper"
               >
                 Review pending wears
