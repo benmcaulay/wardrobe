@@ -1,15 +1,14 @@
 "use client";
 
 /**
- * What the user has told me, in their own words (docs/OUTFIT_INTELLIGENCE.md §9).
+ * Styling tips, in the user's own words (docs/OUTFIT_INTELLIGENCE.md §9).
  *
- * Lives with the trainer rather than beside the daily picks because it is the
- * same job by a different route: a training round teaches by example, a rule
- * teaches by instruction. "I don't wear boots with shorts" is worth a hundred
- * comparisons and takes one sentence, so it belongs where someone has already
- * decided to spend a minute teaching.
+ * Lives with the trainer because it is the same job by a different route: a
+ * training round teaches by example, a tip teaches by instruction. "I don't wear
+ * boots with shorts" is worth a hundred comparisons and takes one sentence, so it
+ * belongs where someone has already decided to spend a minute teaching.
  *
- * Notes are stored verbatim and parsed into rules separately, which is why the
+ * Tips are stored verbatim and parsed into rules separately, which is why the
  * list can honestly say "not applied yet" — we kept what you said even when we
  * couldn't turn it into anything actionable.
  */
@@ -33,17 +32,13 @@ export function StyleRulesPanel({
 
   return (
     <section className="rounded-2xl border border-ink/10 bg-white p-4 shadow-tile">
-      <h3 className="font-serif text-lg">Rules I should always follow</h3>
-      <p className="mt-1 text-xs text-ink-muted">
-        Habits, not one-offs — &ldquo;I don&rsquo;t wear boots with shorts&rdquo;. These keep
-        applying to pieces you buy later, and to every suggestion on this page.
-      </p>
+      <h3 className="font-serif text-lg">Styling Tips</h3>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value.slice(0, MAX_NOTE_LENGTH))}
         rows={2}
         placeholder="I don't wear boots with shorts."
-        aria-label="Standing rule"
+        aria-label="Styling tip"
         className="mt-3 w-full rounded-xl border border-ink/15 bg-paper px-3 py-2 text-sm focus:border-ink/40 focus:outline-none"
       />
       <div className="mt-2 flex items-center gap-2">
@@ -56,7 +51,7 @@ export function StyleRulesPanel({
           }}
           className="rounded-full border border-ink bg-ink px-4 py-1.5 text-xs text-paper disabled:opacity-40"
         >
-          Save rule
+          Save tip
         </button>
         <span className="ml-auto text-[11px] text-ink-muted">
           {text.length}/{MAX_NOTE_LENGTH}
