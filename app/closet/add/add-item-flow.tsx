@@ -7,15 +7,23 @@ import {
   type ChangeEvent,
   type RefObject,
 } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { Camera, Hanger, Upload } from "@/components/icons";
+import { springSnappy, springSoft } from "@/lib/ui-motion";
 import { ItemFormFields } from "@/components/item-form-fields";
 import { ProductSearchPanel } from "@/components/product-search-panel";
 import { CreditMark } from "@/components/credit-mark";
 import { ImageCropper } from "@/components/image-cropper";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
 import { imageUrl } from "@/lib/image-paths";
-import { canonicalCategoryChoice } from "@/lib/categories";
+import {
+  canonicalCategoryChoice,
+  isNoneCategoryStored,
+  suggestCategoryFromItem,
+} from "@/lib/categories";
 import { enqueueGhostPreview, getGhostJobStatus } from "@/lib/actions/ghost-mannequin";
-import { mapCategoryToGhost } from "@/lib/services/ghost-mannequin-shared";
+import { mapItemToGhost, requireGhostCategory } from "@/lib/services/ghost-mannequin-shared";
+import { IMAGE_UPLOAD_ACCEPT } from "@/lib/image-upload-accept";
 import type { ItemFormValue } from "@/lib/types";
 import type { Color, Owner } from "@/lib/json";
 import { DEFAULT_OWNERS } from "@/lib/owners";
@@ -48,6 +56,8 @@ type PickImageState = {
   /** `null` = main listing crop is the model's first input */
   primaryExtraId: string | null;
   compositionHint: "default" | "rear";
+  /** Which entry point opened the panel — decides what starts expanded. */
+  mode: "upload" | "ai";
 };
 
 type ReadyState = {
@@ -89,8 +99,8 @@ function getClipboardImageFile(e: ClipboardEvent): File | null {
   return item ? item.getAsFile() : null;
 }
 
-/** Matches server `ALLOWED_MIME` (lib/uploads). */
-const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+/** Single source of truth, shared with the server (HEIC/HEIF included). */
+const IMAGE_ACCEPT = IMAGE_UPLOAD_ACCEPT;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 4 * 60 * 1000;
 const GHOST_PREVIEW_JOB_KEY = "wardrobe:ghost-preview-job";
@@ -109,6 +119,16 @@ function buildReadyState(
   primaryOwnerId: string,
 ): ReadyState {
   const merged = { ...analyze.bundle.prefill, ...formPatch };
+  // Prefill always ships category "None", making the picker a mandatory detour
+  // and blocking AI generation behind requireGhostCategory. Infer it from the
+  // name when we can; keep None when we genuinely can't.
+  const resolvedCategory = canonicalCategoryChoice(merged.category, categories);
+  const category = isNoneCategoryStored(resolvedCategory)
+    ? (suggestCategoryFromItem(
+        { name: merged.name, subcategory: merged.subcategory },
+        categories,
+      ) ?? resolvedCategory)
+    : resolvedCategory;
   return {
     kind: "ready",
     previewUrl,
@@ -122,7 +142,7 @@ function buildReadyState(
     value: {
       name: merged.name ?? "",
       brand: merged.brand ?? "",
-      category: canonicalCategoryChoice(merged.category, categories),
+      category,
       subcategory: merged.subcategory ?? "",
       colors: merged.colors ?? [],
       priceCents: merged.priceCents ?? null,
@@ -310,7 +330,9 @@ export function AddItemFlow({
       setState(ready);
       setPendingFormPatch(null);
 
-      if (autoGenerateGhost && credits > 0) {
+      // Same gate as the photo path: prefill ships category as None, so an
+      // unconditional auto-generate always tripped requireGhostCategory.
+      if (autoGenerateGhost && credits > 0 && requireGhostCategory(ready.value).ok) {
         void runGhost(
           {
             selectedExtraIds: [],
@@ -318,6 +340,7 @@ export function AddItemFlow({
             instructions: "",
             primaryExtraId: null,
             compositionHint: "default",
+            mode: "ai",
           },
           ready,
         );
@@ -372,7 +395,11 @@ export function AddItemFlow({
       setWebSearchResults(analyzeRes.bundle.matches);
     }
 
-    if (autoGenerateGhost && credits > 0) {
+    // The category gate refuses an unclassifiable item, and prefill ships
+    // category as None — so firing this unconditionally surfaced an error the
+    // user did not cause on every single add. Only auto-generate once the item
+    // is actually classifiable.
+    if (autoGenerateGhost && credits > 0 && requireGhostCategory(ready.value).ok) {
       void runGhost(
         {
           selectedExtraIds: [],
@@ -380,6 +407,7 @@ export function AddItemFlow({
           instructions: "",
           primaryExtraId: null,
           compositionHint: "default",
+          mode: "ai",
         },
         ready,
       );
@@ -423,7 +451,11 @@ export function AddItemFlow({
       garmentImagePath: current.analyze.originalImagePath,
       extraImagePaths: selectedExtras,
       primaryGarmentPathOverride: primaryOverridePath,
-      category: mapCategoryToGhost(current.value.category),
+      category: mapItemToGhost({
+        category: current.value.category,
+        subcategory: current.value.subcategory,
+        name: current.value.name,
+      }),
       instructions: instructionsTrimmed || undefined,
       compositionHint: pick.compositionHint,
     });
@@ -459,6 +491,9 @@ export function AddItemFlow({
         pickingImages: null,
         ghostViews: [...s.ghostViews, newView],
         activeViewId: newView.id,
+        // First catalog view wins the thumbnail — a clean render beats the
+        // listing snapshot. Later renders leave an explicit choice alone.
+        primaryViewId: s.ghostViews.length === 0 ? newView.id : s.primaryViewId,
       };
     });
     setCredits(res.creditsRemaining);
@@ -547,7 +582,7 @@ export function AddItemFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once on mount
   }, []);
 
-  function requestGhost() {
+  function requestGhost(mode: "upload" | "ai" = "upload") {
     if (state.kind !== "ready") return;
     setState((s) =>
       s.kind === "ready"
@@ -559,6 +594,7 @@ export function AddItemFlow({
               instructions: "",
               primaryExtraId: null,
               compositionHint: "default",
+              mode,
             },
           }
         : s,
@@ -837,6 +873,7 @@ function IdleView({
   error?: string;
 }) {
   const [dragActive, setDragActive] = useState(false);
+  const reduce = useReducedMotion();
 
   function onInputChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -844,9 +881,24 @@ function IdleView({
     e.target.value = "";
   }
 
+  // Staggered entrance: the panel settles, then its contents arrive in order.
+  const item = {
+    hidden: reduce ? {} : { opacity: 0, y: 8 },
+    show: { opacity: 1, y: 0 },
+  };
+
   return (
     <div>
-      <div
+      {/* The whole panel is the file picker — a <label> over the hidden input
+          means clicking anywhere in the dropzone opens it, instead of requiring
+          a hit on a 100px pill. Keyboard users still get the two buttons. */}
+      <motion.label
+        htmlFor="add-garment-file"
+        initial={reduce ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={springSoft}
+        variants={{ show: { transition: { staggerChildren: 0.05, delayChildren: 0.05 } } }}
+        whileHover={reduce ? undefined : { scale: 1.004 }}
         onDragOver={(e) => {
           e.preventDefault();
           setDragActive(true);
@@ -858,44 +910,76 @@ function IdleView({
           const file = e.dataTransfer.files[0];
           if (file) onFile(file);
         }}
-        className={`rounded-3xl border-2 border-dashed p-12 text-center transition ${
-          dragActive ? "border-accent bg-accent-soft/20" : "border-ink/15 bg-paper-warm"
+        className={`block cursor-pointer rounded-3xl border-2 border-dashed p-12 text-center transition-colors ${
+          dragActive ? "border-accent bg-accent-soft/20" : "border-ink/15 bg-paper-warm hover:border-ink/30"
         }`}
       >
-        <p className="font-serif text-2xl">Add a garment photo</p>
-        <p className="text-ink-muted text-sm mt-2">JPG, PNG or WebP · up to 10 MB</p>
-        <p className="text-ink-muted text-xs mt-1">Drop, paste, use the webcam, or choose a file</p>
+        <motion.div
+          animate={
+            reduce
+              ? undefined
+              : dragActive
+                ? { scale: 1.12, rotate: -3 }
+                : { scale: 1, rotate: 0 }
+          }
+          transition={springSnappy}
+          className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-ink text-paper"
+        >
+          <Hanger className="h-7 w-7" />
+        </motion.div>
+
+        <p className="font-serif text-2xl">
+          {dragActive ? "Drop it right here" : "Add a garment photo"}
+        </p>
+        <p className="text-ink-muted text-sm mt-2">
+          Drop, paste, snap, or click anywhere in this panel
+        </p>
+
         <input
+          id="add-garment-file"
           ref={libraryInputRef}
           type="file"
           accept={IMAGE_ACCEPT}
           className="hidden"
-          aria-hidden
           onChange={onInputChange}
         />
+
         <div className="mt-6 flex flex-col sm:flex-row justify-center gap-2 sm:gap-3">
-          <button
+          <motion.button
             type="button"
-            onClick={onTakePhoto}
-            className="rounded-full bg-ink text-paper px-6 py-2 text-sm tracking-wide hover:bg-ink-soft transition"
+            // Stop the label from also opening the file picker.
+            onClick={(e) => {
+              e.preventDefault();
+              onTakePhoto();
+            }}
+            whileHover={reduce ? undefined : { scale: 1.04 }}
+            whileTap={reduce ? undefined : { scale: 0.96 }}
+            transition={springSnappy}
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-ink text-paper px-6 py-2 text-sm tracking-wide hover:bg-ink-soft"
             aria-label="Take photo with camera"
           >
+            <Camera className="h-4 w-4" />
             Take photo
-          </button>
-          <button
+          </motion.button>
+          <motion.button
             type="button"
-            onClick={() => libraryInputRef.current?.click()}
-            className="rounded-full border border-ink/15 bg-white px-6 py-2 text-sm tracking-wide hover:bg-paper-warm transition"
+            onClick={(e) => {
+              e.preventDefault();
+              libraryInputRef.current?.click();
+            }}
+            whileHover={reduce ? undefined : { scale: 1.04 }}
+            whileTap={reduce ? undefined : { scale: 0.96 }}
+            transition={springSnappy}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 bg-white px-6 py-2 text-sm tracking-wide hover:bg-paper-warm"
             aria-label="Choose image from photo library or files"
           >
+            <Upload className="h-4 w-4" />
             Choose file
-          </button>
+          </motion.button>
         </div>
-        <p className="text-ink-muted text-[11px] mt-4 max-w-md mx-auto leading-relaxed">
-          Take photo uses your browser&apos;s camera (built-in webcam on Mac, camera on phone).
-          Choose file only if you want an existing image from disk or Photos.
-        </p>
-      </div>
+
+        <p className="text-ink-muted text-[11px] mt-4">JPG, PNG, WebP or HEIC · up to 10 MB</p>
+      </motion.label>
       {error && (
         <p
           role="alert"
@@ -1107,20 +1191,26 @@ function ImagePickerPanel({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const canAiGenerate = canGenerate && pickState.label.trim().length > 0;
+  const aiFirst = pickState.mode === "ai";
 
   return (
-    <div className="space-y-3 rounded-xl border border-ink/10 bg-paper-warm p-3">
-      <div>
+    <div className="flex flex-col gap-3 rounded-xl border border-ink/10 bg-paper-warm p-3">
+      <div className="order-1">
         <p className="text-xs font-medium">
-          {hasExistingGhostViews ? "Add another view" : "Add catalog view"}
+          {aiFirst
+            ? "Generate with AI"
+            : hasExistingGhostViews
+              ? "Add another view"
+              : "Add catalog view"}
         </p>
         <p className="text-[11px] text-ink-muted mt-1">
-          Paste or upload a photo to add it as a view immediately (no AI). Or generate with AI
-          below.
+          {aiFirst
+            ? "The AI render needs a name. You can also upload a photo instead — that adds a view immediately, no credit."
+            : "Paste or upload a photo to add it as a view immediately (no AI). Or generate with AI below."}
         </p>
       </div>
 
-      <label className="block space-y-1">
+      <label className={`${aiFirst ? "order-3" : "order-2"} block space-y-1`}>
         <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
         <input
           type="text"
@@ -1147,14 +1237,17 @@ function ImagePickerPanel({
         type="button"
         disabled={generating}
         onClick={() => fileRef.current?.click()}
-        className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
+        className={`${aiFirst ? "order-4" : "order-3"} self-start rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50`}
       >
         Upload photo as view
       </button>
 
-      <details className="rounded-lg border border-ink/10 bg-white p-3">
+      <details
+        open={aiFirst}
+        className={`${aiFirst ? "order-2" : "order-5"} rounded-lg border border-ink/10 bg-white p-3`}
+      >
         <summary className="text-xs font-medium cursor-pointer list-none">
-          Or generate with AI · 1 credit
+          {aiFirst ? "Render settings" : "Or generate with AI · 1 credit"}
         </summary>
         <div className="mt-3 space-y-3">
           <p className="text-[11px] text-ink-muted">
@@ -1279,7 +1372,7 @@ function ImagePickerPanel({
       <button
         type="button"
         onClick={onCancel}
-        className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
+        className="order-6 self-start rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
       >
         {generating ? "Close" : "Cancel"}
       </button>
@@ -1341,7 +1434,7 @@ function ReadyView({
   selectedWebProductUrl: string | null;
   onClearWebSelection: () => void;
   onChange: (patch: Partial<ItemFormValue>) => void;
-  onRequestGhost: () => void;
+  onRequestGhost: (mode: "upload" | "ai") => void;
   onConfirmPick: (pick: PickImageState) => void;
   onCancelPick: () => void;
   onTogglePickExtra: (id: string) => void;
@@ -1360,11 +1453,15 @@ function ReadyView({
 }) {
   const noCredits = credits < 1;
   const hasGhosts = state.ghostViews.length > 0;
-  const ghostBtnLabel = state.generatingGhost
-    ? "Generating…"
-    : hasGhosts
-      ? "Add another view"
-      : "Add catalog view";
+  // Generation is refused server-side for an unclassifiable item, so surface it
+  // here rather than letting the click fail.
+  const categoryCheck = requireGhostCategory({
+    category: state.value.category,
+    subcategory: state.value.subcategory,
+    name: state.value.name,
+  });
+  const categoryBlocked = !categoryCheck.ok ? categoryCheck.error : null;
+  const ghostBtnLabel = hasGhosts ? "Add another view" : "Add catalog view";
 
   return (
     <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-8 items-start">
@@ -1418,16 +1515,30 @@ function ReadyView({
               )}
               <button
                 type="button"
-                onClick={onRequestGhost}
+                onClick={() => onRequestGhost("upload")}
                 disabled={state.generatingGhost}
                 className="w-full rounded-full bg-ink text-paper px-4 py-2 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
               >
                 {ghostBtnLabel}
               </button>
+              <button
+                type="button"
+                onClick={() => onRequestGhost("ai")}
+                disabled={state.generatingGhost || noCredits || !!categoryBlocked}
+                title={
+                  categoryBlocked ?? (noCredits ? "Out of credits — buy more in Settings" : undefined)
+                }
+                className="w-full rounded-full border border-ink/20 px-4 py-2 text-xs tracking-wide hover:bg-paper transition disabled:opacity-50"
+              >
+                {state.generatingGhost ? "Generating…" : "Generate with AI"}
+              </button>
               <p className="text-[11px] text-ink-muted">
                 Paste or upload a photo for free, or generate with AI
                 {noCredits ? " (out of credits)." : " (1 credit)."}
               </p>
+              {categoryBlocked && (
+                <p className="text-[11px] text-amber-700">{categoryBlocked}</p>
+              )}
             </>
           )}
 

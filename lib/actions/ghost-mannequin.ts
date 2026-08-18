@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { loadCategoryShapes } from "@/lib/server/category-shapes";
 import { cutoutPathFor } from "@/lib/image-paths";
 import { encode } from "@/lib/json";
 import { deleteUpload, saveUpload, UploadError } from "@/lib/uploads";
@@ -11,7 +12,7 @@ import { checkAiQuota } from "@/lib/ai-guardrails";
 import { log } from "@/lib/log";
 import {
   createGhostMannequin,
-  mapCategoryToGhost,
+  requireGhostCategory,
   type GhostMannequinResult,
 } from "@/lib/services/ghostMannequin";
 import {
@@ -61,6 +62,9 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
     prisma.user.findUnique({ where: { id: user.id }, select: { credits: true } }),
   ]);
   if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+  const categoryShapes = await loadCategoryShapes(user.id);
+  const categoryCheck = requireGhostCategory({ ...item, categoryShapes });
+  if (!categoryCheck.ok) return { ok: false, error: categoryCheck.error };
   if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
@@ -81,7 +85,7 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
       userId: user.id,
       garmentImagePath: sourcePath,
       extraImagePaths: extras,
-      category: mapCategoryToGhost(item.category),
+      category: categoryCheck.category,
     });
   } catch (err) {
     log.error("ghost.generate.failed", err, { userId: user.id, itemId });
@@ -304,9 +308,10 @@ export type ReplaceGhostViewCropResponse =
   | { ok: false; error: string };
 
 /**
- * Replace one ghost-view JPEG with a user-cropped image (same UX as add-flow
- * ImageCropper). Deletes the previous file, its thumbnail, and a sibling
- * cutout PNG when present.
+ * Replace one ghost-view JPEG with a user-edited image — cropped via the
+ * add-flow ImageCropper, or background-whitened via BackgroundWhitener.
+ * Deletes the previous file, its thumbnail, and a sibling cutout PNG when
+ * present.
  */
 export async function replaceGhostViewImageWithCrop(
   itemId: string,
@@ -554,6 +559,10 @@ export async function enqueueGhostViewFor(
   const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
   if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
 
+  const categoryShapes = await loadCategoryShapes(user.id);
+  const categoryCheck = requireGhostCategory({ ...item, categoryShapes });
+  if (!categoryCheck.ok) return { ok: false, error: categoryCheck.error };
+
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
     select: { credits: true },
@@ -589,6 +598,15 @@ export async function enqueueGhostPreview(
     if (!extra.startsWith(`${user.id}/`)) {
       return { ok: false, error: "Extra image does not belong to this user" };
     }
+  }
+
+  if (input.category === "full") {
+    return {
+      ok: false,
+      error:
+        "Set a category before generating — without one the render has to guess the garment type, " +
+        "which is what produces cropped or misshapen results.",
+    };
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -637,6 +655,7 @@ export async function getGhostJobStatus(jobId: string): Promise<GhostJobStatusRe
         status: "succeeded",
         ghostImagePath: view.ghostImagePath,
         creditsRemaining: view.creditsRemaining,
+        creditsUsed: view.creditsUsed,
         viewLabel: view.viewLabel,
       };
     }

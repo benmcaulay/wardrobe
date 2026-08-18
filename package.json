@@ -26,7 +26,12 @@
     "test:stripe": "tsx scripts/verify-stripe.ts",
     "benchmark:wear-retrieval": "tsx --env-file=.env scripts/benchmark-wear-retrieval.ts",
     "calibrate:wear-match": "tsx --env-file=.env scripts/calibrate-wear-match.ts",
-    "benchmark:style-text": "tsx --env-file=.env scripts/benchmark-style-text.ts"
+    "benchmark:style-text": "tsx --env-file=.env scripts/benchmark-style-text.ts",
+    "eval:ranker": "tsx --env-file=.env scripts/eval-ranker.ts",
+    "eval:catalog": "tsx --env-file=.env scripts/eval-catalog.ts",
+    "ghost:lora:build": "tsx --env-file=.env scripts/ghost-lora-build.ts",
+    "ghost:lora:train": "tsx --env-file=.env scripts/ghost-lora-train.ts",
+    "audit:layout": "tsx --env-file=.env scripts/audit-layout.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

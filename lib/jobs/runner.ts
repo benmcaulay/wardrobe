@@ -159,6 +159,7 @@ async function runGhostView(
   return {
     ghostImagePath: out.ghostImagePath,
     creditsRemaining: out.creditsRemaining,
+    creditsUsed: out.creditsUsed,
     viewLabel: payload.label.trim() || "Ghost",
   };
 }

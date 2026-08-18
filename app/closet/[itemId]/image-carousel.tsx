@@ -19,6 +19,12 @@ import {
 } from "@/lib/actions/ghost-mannequin";
 import { ImageCropper } from "@/components/image-cropper";
 import { BackgroundWhitener } from "@/components/background-whitener";
+import { Check, Edit, Mirror as MirrorIcon, Refresh, Sparkle, Upload } from "@/components/icons";
+import { Button } from "@/components/ui-button";
+import { BUTTON_ICON_SIZE } from "@/lib/ui-button-tokens";
+
+const ICON = BUTTON_ICON_SIZE.md;
+const ICON_SM = BUTTON_ICON_SIZE.sm;
 
 type GhostView = { label: string; imagePath: string; mirror?: boolean; thumbZoom?: number };
 type PickImageState = {
@@ -28,6 +34,8 @@ type PickImageState = {
   /** `null` = listing photo is the model's first input */
   primaryPath: string | null;
   compositionHint: "default" | "rear";
+  /** Which entry point opened the dialog — decides what starts expanded. */
+  mode: "upload" | "ai";
 };
 
 const POLL_INTERVAL_MS = 2000;
@@ -42,6 +50,8 @@ type Props = {
   primaryGhostPath: string | null;
   extraImagePaths: string[];
   credits: number;
+  /** Non-null when the item's type can't be classified, so AI is unavailable. */
+  categoryBlocked?: string | null;
 };
 
 export function ImageCarousel({
@@ -53,6 +63,7 @@ export function ImageCarousel({
   primaryGhostPath,
   extraImagePaths,
   credits,
+  categoryBlocked = null,
 }: Props) {
   const [ghostViews, setGhostViews] = useState(initialGhostViews);
   const [origPath, setOrigPath] = useState(originalPath);
@@ -73,8 +84,10 @@ export function ImageCarousel({
   const pollGenRef = useRef(0);
   const prevGhostCountRef = useRef(initialGhostViews.length);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pickingImages, setPickingImages] = useState<PickImageState | null>(null);
   const [croppingPath, setCroppingPath] = useState<string | null>(null);
+  const [whiteningPath, setWhiteningPath] = useState<string | null>(null);
   const [croppingOriginal, setCroppingOriginal] = useState(false);
   const router = useRouter();
   const noCredits = credits < 1;
@@ -106,14 +119,16 @@ export function ImageCarousel({
     ? `scale(${activeGhost.thumbZoom ?? 1}) ${activeGhost.mirror ? "scaleX(-1)" : ""}`
     : `scale(${originalStyle.thumbZoom}) ${originalStyle.mirror ? "scaleX(-1)" : ""}`;
 
-  function requestGenerate() {
+  function openViewDialog(mode: "upload" | "ai") {
     setError(null);
+    setNotice(null);
     setPickingImages({
       selectedExtraPaths: [...sourceImagePaths],
       label: ghostViews.length > 0 ? `View ${ghostViews.length + 1}` : "Front",
       instructions: "",
       primaryPath: null,
       compositionHint: "default",
+      mode,
     });
   }
 
@@ -179,6 +194,15 @@ export function ImageCarousel({
         return;
       }
       if (status.status === "succeeded") {
+        // creditsUsed === 0 means an identical request already had an image on
+        // disk. Say so — otherwise reusing it looks like the generator ignoring
+        // the request and returning the same picture.
+        if (status.creditsUsed === 0) {
+          setNotice(
+            "That request was identical to an earlier one, so the existing render was reused — no credit spent. " +
+              "Change the instructions to get a different image.",
+          );
+        }
         setPickingImages(null);
         router.refresh();
         return;
@@ -361,18 +385,30 @@ export function ImageCarousel({
               view.
             </p>
           )}
-          <button
-            type="button"
-            onClick={requestGenerate}
-            disabled={ghostGenerating || manualAdding}
-            className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
-          >
-            {ghostGenerating
-              ? "Generating…"
-              : hasGhosts
-                ? "Add another view"
-                : "Add catalog view"}
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="solid"
+              onClick={() => openViewDialog("upload")}
+              disabled={ghostGenerating || manualAdding}
+              icon={<Upload size={ICON} />}
+            >
+              {hasGhosts ? "Add another view" : "Add catalog view"}
+            </Button>
+            <Button
+              onClick={() => openViewDialog("ai")}
+              disabled={ghostGenerating || manualAdding || noCredits || !!categoryBlocked}
+              title={
+                categoryBlocked ?? (noCredits ? "Out of credits — buy more in Settings" : undefined)
+              }
+              icon={<Sparkle size={ICON} />}
+            >
+              {ghostGenerating ? "Generating…" : "Generate with AI"}
+            </Button>
+          </div>
+          {categoryBlocked && (
+            <p className="text-[11px] text-amber-700">{categoryBlocked}</p>
+          )}
+          {notice && <p className="text-[11px] text-ink-muted">{notice}</p>}
           {error && (
             <p role="alert" className="text-[11px] text-red-700">
               {error}
@@ -438,6 +474,30 @@ export function ImageCarousel({
           }}
         />
       )}
+      {whiteningPath && (
+        <GhostViewWhitenModal
+          src={imageUrl(whiteningPath)}
+          onClose={() => setWhiteningPath(null)}
+          onSave={async (blob) => {
+            const formData = new FormData();
+            formData.append("image", new File([blob], "whitened.jpg", { type: "image/jpeg" }));
+            const res = await replaceGhostViewImageWithCrop(itemId, whiteningPath, formData);
+            if (!res.ok) {
+              setError(res.error);
+              return;
+            }
+            const newPath = res.imagePath;
+            startTransition(() => {
+              setGhostViews((prev) =>
+                prev.map((v) => (v.imagePath === whiteningPath ? { ...v, imagePath: newPath } : v)),
+              );
+              setPrimaryPath((p) => (p === whiteningPath ? newPath : p));
+              router.refresh();
+            });
+            setWhiteningPath(null);
+          }}
+        />
+      )}
       {croppingPath && (
         <GhostViewCropModal
           itemId={itemId}
@@ -460,48 +520,58 @@ export function ImageCarousel({
             Zoom adjusts how the original is framed in square tiles. Use Crop to reframe the file
             itself (same tool as when you add a piece).
           </p>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              type="button"
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              title="Use as thumbnail"
+              aria-label="Use as thumbnail"
+              variant={primaryPath === null ? "solid" : "outline"}
+              aria-pressed={primaryPath === null}
               onClick={() => setPrimary(null)}
-              className={`rounded-full px-3 py-1 text-xs border ${
-                primaryPath === null
-                  ? "border-ink bg-ink text-paper"
-                  : "border-ink/15 hover:border-ink/30"
-              }`}
+              icon={<Check size={ICON_SM} />}
             >
-              {primaryPath === null ? "Primary thumbnail" : "Set as thumbnail"}
-            </button>
-            <button
-              type="button"
+              Thumbnail
+            </Button>
+            <Button
+              size="sm"
+              title="Crop image"
+              aria-label="Crop image"
               onClick={() => setCroppingOriginal(true)}
-              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+              icon={<Edit size={ICON_SM} />}
             >
-              Crop image…
-            </button>
-            <button
-              type="button"
+              Crop
+            </Button>
+            <Button
+              size="sm"
+              title="Whiten background"
+              aria-label="Whiten background"
               onClick={() => setWhitening(true)}
-              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+              icon={<Sparkle size={ICON_SM} />}
             >
-              Whiten background…
-            </button>
-            <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={originalStyle.mirror}
-                onChange={(e) => patchOriginalStyle({ mirror: e.target.checked })}
-                className="accent-ink"
-              />
-              Mirror
-            </label>
-            <button
-              type="button"
+              Whiten
+            </Button>
+            {/* A toggle, not a checkbox: the pressed state carries the meaning. */}
+            <Button
+              size="sm"
+              title="Flip horizontally"
+              aria-label="Flip horizontally"
+              variant={originalStyle.mirror ? "solid" : "outline"}
+              aria-pressed={Boolean(originalStyle.mirror)}
+              onClick={() => patchOriginalStyle({ mirror: !originalStyle.mirror })}
+              icon={<MirrorIcon size={ICON_SM} />}
+            >
+              Flip
+            </Button>
+            <Button
+              size="sm"
+              variant="quiet"
+              title="Reset zoom"
+              aria-label="Reset zoom"
               onClick={() => patchOriginalStyle({ thumbZoom: 1 })}
-              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+              icon={<Refresh size={ICON_SM} />}
             >
-              Reset zoom
-            </button>
+              Reset
+            </Button>
           </div>
           <label className="block text-xs">
             <span className="text-ink-muted">Zoom ({originalStyle.thumbZoom.toFixed(2)}×)</span>
@@ -524,41 +594,58 @@ export function ImageCarousel({
             Zoom adjusts how this image is framed in square tiles. Use Crop to reframe the file
             itself (same tool as when you add a piece).
           </p>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              type="button"
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              title="Use as thumbnail"
+              aria-label="Use as thumbnail"
+              variant={primaryPath === activeGhost.imagePath ? "solid" : "outline"}
+              aria-pressed={primaryPath === activeGhost.imagePath}
               onClick={() => setPrimary(activeGhost.imagePath)}
-              className={`rounded-full px-3 py-1 text-xs border ${
-                primaryPath === activeGhost.imagePath
-                  ? "border-ink bg-ink text-paper"
-                  : "border-ink/15 hover:border-ink/30"
-              }`}
+              icon={<Check size={ICON_SM} />}
             >
-              {primaryPath === activeGhost.imagePath ? "Primary thumbnail" : "Set as thumbnail"}
-            </button>
-            <button
-              type="button"
+              Thumbnail
+            </Button>
+            <Button
+              size="sm"
+              title="Crop image"
+              aria-label="Crop image"
               onClick={() => setCroppingPath(activeGhost.imagePath)}
-              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+              icon={<Edit size={ICON_SM} />}
             >
-              Crop image…
-            </button>
-            <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={!!activeGhost.mirror}
-                onChange={(e) => patchStyle(activeGhost.imagePath, { mirror: e.target.checked })}
-                className="accent-ink"
-              />
-              Mirror
-            </label>
-            <button
-              type="button"
+              Crop
+            </Button>
+            <Button
+              size="sm"
+              title="Whiten background"
+              aria-label="Whiten background"
+              onClick={() => setWhiteningPath(activeGhost.imagePath)}
+              icon={<Sparkle size={ICON_SM} />}
+            >
+              Whiten
+            </Button>
+            {/* A toggle, not a checkbox: the pressed state carries the meaning. */}
+            <Button
+              size="sm"
+              title="Flip horizontally"
+              aria-label="Flip horizontally"
+              variant={activeGhost.mirror ? "solid" : "outline"}
+              aria-pressed={Boolean(activeGhost.mirror)}
+              onClick={() => patchStyle(activeGhost.imagePath, { mirror: !activeGhost.mirror })}
+              icon={<MirrorIcon size={ICON_SM} />}
+            >
+              Flip
+            </Button>
+            <Button
+              size="sm"
+              variant="quiet"
+              title="Reset zoom"
+              aria-label="Reset zoom"
               onClick={() => patchStyle(activeGhost.imagePath, { thumbZoom: 1 })}
-              className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:bg-paper transition"
+              icon={<Refresh size={ICON_SM} />}
             >
-              Reset zoom
-            </button>
+              Reset
+            </Button>
           </div>
           <label className="block text-xs">
             <span className="text-ink-muted">Thumbnail zoom ({(activeGhost.thumbZoom ?? 1).toFixed(2)}×)</span>
@@ -635,6 +722,38 @@ function OriginalCropModal({
           aspect. Square crop matches closet tiles.
         </p>
         <ImageCropper src={src} aspect={1} onCancel={onClose} onConfirm={onConfirm} />
+      </div>
+    </div>
+  );
+}
+
+function GhostViewWhitenModal({
+  src,
+  onClose,
+  onSave,
+}: {
+  src: string;
+  onClose: () => void;
+  onSave: (blob: Blob) => Promise<void>;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
+      <div className="w-full max-w-2xl rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+        <div className="flex items-center justify-between">
+          <h3 className="font-serif text-xl tracking-tight">Whiten background</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-7 h-7 rounded-full border border-ink/15 text-sm hover:bg-paper"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <p className="text-xs text-ink-muted">
+          Cleans up any off-white cast the render left behind, so the view sits on true #ffffff.
+        </p>
+        <BackgroundWhitener src={src} onCancel={onClose} onSave={onSave} />
       </div>
     </div>
   );
@@ -771,7 +890,12 @@ function GenerateViewModal({
   onGenerate: () => void;
   onCancel: () => void;
 }) {
-  const title = variant === "another" ? "Add another view" : "Add catalog view";
+  const aiFirst = pickState.mode === "ai";
+  const title = aiFirst
+    ? "Generate with AI"
+    : variant === "another"
+      ? "Add another view"
+      : "Add catalog view";
   const busy = generating || manualAdding;
   const canAiGenerate = canGenerate && pickState.label.trim().length > 0;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -809,8 +933,8 @@ function GenerateViewModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3">
-        <div className="flex items-center justify-between">
+      <div className="w-full max-w-md rounded-2xl border border-ink/10 bg-white shadow-tile p-4 flex flex-col gap-3">
+        <div className="order-1 flex items-center justify-between">
           <h3 className="font-serif text-xl tracking-tight">{title}</h3>
           <button
             type="button"
@@ -822,11 +946,16 @@ function GenerateViewModal({
           </button>
         </div>
 
-        <div className="rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2">
-          <p className="text-xs font-medium">Paste or upload a photo</p>
+        <div
+          className={`${aiFirst ? "order-3" : "order-2"} rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2`}
+        >
+          <p className="text-xs font-medium">
+            {aiFirst ? "Name this view" : "Paste or upload a photo"}
+          </p>
           <p className="text-[11px] text-ink-muted">
-            Adds the image as a catalog view immediately — no AI, no credit. Optional: name it
-            below first. Shift+paste adds it as an AI context source instead.
+            {aiFirst
+              ? "The AI render needs a name. You can also paste or upload a photo instead — that adds a view immediately, no credit."
+              : "Adds the image as a catalog view immediately — no AI, no credit. Optional: name it below first. Shift+paste adds it as an AI context source instead."}
           </p>
           <label className="block space-y-1">
             <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
@@ -860,9 +989,12 @@ function GenerateViewModal({
           </button>
         </div>
 
-        <details className="rounded-xl border border-ink/10 p-3 group">
+        <details
+          open={aiFirst}
+          className={`${aiFirst ? "order-2" : "order-3"} rounded-xl border border-ink/10 p-3 group`}
+        >
           <summary className="text-xs font-medium cursor-pointer list-none flex items-center justify-between">
-            <span>Or generate with AI</span>
+            <span>{aiFirst ? "Render settings" : "Or generate with AI"}</span>
             <span className="text-[10px] text-ink-muted group-open:hidden">1 credit</span>
           </summary>
           <div className="mt-3 space-y-3">
@@ -998,7 +1130,7 @@ function GenerateViewModal({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
+          className="order-4 self-start rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
         >
           {busy ? "Close" : "Cancel"}
         </button>

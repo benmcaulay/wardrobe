@@ -162,27 +162,36 @@ export function ItemFormFields({
       </div>
 
       <Field label="Colors" hint="Tap to toggle · star = sort color">
-        <div className="flex flex-wrap gap-2.5">
+        {/* auto-fit grid rather than flex-wrap: a fixed 36px swatch plus a
+            full-width label made 14 colours overflow into a second row on a
+            laptop. Columns now shrink to fit the container, so the palette
+            occupies one row at any realistic width and only wraps on phones. */}
+        <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(2rem,1fr))]">
           {colorOptions.map((c) => {
             const active = selectedNames.has(c.name);
             const isPrimary = active && primaryName === c.name;
             return (
-              <div key={c.name} className="group flex flex-col items-center gap-1">
+              <div key={c.name} className="group flex min-w-0 flex-col items-center gap-1">
                 <button
                   type="button"
                   onClick={() => toggleColor(c.hex, c.name)}
                   disabled={disabled}
                   aria-pressed={active}
                   aria-label={c.name}
-                  className="flex flex-col items-center gap-1 transition disabled:opacity-50"
+                  className="flex w-full min-w-0 flex-col items-center gap-1 transition disabled:opacity-50"
                 >
                   <span
-                    className={`block w-9 h-9 rounded-full border transition ${
+                    className={`block w-full max-w-9 aspect-square rounded-full border transition ${
                       active ? "ring-2 ring-offset-2 ring-accent border-transparent" : "border-ink/10"
                     }`}
                     style={{ backgroundColor: c.hex }}
                   />
-                  <span className="text-[10px] uppercase tracking-wide text-ink-muted">{c.name}</span>
+                  <span
+                    title={c.name}
+                    className="w-full text-center text-[9px] uppercase tracking-tight text-ink-muted truncate"
+                  >
+                    {c.name}
+                  </span>
                 </button>
                 {/* Reserve a fixed slot so hovering doesn't shift the row. */}
                 <div className="h-4 flex items-center justify-center">

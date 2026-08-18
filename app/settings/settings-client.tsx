@@ -30,7 +30,9 @@ import {
   removeWardrobeCategory,
   renameWardrobeCategory,
   reorderWardrobeCategories,
+  setCategoryShape,
 } from "@/lib/actions/wardrobeCategories";
+import { CategoryReassignModal } from "@/components/category-reassign-modal";
 import {
   addWardrobeStyleTag,
   removeWardrobeStyleTag,
@@ -50,7 +52,12 @@ import {
 import { clearAllData } from "@/lib/actions/account";
 import { createCreditCheckout } from "@/lib/actions/billing";
 import { CREDIT_PACKS, formatPackPrice } from "@/lib/credit-packs";
-import { normalizeCategoryName } from "@/lib/categories";
+import {
+  categoriesNeedingShape,
+  normalizeCategoryName,
+  type GarmentKind,
+} from "@/lib/categories";
+import type { GarmentKindChoice } from "@/lib/json";
 import type { Color, Owner, StylePrefs } from "@/lib/json";
 
 type EyeDropperResult = { sRGBHex: string };
@@ -59,6 +66,7 @@ type EyeDropperConstructor = new () => { open: () => Promise<EyeDropperResult> }
 type Props = {
   initialPrefs: StylePrefs;
   categoryList: string[];
+  categoryShapes: Record<string, string>;
   styleTagsList: string[];
   ownersList: Owner[];
   colorList: Color[];
@@ -73,6 +81,7 @@ const DELETE_CONFIRM_PHRASE = "delete my wardrobe";
 export function SettingsClient({
   initialPrefs,
   categoryList,
+  categoryShapes,
   styleTagsList,
   ownersList,
   colorList,
@@ -82,6 +91,9 @@ export function SettingsClient({
 }: Props) {
   const [prefs, setPrefs] = useState<StylePrefs>(initialPrefs);
   const [newCategory, setNewCategory] = useState("");
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [shapes, setShapes] = useState<Record<string, string>>(categoryShapes);
+  const [reassignNote, setReassignNote] = useState<string | null>(null);
   const [newTag, setNewTag] = useState("");
   const [newOwner, setNewOwner] = useState("");
   const [newColorHex, setNewColorHex] = useState("#4a6fb0");
@@ -543,7 +555,61 @@ export function SettingsClient({
           onRename={handleRenameCategory}
           onRemove={handleDeleteCategory}
         />
+
+        <UnreadableCategories
+          categories={localCategories}
+          shapes={shapes}
+          onChoose={(cat, shape) => {
+            const key = normalizeCategoryName(cat);
+            setShapes((prev) => {
+              const next = { ...prev };
+              if (shape) next[key] = shape;
+              else delete next[key];
+              return next;
+            });
+            void setCategoryShape(cat, shape as GarmentKindChoice | "").then((res) => {
+              if (!res.ok) setCatError(res.error);
+              else router.refresh();
+            });
+          }}
+        />
+
+        {/* Splitting a category is neither a rename (which moves everything) nor
+            a per-item edit (which does not scale) — it needs a bulk picker. */}
+        <div className="rounded-xl border border-ink/10 bg-paper-warm p-4 space-y-2">
+          <p className="text-sm">
+            Added a category that overlaps an existing one?
+          </p>
+          <p className="text-xs text-ink-muted">
+            Adding <span className="text-ink">t shirt</span> when you already have{" "}
+            <span className="text-ink">shirt</span> leaves every piece where it was. Use this to
+            pick which ones move across — renaming would move all of them.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setReassignNote(null);
+              setReassignOpen(true);
+            }}
+            className="rounded-full bg-ink text-paper px-4 py-2 text-xs tracking-wide hover:bg-ink-soft transition"
+          >
+            Reassign pieces…
+          </button>
+          {reassignNote && <p className="text-xs text-ink-muted">{reassignNote}</p>}
+        </div>
       </section>
+
+      <CategoryReassignModal
+        open={reassignOpen}
+        categories={localCategories}
+        onClose={() => setReassignOpen(false)}
+        onMoved={(moved, target) => {
+          setReassignNote(
+            `Moved ${moved} ${moved === 1 ? "piece" : "pieces"} into ${target}.`,
+          );
+          router.refresh();
+        }}
+      />
 
       <section className="space-y-4">
         <h3 className="text-xs uppercase tracking-wide text-ink-muted">Owners</h3>
@@ -850,6 +916,101 @@ export function SettingsClient({
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+const SHAPE_CHOICES: { value: string; label: string }[] = [
+  { value: "top", label: "Top" },
+  { value: "bottom", label: "Bottom" },
+  { value: "dress", label: "Dress" },
+  { value: "outerwear", label: "Outerwear" },
+  { value: "shoes", label: "Shoes" },
+  { value: "accessory", label: "Accessory" },
+];
+
+/**
+ * Categories whose name says nothing about garment shape.
+ *
+ * "workwear", "favorites" and "y2k" cannot be classified from text, so the
+ * ghost pipeline would fall back to its generic guess-the-type prompt — and the
+ * category gate refuses to generate at all. Asking once per label fixes every
+ * item in it. Hidden entirely when nothing needs an answer.
+ */
+function UnreadableCategories({
+  categories,
+  shapes,
+  onChoose,
+}: {
+  categories: string[];
+  shapes: Record<string, string>;
+  onChoose: (category: string, shape: string) => void;
+}) {
+  const needing = categoriesNeedingShape(categories, shapes as Record<string, GarmentKind>);
+  const assigned = categories.filter((c) => shapes[normalizeCategoryName(c)]);
+
+  if (needing.length === 0 && assigned.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-ink/10 bg-white p-4 space-y-3">
+      <div>
+        <p className="text-sm">Category shapes</p>
+        <p className="text-xs text-ink-muted mt-1">
+          Catalog renders need to know whether a category is a top, a bottom, and so on. Most names
+          give that away — <span className="text-ink">shirt</span>,{" "}
+          <span className="text-ink">jeans</span> — but names like{" "}
+          <span className="text-ink">workwear</span> or <span className="text-ink">favorites</span>{" "}
+          don&apos;t. Set those once here.
+        </p>
+      </div>
+
+      {needing.length > 0 && (
+        <ul className="space-y-2">
+          {needing.map((cat) => (
+            <li key={cat} className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-amber-700 shrink-0">
+                {cat} — shape unknown
+              </span>
+              <select
+                defaultValue=""
+                onChange={(e) => onChoose(cat, e.target.value)}
+                className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:outline-none focus:border-ink/40"
+                aria-label={`Shape for ${cat}`}
+              >
+                <option value="">Choose a shape…</option>
+                {SHAPE_CHOICES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {assigned.length > 0 && (
+        <ul className="space-y-2 pt-1 border-t border-ink/10">
+          {assigned.map((cat) => (
+            <li key={cat} className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-ink-muted shrink-0">{cat}</span>
+              <select
+                value={shapes[normalizeCategoryName(cat)] ?? ""}
+                onChange={(e) => onChoose(cat, e.target.value)}
+                className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:outline-none focus:border-ink/40"
+                aria-label={`Shape for ${cat}`}
+              >
+                {SHAPE_CHOICES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+                <option value="">Clear (guess from the name)</option>
+              </select>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

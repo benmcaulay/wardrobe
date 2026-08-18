@@ -16,12 +16,24 @@ export type Season = "spring" | "summer" | "fall" | "winter";
  */
 export type Owner = { id: string; name: string; linkedUserId?: string | null };
 
+/** Shapes a user can assign to a category. Mirrors GarmentKind minus "other". */
+export type GarmentKindChoice = "top" | "bottom" | "dress" | "outerwear" | "shoes" | "accessory";
+
 export type StylePrefs = {
   sizes?: Record<string, string>;
   favoriteColors?: string[];
   styles?: string[];
   /** Ordered wardrobe category picker list (merged with defaults server-side only when absent). */
   categoriesList?: string[];
+  /**
+   * Explicit garment shape per category label, keyed by normalised name.
+   *
+   * The classifier infers shape from the label text, which cannot work for
+   * occasion-style names — "workwear", "favorites", "y2k" say nothing about
+   * what the garment IS, and "swim" is ambiguous between trunks and a bikini
+   * top. This is the user's answer for those, and it wins over inference.
+   */
+  categoryShapes?: Record<string, GarmentKindChoice>;
   /** Ordered style-tag chips for item add/edit (defaults when absent). */
   styleTagsList?: string[];
   /** Ordered wardrobe color palette (swatch + name); defaults to built-ins when absent. */

@@ -319,6 +319,24 @@ export function Mail({ size = 20, ...props }: IconProps) {
   );
 }
 
+/**
+ * mirror — flip horizontally.
+ *
+ * HAND-ADDED, not from the generator: tmp/build-icons.ts and its source JSON are
+ * no longer in the tree. Drawn to the same spec as the rest — 24x24, the shared
+ * 1.75 stroke from BASE, round caps and joins — so it sits level with its
+ * neighbours. Re-generate it properly if the generator ever comes back.
+ */
+export function Mirror({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M12 3.7v16.6" strokeDasharray="2.6 2.9"/>
+      <path d="M8.8 7.4 4.5 12l4.3 4.6Z"/>
+      <path d="M15.2 7.4 19.5 12l-4.3 4.6Z"/>
+    </svg>
+  );
+}
+
 /** outerwear — outerwear, coat, jacket, overcoat */
 export function Outerwear({ size = 20, ...props }: IconProps) {
   return (
@@ -663,6 +681,7 @@ export const ICON_REGISTRY: readonly {
   { name: "link", keywords: ["url", "chain", "copy link"], Component: Link },
   { name: "list", keywords: ["list"], Component: List },
   { name: "mail", keywords: ["email", "envelope", "message"], Component: Mail },
+  { name: "mirror", keywords: ["mirror", "flip", "reflect", "reverse"], Component: Mirror },
   { name: "outerwear", keywords: ["outerwear", "coat", "jacket", "overcoat"], Component: Outerwear },
   { name: "palette", keywords: ["palette"], Component: Palette },
   { name: "pants", keywords: ["pants", "trousers", "jeans", "bottoms"], Component: Pants },

@@ -1156,7 +1156,9 @@ export function RandomOutfitBuilder({
               Your closet has no categorized pieces yet.
             </p>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
+            // Single row, scrolled: the number of categories is user-controlled,
+            // so any fixed-width assumption eventually wraps.
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
               {categoryOptions.map((cat) => {
                 const key = normalizeCategoryName(cat);
                 const rule = categoryRules.find((r) =>
@@ -1174,7 +1176,7 @@ export function RandomOutfitBuilder({
                     onClick={() => toggleSimpleCategory(cat)}
                     disabled={locked}
                     title={locked ? "Managed in multi-select below" : "Tap to include · drag into a layer"}
-                    className={`rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
+                    className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
                       active
                         ? "bg-ink text-paper border-ink"
                         : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
@@ -1217,7 +1219,7 @@ export function RandomOutfitBuilder({
               <div className="text-xs text-ink-muted">
                 Pick categories to combine (matches any — “or”), then how many.
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
                 {categoryOptions
                   .filter((cat) => {
                     const key = normalizeCategoryName(cat);

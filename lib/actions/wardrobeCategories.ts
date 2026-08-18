@@ -5,11 +5,12 @@ import {
   getCategoriesListFromPrefs,
   NONE_CATEGORY,
   normalizeCategoryName,
+  resolveReassignTarget,
   sanitizeCategoryList,
 } from "@/lib/categories";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { decode, encode, type StylePrefs } from "@/lib/json";
+import { decode, encode, type GarmentKindChoice, type StylePrefs } from "@/lib/json";
 import { migrateClosetGroupOrderCategory } from "@/lib/closet-group-order";
 
 function stripLegacyCategoryFields(prefs: StylePrefs): StylePrefs {
@@ -176,6 +177,131 @@ export async function reorderWardrobeCategories(
     data: { stylePrefs: encode(clean) },
   });
 
+  revalidatePath("/settings");
+  revalidatePath("/closet");
+  revalidatePath("/closet/add");
+  return { ok: true };
+}
+
+export type ReassignItem = {
+  id: string;
+  name: string;
+  /** Verbatim stored category — may be "None" or a label no longer in the list. */
+  category: string;
+  /** Primary image (ghost view when present, else the original photo). */
+  imagePath: string;
+};
+
+/**
+ * Every item, with just enough to render a picker.
+ *
+ * Returned whole rather than per-category so the reassign UI can switch source
+ * categories, search, and show counts without a round trip per keystroke. A
+ * closet is a couple hundred rows of four short fields — cheaper than the
+ * chatter of filtering server-side.
+ */
+export async function listItemsForReassign(): Promise<
+  { ok: true; items: ReassignItem[] } | { ok: false; error: string }
+> {
+  const user = await requireUser();
+  const rows = await prisma.wardrobeItem.findMany({
+    where: { userId: user.id },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      originalImagePath: true,
+      ghostImagePath: true,
+    },
+    orderBy: [{ category: "asc" }, { name: "asc" }],
+  });
+  return {
+    ok: true,
+    items: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      imagePath: r.ghostImagePath ?? r.originalImagePath,
+    })),
+  };
+}
+
+/**
+ * Move a chosen set of items into `target`.
+ *
+ * This is the other half of adding a category: splitting "shirt" into "shirt"
+ * and "t shirt" is not a rename — some rows move and some stay — and there was
+ * no way to express that. Renaming hits every item, and editing one at a time
+ * does not scale past a handful.
+ */
+export async function reassignItemsToCategory(
+  itemIds: string[],
+  target: string,
+): Promise<{ ok: true; moved: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const ids = [...new Set(itemIds.filter((id) => typeof id === "string" && id.length > 0))];
+  if (ids.length === 0) return { ok: false, error: "Select at least one piece to move" };
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(dbUser?.stylePrefs, {});
+  const options = getCategoriesListFromPrefs(prefs);
+
+  // Resolve to the user's own label so casing matches the picker and the closet
+  // groups by the same string. "None" is always allowed as a destination.
+  const resolved = resolveReassignTarget(target, options);
+  if (!resolved) {
+    return { ok: false, error: `"${target}" is not one of your categories` };
+  }
+
+  // userId in the filter is what stops an id from another account being moved.
+  const res = await prisma.wardrobeItem.updateMany({
+    where: { id: { in: ids }, userId: user.id },
+    data: { category: resolved },
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/closet");
+  return { ok: true, moved: res.count };
+}
+
+/**
+ * Record what shape a category is, for labels the classifier can't read.
+ *
+ * "workwear" and "favorites" contain no garment noun, so no amount of regex
+ * will place them — this is the user answering directly, and
+ * `classifyGarmentKind` checks it before any inference.
+ */
+export async function setCategoryShape(
+  category: string,
+  shape: GarmentKindChoice | "",
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const key = normalizeCategoryName(category);
+  if (!key) return { ok: false, error: "Invalid category" };
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = decode<StylePrefs>(dbUser?.stylePrefs, {});
+  const options = getCategoriesListFromPrefs(prefs);
+  if (!options.some((o) => normalizeCategoryName(o) === key)) {
+    return { ok: false, error: "That category no longer exists" };
+  }
+
+  const next = { ...(prefs.categoryShapes ?? {}) };
+  // Empty string clears the override and hands the label back to inference.
+  if (shape === "") delete next[key];
+  else next[key] = shape;
+
+  const clean = { ...prefs, categoryShapes: next };
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stylePrefs: encode(clean) },
+  });
   revalidatePath("/settings");
   revalidatePath("/closet");
   revalidatePath("/closet/add");

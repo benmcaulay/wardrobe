@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Clock } from "@/components/icons";
+import { springSnappy } from "@/lib/ui-motion";
 
 export type WebcamFacingPreference = "environment" | "user";
 
@@ -12,6 +15,17 @@ type Props = {
   onClose: () => void;
   onCapture: (file: File) => void;
 };
+
+/** Self-timer choices, in seconds. 0 = shoot immediately. */
+const DELAY_OPTIONS = [0, 3, 10] as const;
+/** Remembered across opens — someone shooting a rail of garments wants it sticky. */
+const DELAY_STORAGE_KEY = "wardrobe:webcam-timer-seconds";
+
+function loadStoredDelay(): number {
+  if (typeof window === "undefined") return 0;
+  const raw = Number(window.localStorage.getItem(DELAY_STORAGE_KEY));
+  return (DELAY_OPTIONS as readonly number[]).includes(raw) ? raw : 0;
+}
 
 async function acquireStream(preferredFacing: WebcamFacingPreference): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -56,6 +70,25 @@ export function WebcamCaptureModal({
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [delaySec, setDelaySec] = useState(0);
+  /** null = not counting. Counts down to 0, which fires the shutter. */
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const reduce = useReducedMotion();
+
+  // Restore the remembered delay on the client only, so SSR markup matches.
+  useEffect(() => {
+    setDelaySec(loadStoredDelay());
+  }, []);
+
+  function chooseDelay(next: number) {
+    setDelaySec(next);
+    setCountdown(null);
+    try {
+      window.localStorage.setItem(DELAY_STORAGE_KEY, String(next));
+    } catch {
+      // Private mode / storage disabled — the timer still works this session.
+    }
+  }
 
   useEffect(() => {
     if (!open) {
@@ -114,7 +147,13 @@ export function WebcamCaptureModal({
     };
   }, [open, preferredFacing]);
 
-  function capture() {
+  // A running countdown must never outlive the modal, or the shutter fires
+  // against a stopped stream after the dialog is gone.
+  useEffect(() => {
+    if (!open) setCountdown(null);
+  }, [open]);
+
+  const capture = useCallback(() => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0 || !ready) return;
 
@@ -136,9 +175,39 @@ export function WebcamCaptureModal({
       "image/jpeg",
       0.92,
     );
+  }, [ready, onCapture, onClose]);
+
+  // One timeout per tick, driven by state — so React's cleanup cancels it on
+  // close, unmount, or a cancel click without any manual interval bookkeeping.
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      capture();
+      return;
+    }
+    const id = window.setTimeout(() => {
+      setCountdown((n) => (n === null ? null : n - 1));
+    }, 1000);
+    return () => window.clearTimeout(id);
+  }, [countdown, capture]);
+
+  function onShutter() {
+    if (!ready || error) return;
+    if (countdown !== null) {
+      setCountdown(null); // second press cancels a running timer
+      return;
+    }
+    if (delaySec <= 0) {
+      capture();
+      return;
+    }
+    setCountdown(delaySec);
   }
 
   if (!open) return null;
+
+  const counting = countdown !== null;
 
   return (
     <div
@@ -169,23 +238,83 @@ export function WebcamCaptureModal({
           ) : (
             <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
           )}
+
+          {/* Countdown overlay. aria-live so it's announced, not just seen. */}
+          <AnimatePresence>
+            {counting && (
+              <motion.div
+                key="countdown"
+                initial={reduce ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={reduce ? undefined : { opacity: 0 }}
+                className="absolute inset-0 flex items-center justify-center bg-ink/30 pointer-events-none"
+              >
+                <motion.span
+                  key={countdown}
+                  initial={reduce ? false : { scale: 0.6, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={springSnappy}
+                  className="font-serif text-white text-[7rem] leading-none tabular-nums drop-shadow-lg"
+                >
+                  {countdown}
+                </motion.span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <span className="sr-only" aria-live="assertive">
+            {counting ? `Capturing in ${countdown}` : ""}
+          </span>
         </div>
-        <div className="p-4 flex flex-wrap gap-3 justify-end border-t border-ink/10 bg-paper-warm">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-ink/15 bg-white px-4 py-2 text-sm hover:bg-paper transition"
+
+        <div className="p-4 flex flex-wrap items-center gap-3 border-t border-ink/10 bg-paper-warm">
+          {/* Self-timer segmented control */}
+          <div
+            className="inline-flex items-center gap-1 rounded-full border border-ink/15 bg-white p-1"
+            role="group"
+            aria-label="Self-timer"
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={capture}
-            disabled={!ready || !!error}
-            className="rounded-full bg-ink text-paper px-4 py-2 text-sm hover:bg-ink-soft transition disabled:opacity-50"
-          >
-            Capture
-          </button>
+            <Clock size={14} className="ml-2 mr-0.5 text-ink-muted shrink-0" />
+            {DELAY_OPTIONS.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => chooseDelay(opt)}
+                aria-pressed={delaySec === opt}
+                className={`rounded-full px-2.5 py-1 text-xs tracking-wide transition ${
+                  delaySec === opt
+                    ? "bg-ink text-paper"
+                    : "text-ink-muted hover:text-ink hover:bg-paper-warm"
+                }`}
+              >
+                {opt === 0 ? "Off" : `${opt}s`}
+              </button>
+            ))}
+          </div>
+
+          <div className="ml-auto flex flex-wrap gap-3 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-ink/15 bg-white px-4 py-2 text-sm hover:bg-paper transition"
+            >
+              Cancel
+            </button>
+            <motion.button
+              type="button"
+              onClick={onShutter}
+              disabled={!ready || !!error}
+              whileHover={reduce ? undefined : { scale: 1.04 }}
+              whileTap={reduce ? undefined : { scale: 0.96 }}
+              transition={springSnappy}
+              className="rounded-full bg-ink text-paper px-4 py-2 text-sm hover:bg-ink-soft disabled:opacity-50 tabular-nums"
+            >
+              {counting
+                ? `Stop (${countdown})`
+                : delaySec > 0
+                  ? `Capture in ${delaySec}s`
+                  : "Capture"}
+            </motion.button>
+          </div>
         </div>
       </div>
     </div>

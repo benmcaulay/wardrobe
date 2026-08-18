@@ -9,16 +9,21 @@
  * from how often the user gets dressed, which was the binding constraint on the
  * whole personalization layer.
  *
- * Three shapes over the same fit:
+ * Four shapes over the same fit:
  *
- *   pick  — N outfits, tap the best. `chosen ≻ every other outfit shown`, the
- *           richest input Bradley-Terry takes: one tap, N−1 comparisons.
- *   rate  — N outfits, like or dislike each independently. Less information per
- *           outfit than a pick, but nobody is forced to crown a winner among
- *           things they all dislike — which is where pick quietly lies.
- *   swipe — one at a time, swipe or tap. Least information per answer and by far
- *           the fastest; some people will do fifty of these and none of the
- *           others. All three land in the same place.
+ *   pick   — N outfits, tap the best. `chosen ≻ every other outfit shown`, the
+ *            richest input Bradley-Terry takes: one tap, N−1 comparisons.
+ *   rate   — N outfits, like or dislike each independently. Less information per
+ *            outfit than a pick, but nobody is forced to crown a winner among
+ *            things they all dislike — which is where pick quietly lies.
+ *   swipe  — one at a time, swipe or tap. Least information per answer and by far
+ *            the fastest; some people will do fifty of these and none of the
+ *            others.
+ *   pieces — one *garment* at a time. The others all ask about outfits, so item
+ *            taste has to be inferred from set-level choices where a three-piece
+ *            pick spreads its weight across three garments. This asks the affinity
+ *            question directly, which is the one thing §1 wants and nothing was
+ *            collecting.
  *
  * Focus (pin pieces, restrict categories or colours) narrows what the round is
  * about. See lib/outfit/training-focus.ts for why those are hard exclusions.
@@ -43,14 +48,18 @@ import {
   TRAINING_MODE_HINTS,
   TRAINING_MODE_LABELS,
   focusIsEmpty,
+  isPieceMode,
   type TrainingFocus,
   type TrainingMode,
 } from "@/lib/outfit/training-focus";
 import {
+  getPieceRound,
   getTrainingRound,
+  recordPieceRating,
   recordTrainingPick,
   recordTrainingRate,
   type TrainingOutfit,
+  type TrainingPiece,
 } from "@/lib/actions/training";
 import type { RandomOutfitItem } from "./random-outfit-builder";
 
@@ -79,6 +88,12 @@ export function StylistTrainer({
   const [exhausted, setExhausted] = useState(false);
   const [busy, startTransition] = useTransition();
 
+  // Piece rounds keep their own state: they ask about garments, not outfits, so
+  // nothing about a round of three outfits carries over.
+  const [pieces, setPieces] = useState<TrainingPiece[]>([]);
+  const [pieceVerdicts, setPieceVerdicts] = useState<Record<string, boolean>>({});
+  const [pieceProgress, setPieceProgress] = useState({ rated: 0, total: 0 });
+
   const focus: TrainingFocus = useMemo(
     () => ({ pinnedItemIds, categories, colorNames }),
     [pinnedItemIds, categories, colorNames],
@@ -87,6 +102,16 @@ export function StylistTrainer({
   const load = useCallback(
     (nextMode: TrainingMode, nextSize: number, nextFocus: TrainingFocus) => {
       startTransition(async () => {
+        // A piece round needs no outfit built, so the focus filters — which exist
+        // to shape an outfit — don't apply to it.
+        if (isPieceMode(nextMode)) {
+          const round = await getPieceRound(nextSize);
+          setPieces(round.pieces);
+          setPieceProgress({ rated: round.rated, total: round.total });
+          setPieceVerdicts({});
+          setExhausted(round.pieces.length === 0);
+          return;
+        }
         const round = await getTrainingRound({
           mode: nextMode,
           sampleSize: nextSize,
@@ -117,12 +142,17 @@ export function StylistTrainer({
   }
 
   function onPick(chosen: TrainingOutfit) {
-    const rejected = outfits
-      .filter((o) => o.key !== chosen.key)
-      .flatMap((o) => o.items.map((i) => i.id));
-    if (rejected.length === 0) return;
+    // Send the whole round, in display order, plus which one was tapped. One tap
+    // on n outfits is n−1 preferences; sending only the winner and a flattened
+    // remainder threw all but one of them away before it reached the database.
+    const arms = outfits.map((o) => o.items.map((i) => i.id));
+    const chosenArm = outfits.findIndex((o) => o.key === chosen.key);
+    if (arms.length < 2 || chosenArm < 0) return;
     startTransition(async () => {
-      const result = await recordTrainingPick(chosen.items.map((i) => i.id), rejected);
+      // The chosen arm's propensity goes back with the answer: it exists only
+      // while the round is being built, and off-policy evaluation of any future
+      // ranker depends on having it (docs/OUTFIT_INTELLIGENCE.md §8).
+      const result = await recordTrainingPick(arms, chosenArm, chosen.propensity);
       if (result.ok) {
         setAnswered(result.answered);
         maybeRefresh(result.answered);
@@ -134,7 +164,11 @@ export function StylistTrainer({
   /** Rate one outfit of a set without ending the round. */
   function onRateOne(outfit: TrainingOutfit, liked: boolean) {
     startTransition(async () => {
-      const result = await recordTrainingRate(outfit.items.map((i) => i.id), liked);
+      const result = await recordTrainingRate(
+        outfit.items.map((i) => i.id),
+        liked,
+        outfit.propensity,
+      );
       if (result.ok) {
         setAnswered(result.answered);
         maybeRefresh(result.answered);
@@ -148,7 +182,11 @@ export function StylistTrainer({
     const outfit = outfits[0];
     if (!outfit) return;
     startTransition(async () => {
-      const result = await recordTrainingRate(outfit.items.map((i) => i.id), liked);
+      const result = await recordTrainingRate(
+        outfit.items.map((i) => i.id),
+        liked,
+        outfit.propensity,
+      );
       if (result.ok) {
         setAnswered(result.answered);
         maybeRefresh(result.answered);
@@ -157,7 +195,21 @@ export function StylistTrainer({
     });
   }
 
+  /** One garment, liked or passed. */
+  function onRatePiece(piece: TrainingPiece, liked: boolean) {
+    startTransition(async () => {
+      const result = await recordPieceRating(piece.id, liked);
+      if (result.ok) {
+        setAnswered(result.answered);
+        maybeRefresh(result.answered);
+        setPieceProgress((prev) => ({ ...prev, rated: prev.rated + 1 }));
+      }
+      setPieceVerdicts((prev) => ({ ...prev, [piece.id]: liked }));
+    });
+  }
+
   const allRated = outfits.length > 0 && outfits.every((o) => o.key in rated);
+  const allPiecesRated = pieces.length > 0 && pieces.every((p) => p.id in pieceVerdicts);
 
   const categoryOptions = useMemo(() => {
     const labels = new Map<string, string>();
@@ -212,22 +264,40 @@ export function StylistTrainer({
         {mode !== "swipe" ? (
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <label htmlFor="sample-size" className="text-[11px] uppercase tracking-wide text-ink-muted">
-              Outfits per round
+              {isPieceMode(mode) ? "Pieces per round" : "Outfits per round"}
             </label>
             <input
               id="sample-size"
               type="range"
-              min={MIN_SAMPLE_SIZE}
+              min={isPieceMode(mode) ? 1 : MIN_SAMPLE_SIZE}
               max={MAX_SAMPLE_SIZE}
               value={sampleSize}
               onChange={(e) => setSampleSize(Number(e.target.value))}
               className="h-1.5 w-40 accent-ink"
             />
             <span className="text-sm tabular-nums">{sampleSize}</span>
+            {isPieceMode(mode) && pieceProgress.total > 0 ? (
+              <span className="text-xs text-ink-muted">
+                {pieceProgress.rated} of {pieceProgress.total} pieces rated
+              </span>
+            ) : null}
           </div>
         ) : null}
 
-        {exhausted ? (
+        {exhausted && isPieceMode(mode) ? (
+          <p className="mt-6 rounded-xl bg-paper-warm px-3 py-2 text-xs text-ink-muted">
+            Nothing to rate — the closet is empty, or everything in it is listed for sale.
+          </p>
+        ) : isPieceMode(mode) ? (
+          <PieceRound
+            pieces={pieces}
+            verdicts={pieceVerdicts}
+            busy={busy}
+            allRated={allPiecesRated}
+            onRate={onRatePiece}
+            onNext={() => load(mode, sampleSize, focus)}
+          />
+        ) : exhausted ? (
           <p className="mt-6 rounded-xl bg-paper-warm px-3 py-2 text-xs text-ink-muted">
             {focusIsEmpty(focus)
               ? "Not enough pieces to build a comparison yet — add a top, a bottom and some shoes."
@@ -726,7 +796,7 @@ function FilterChips({
   return (
     <div className="mt-4">
       <h4 className="text-[11px] uppercase tracking-wide text-ink-muted">{title}</h4>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
         {shown.map((name) => {
           const on = selected.includes(name);
           return (
@@ -735,7 +805,7 @@ function FilterChips({
               type="button"
               onClick={() => onToggle(name)}
               aria-pressed={on}
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+              className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] transition ${
                 on
                   ? "border-ink bg-ink text-paper"
                   : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
@@ -756,5 +826,92 @@ function FilterChips({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * One garment at a time, liked or passed.
+ *
+ * Deliberately not the outfit strip: there is no outfit here, and showing a lone
+ * garment inside an outfit frame would imply the judgement was about a look. The
+ * name is shown because a ghost render of a black tee is hard to tell from
+ * another black tee, and the answer should be about the piece the user thinks
+ * they are rating.
+ */
+function PieceRound({
+  pieces,
+  verdicts,
+  busy,
+  allRated,
+  onRate,
+  onNext,
+}: {
+  pieces: TrainingPiece[];
+  verdicts: Record<string, boolean>;
+  busy: boolean;
+  allRated: boolean;
+  onRate: (piece: TrainingPiece, liked: boolean) => void;
+  onNext: () => void;
+}) {
+  if (pieces.length === 0) return <Loading />;
+  return (
+    <>
+      <ul className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {pieces.map((piece) => {
+          const done = piece.id in verdicts;
+          return (
+            <li
+              key={piece.id}
+              className={`rounded-xl border border-ink/10 p-2 transition ${done ? "opacity-60" : ""}`}
+            >
+              <div className="relative aspect-[3/4] overflow-hidden rounded-lg bg-paper-warm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imageUrl(piece.imagePath)}
+                  alt={piece.name}
+                  className="h-full w-full object-contain"
+                  loading="lazy"
+                />
+              </div>
+              <p className="mt-1.5 truncate text-[11px] text-ink" title={piece.name}>
+                {piece.name}
+              </p>
+              {done ? (
+                <p className="mt-1 text-center text-[11px] text-ink-muted">
+                  {verdicts[piece.id] ? "Liked" : "Not for me"}
+                </p>
+              ) : (
+                <div className="mt-1.5 flex gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onRate(piece, false)}
+                    className="flex-1 rounded-full border border-ink/15 bg-white px-2 py-1 text-[11px] text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
+                  >
+                    Pass
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onRate(piece, true)}
+                    className="flex-1 rounded-full border border-ink bg-ink px-2 py-1 text-[11px] text-paper transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    Like
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onNext}
+        className="mt-4 rounded-full border border-ink/15 bg-white px-4 py-1.5 text-xs text-ink transition hover:bg-paper-warm disabled:opacity-50"
+      >
+        {allRated ? "Next pieces →" : "Skip the rest →"}
+      </button>
+    </>
   );
 }

@@ -87,6 +87,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | `pnpm test:s3`     | S3/R2 storage-driver integration check         |
 | `pnpm test:jobs`   | Job-queue integration check (needs DB)         |
 | `pnpm test:stripe` | Credit-purchase fulfillment check (needs DB)   |
+| `pnpm eval:ranker` | Offline outfit-ranker evaluation (needs DB)    |
 | `pnpm db:seed`     | Re-run the seed script (idempotent)            |
 | `pnpm db:reset`    | Drop and re-create the database, then re-seed  |
 
@@ -142,7 +143,7 @@ signature. Swapping in a real API only edits one file.
 
 | Service file                           | Purpose                                       | Suggested providers                                                  | Env vars                                                     |
 | -------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `lib/services/ghostMannequin.ts` ✅     | Composite a garment as a ghost mannequin      | fal.ai (Gemini 2.5 Flash Image / Flux Kontext / SeedDream)           | `USE_REAL_GHOST_MANNEQUIN`, `FAL_KEY`, `FAL_GHOST_MODEL`     |
+| `lib/services/ghostMannequin.ts` ✅     | Composite a garment as a ghost mannequin      | Gemini Interactions API *(default)* or fal.ai (SeedDream / Flux Kontext) | `USE_REAL_GHOST_MANNEQUIN`, `GHOST_PROVIDER`, `GEMINI_API_KEY`, `FAL_KEY`, `FAL_GHOST_MODEL` |
 | `lib/client/background-removal.ts` ✅   | Transparent-background cutouts (live, client) | `@imgly/background-removal` (already wired)                          | none — runs free in-browser via WASM                         |
 | `lib/services/vision.ts`               | Garment category / color / style tagging      | Anthropic Claude Vision, OpenAI Vision, Google Vision AI             | `USE_REAL_VISION`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`     |
 | `lib/services/reverseImageSearch.ts`   | Find matching products online                 | SerpAPI (Google Lens), Bing Visual Search, TinEye                    | `USE_REAL_REVERSE_IMAGE_SEARCH`, `SERPAPI_KEY`               |

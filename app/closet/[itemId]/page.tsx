@@ -9,6 +9,7 @@ import { getStyleTagsListFromPrefs } from "@/lib/preferences";
 import { getOwnersFromPrefs, getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
 import type { ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
+import { requireGhostCategory } from "@/lib/services/ghost-mannequin-shared";
 import { ImageCarousel } from "./image-carousel";
 
 type StoredGhostView = { label: string; imagePath: string; mirror: boolean; thumbZoom: number };
@@ -24,6 +25,10 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
     prisma.user.findUnique({ where: { id: user.id }, select: { credits: true, stylePrefs: true } }),
   ]);
   if (!item) notFound();
+
+  // Generation is refused server-side when the garment type can't be pinned
+  // down; pass the reason so the button explains itself instead of failing.
+  const categoryGate = requireGhostCategory(item);
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
@@ -96,6 +101,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
             primaryGhostPath={item.ghostImagePath}
             extraImagePaths={extraPaths}
             credits={dbUser?.credits ?? 0}
+            categoryBlocked={categoryGate.ok ? null : categoryGate.error}
           />
           <dl className="grid grid-cols-2 gap-4 text-xs">
             <div>

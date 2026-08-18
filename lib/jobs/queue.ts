@@ -51,6 +51,8 @@ export type VirtualTryOnJobResult = {
 export type GhostViewJobResult = {
   ghostImagePath: string;
   creditsRemaining: number;
+  /** 0 when the render was served from cache. */
+  creditsUsed?: number;
   viewLabel: string;
 };
 

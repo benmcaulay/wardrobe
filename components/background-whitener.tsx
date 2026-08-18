@@ -12,17 +12,41 @@ type Props = {
 
 const MAX_UNDO = 12;
 
+type Tool = "bucket" | "box" | "lasso";
+type Point = { x: number; y: number };
+
+const TOOLS: { id: Tool; label: string }[] = [
+  { id: "bucket", label: "Paint bucket" },
+  { id: "box", label: "Box select" },
+  { id: "lasso", label: "Free select" },
+];
+
+const TOOL_HINT: Record<Tool, string> = {
+  bucket:
+    "Click a background color to paint it pure white — like the paint-bucket in MS Paint. Click again to catch any leftover patches. Raise tolerance if an off-white area doesn’t fully fill; lower it if it bleeds into the garment.",
+  box: "Drag a rectangle. Everything inside it becomes pure white, regardless of color — good for clearing a corner or a stray prop.",
+  lasso:
+    "Draw a loop freehand around an area. Everything inside becomes pure white, regardless of color. The loop closes itself when you release.",
+};
+
 /**
  * MS-Paint-style paint bucket: click a color and everything matching (within a
  * tolerance) becomes pure white. Contiguous by default (like the bucket tool);
  * toggle off to replace that color across the whole image. Useful for snapping
  * a slightly-off white product background to true #ffffff.
+ *
+ * Box / free select paint a region white outright (color-independent), for
+ * clutter the bucket can't isolate. Every tool pushes one undo snapshot.
  */
 export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const initialRef = useRef<ImageData | null>(null);
   const undoStack = useRef<ImageData[]>([]);
+  /** In-progress selection, in image pixel coords. */
+  const dragRef = useRef<{ tool: "box" | "lasso"; points: Point[] } | null>(null);
 
+  const [tool, setTool] = useState<Tool>("bucket");
   const [tolerance, setTolerance] = useState(36);
   const [contiguous, setContiguous] = useState(true);
   const [ready, setReady] = useState(false);
@@ -43,6 +67,12 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
       if (!canvas) return;
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
+      // Overlay shares the bitmap size so selection coords need no rescaling.
+      const overlay = overlayRef.current;
+      if (overlay) {
+        overlay.width = img.naturalWidth;
+        overlay.height = img.naturalHeight;
+      }
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
       ctx.drawImage(img, 0, 0);
@@ -65,20 +95,154 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
     return canvasRef.current?.getContext("2d", { willReadFrequently: true }) ?? null;
   }
 
-  function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!ready || saving) return;
+  /** Pointer/mouse position in image pixel coords (unclamped). */
+  function toImagePoint(clientX: number, clientY: number): Point | null {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: (clientX - rect.left) * (canvas.width / rect.width),
+      y: (clientY - rect.top) * (canvas.height / rect.height),
+    };
+  }
+
+  /** Snapshot the canvas so the next edit can be undone. */
+  function pushUndo() {
     const canvas = canvasRef.current;
     const ctx = ctx2d();
     if (!canvas || !ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
-    const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
-    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
-
-    const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    undoStack.current.push(snapshot);
+    undoStack.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     if (undoStack.current.length > MAX_UNDO) undoStack.current.shift();
     setCanUndo(true);
+  }
+
+  function clearOverlay() {
+    const overlay = overlayRef.current;
+    const octx = overlay?.getContext("2d");
+    if (overlay && octx) octx.clearRect(0, 0, overlay.width, overlay.height);
+  }
+
+  /** Draw the in-progress marquee/loop as a dashed outline. */
+  function drawOverlay() {
+    const overlay = overlayRef.current;
+    const octx = overlay?.getContext("2d");
+    if (!overlay || !octx) return;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const lw = Math.max(1, Math.round(overlay.width / 320));
+    octx.beginPath();
+    if (drag.tool === "box") {
+      const [a, b] = drag.points;
+      if (!a || !b) return;
+      octx.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+    } else {
+      if (drag.points.length < 2) return;
+      octx.moveTo(drag.points[0]!.x, drag.points[0]!.y);
+      for (const p of drag.points.slice(1)) octx.lineTo(p.x, p.y);
+      octx.closePath();
+    }
+    // White underlay then dark dashes, so the outline reads on any background.
+    octx.setLineDash([]);
+    octx.lineWidth = lw * 3;
+    octx.strokeStyle = "rgba(255,255,255,0.9)";
+    octx.stroke();
+    octx.setLineDash([lw * 4, lw * 3]);
+    octx.lineWidth = lw;
+    octx.strokeStyle = "rgba(20,18,16,0.95)";
+    octx.stroke();
+  }
+
+  /** Paint the finished selection pure white. Returns false if it was too small. */
+  function commitSelection(drag: { tool: "box" | "lasso"; points: Point[] }): boolean {
+    const canvas = canvasRef.current;
+    const ctx = ctx2d();
+    if (!canvas || !ctx) return false;
+
+    ctx.save();
+    ctx.beginPath();
+    if (drag.tool === "box") {
+      const [a, b] = drag.points;
+      if (!a || !b) return false;
+      const w = Math.abs(b.x - a.x);
+      const h = Math.abs(b.y - a.y);
+      // Ignore stray clicks that register as a zero-area drag.
+      if (w < 2 || h < 2) return false;
+      ctx.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), w, h);
+    } else {
+      if (drag.points.length < 3) return false;
+      ctx.moveTo(drag.points[0]!.x, drag.points[0]!.y);
+      for (const p of drag.points.slice(1)) ctx.lineTo(p.x, p.y);
+      ctx.closePath();
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.restore();
+    return true;
+  }
+
+  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!ready || saving || tool === "bucket") return;
+    const p = toImagePoint(e.clientX, e.clientY);
+    if (!p) return;
+    // Capture keeps the drag alive past the canvas edge; not fatal if refused.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    dragRef.current = { tool, points: tool === "box" ? [p, p] : [p] };
+    drawOverlay();
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const p = toImagePoint(e.clientX, e.clientY);
+    if (!p) return;
+    if (drag.tool === "box") drag.points[1] = p;
+    else drag.points.push(p);
+    drawOverlay();
+  }
+
+  function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    clearOverlay();
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+    if (!drag || !ready || saving) return;
+    // Snapshot only once we know the selection is real, so Undo never no-ops.
+    const canvas = canvasRef.current;
+    const ctx = ctx2d();
+    if (!canvas || !ctx) return;
+    const before = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    if (!commitSelection(drag)) return;
+    undoStack.current.push(before);
+    if (undoStack.current.length > MAX_UNDO) undoStack.current.shift();
+    setCanUndo(true);
+    setDirty(true);
+  }
+
+  function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!ready || saving || tool !== "bucket") return;
+    const canvas = canvasRef.current;
+    const ctx = ctx2d();
+    if (!canvas || !ctx) return;
+    const p = toImagePoint(e.clientX, e.clientY);
+    if (!p) return;
+    const x = Math.floor(p.x);
+    const y = Math.floor(p.y);
+    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
+
+    pushUndo();
 
     const working = ctx.getImageData(0, 0, canvas.width, canvas.height);
     fillToWhite(working, canvas.width, canvas.height, x, y, tolerance, contiguous);
@@ -90,6 +254,8 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
     const ctx = ctx2d();
     const prev = undoStack.current.pop();
     if (!ctx || !prev) return;
+    dragRef.current = null;
+    clearOverlay();
     ctx.putImageData(prev, 0, 0);
     setCanUndo(undoStack.current.length > 0);
     setDirty(undoStack.current.length > 0);
@@ -98,11 +264,27 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
   function reset() {
     const ctx = ctx2d();
     if (!ctx || !initialRef.current) return;
+    dragRef.current = null;
+    clearOverlay();
     ctx.putImageData(initialRef.current, 0, 0);
     undoStack.current = [];
     setCanUndo(false);
     setDirty(false);
   }
+
+  // Cmd/Ctrl+Z — expected in any edit surface, and the tools make it load-bearing.
+  useEffect(() => {
+    if (!ready || saving) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- undo reads refs only
+  }, [ready, saving]);
 
   async function save() {
     const canvas = canvasRef.current;
@@ -128,48 +310,80 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
         {loadError ? (
           <p className="p-8 text-sm text-ink-muted">Couldn’t load the image.</p>
         ) : (
-          <canvas
-            ref={canvasRef}
-            onClick={handleClick}
-            className="max-w-full max-h-[min(60vh,640px)] object-contain cursor-crosshair"
-            style={{ imageRendering: "auto" }}
-          />
+          <div className="relative">
+            <canvas
+              ref={canvasRef}
+              className="block max-w-full max-h-[min(60vh,640px)] object-contain"
+              style={{ imageRendering: "auto" }}
+            />
+            <canvas
+              ref={overlayRef}
+              onClick={handleClick}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              className="absolute inset-0 w-full h-full cursor-crosshair touch-none"
+            />
+          </div>
         )}
       </div>
 
-      <p className="text-xs text-ink-muted">
-        Click a background color to paint it pure white — like the paint-bucket in MS Paint. Click
-        again to catch any leftover patches. Raise tolerance if an off-white area doesn’t fully
-        fill; lower it if it bleeds into the garment.
-      </p>
+      <div className="flex flex-wrap gap-2">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => {
+              dragRef.current = null;
+              clearOverlay();
+              setTool(t.id);
+            }}
+            aria-pressed={tool === t.id}
+            className={`rounded-full px-3 py-1 text-xs border transition ${
+              tool === t.id
+                ? "border-ink bg-ink text-paper"
+                : "border-ink/15 hover:border-ink/30 hover:bg-paper-warm"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      <label className="block text-xs">
-        <span className="text-ink-muted">Tolerance ({tolerance})</span>
-        <input
-          type="range"
-          min={0}
-          max={120}
-          step={1}
-          value={tolerance}
-          onChange={(e) => setTolerance(Number(e.target.value))}
-          className="mt-1 w-full accent-ink"
-        />
-      </label>
+      <p className="text-xs text-ink-muted">{TOOL_HINT[tool]}</p>
 
-      <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={contiguous}
-          onChange={(e) => setContiguous(e.target.checked)}
-          className="accent-ink"
-        />
-        <span>
-          Fill connected area only
-          <span className="block text-[11px] text-ink-muted">
-            Off = replace that color everywhere in the photo.
-          </span>
-        </span>
-      </label>
+      {tool === "bucket" && (
+        <>
+          <label className="block text-xs">
+            <span className="text-ink-muted">Tolerance ({tolerance})</span>
+            <input
+              type="range"
+              min={0}
+              max={120}
+              step={1}
+              value={tolerance}
+              onChange={(e) => setTolerance(Number(e.target.value))}
+              className="mt-1 w-full accent-ink"
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={contiguous}
+              onChange={(e) => setContiguous(e.target.checked)}
+              className="accent-ink"
+            />
+            <span>
+              Fill connected area only
+              <span className="block text-[11px] text-ink-muted">
+                Off = replace that color everywhere in the photo.
+              </span>
+            </span>
+          </label>
+        </>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <button
@@ -188,6 +402,7 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
         >
           Undo
         </button>
+        <span className="text-[11px] text-ink-muted">⌘Z</span>
         <button
           type="button"
           onClick={reset}

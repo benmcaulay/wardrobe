@@ -37,7 +37,9 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
     <div className="space-y-8">
       <section>
         <h3 className="text-xs uppercase tracking-wide text-ink-muted mb-3">Styles</h3>
-        <div className="flex flex-wrap gap-2">
+        {/* One row, scrolled — these labels are words, so shrinking them to fit
+            would truncate. Matches the thumbnail-strip idiom elsewhere. */}
+        <div className="flex gap-2 overflow-x-auto pb-1">
           {STYLE_OPTIONS.map((s) => {
             const active = styles.includes(s);
             return (
@@ -46,7 +48,7 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
                 type="button"
                 onClick={() => toggleStyle(s)}
                 disabled={disabled}
-                className={`rounded-full border px-3 py-1 text-xs capitalize transition ${
+                className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs capitalize transition ${
                   active
                     ? "bg-ink text-paper border-ink"
                     : "bg-white border-ink/10 text-ink hover:border-ink/30"

@@ -1,11 +1,13 @@
 import type { User } from "@prisma/client";
 import { checkAiQuota } from "@/lib/ai-guardrails";
 import { prisma } from "@/lib/db";
+import { loadCategoryShapes } from "@/lib/server/category-shapes";
 import { encode } from "@/lib/json";
 import { log } from "@/lib/log";
 import {
   createGhostMannequin,
-  mapCategoryToGhost,
+  mapItemToGhost,
+  requireGhostCategory,
   type GhostMannequinCategory,
   type GhostMannequinResult,
 } from "@/lib/services/ghostMannequin";
@@ -57,7 +59,7 @@ export type PreviewGhostResponse =
   | { ok: false; error: string };
 
 export type GenerateGhostViewResponse =
-  | { ok: true; ghostImagePath: string; creditsRemaining: number }
+  | { ok: true; ghostImagePath: string; creditsRemaining: number; creditsUsed: number }
   | { ok: false; error: string };
 
 export async function runPreviewGhostMannequin(
@@ -71,6 +73,14 @@ export async function runPreviewGhostMannequin(
     if (!extra.startsWith(`${user.id}/`)) {
       return { ok: false, error: "Extra image does not belong to this user" };
     }
+  }
+  if (input.category === "full") {
+    return {
+      ok: false,
+      error:
+        "Set a category before generating — without one the render has to guess the garment type, " +
+        "which is what produces cropped or misshapen results.",
+    };
   }
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
@@ -109,7 +119,7 @@ export async function runPreviewGhostMannequin(
   }
 
   let creditsRemaining = dbUser?.credits ?? 0;
-  if (REAL_GHOST) {
+  if (REAL_GHOST && !result.cached) {
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: { credits: { decrement: result.credits } },
@@ -140,6 +150,11 @@ export async function runGenerateGhostViewFor(
     prisma.user.findUnique({ where: { id: user.id }, select: { credits: true } }),
   ]);
   if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+  // Before credits or quota: an unclassifiable item can only get the generic
+  // "guess the type" prompt, so refuse rather than spend on a likely-bad render.
+  const categoryShapes = await loadCategoryShapes(user.id);
+  const categoryCheck = requireGhostCategory({ ...item, categoryShapes });
+  if (!categoryCheck.ok) return { ok: false, error: categoryCheck.error };
   if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
@@ -190,7 +205,7 @@ export async function runGenerateGhostViewFor(
       userId: user.id,
       garmentImagePath: stack.garmentImagePath,
       extraImagePaths: stack.extraImagePaths,
-      category: mapCategoryToGhost(item.category),
+      category: categoryCheck.category,
       instructions,
       compositionHint: compositionHint ?? "default",
     });
@@ -208,7 +223,11 @@ export async function runGenerateGhostViewFor(
 
   const viewLabel = label.trim() || (existingViews.length === 0 ? "Ghost" : `View ${existingViews.length + 1}`);
   const newView = { label: viewLabel, imagePath: result.resultImagePath, mirror: false, thumbZoom: 1 };
-  const updatedViews = [...existingViews, newView];
+  // A cache hit returns a path an existing view may already own. Appending a
+  // second row for the same file is what made deleting either view break the
+  // other, so keep the existing row and don't duplicate it.
+  const alreadyPresent = existingViews.some((v) => v.imagePath === result.resultImagePath);
+  const updatedViews = alreadyPresent ? existingViews : [...existingViews, newView];
 
   const remaining = await prisma.$transaction(async (tx) => {
     await tx.wardrobeItem.update({
@@ -218,15 +237,19 @@ export async function runGenerateGhostViewFor(
         ghostImagePath: item.ghostImagePath ?? result.resultImagePath,
       },
     });
-    await tx.tryOnGeneration.create({
-      data: {
-        userId: user.id,
-        itemId,
-        resultImagePath: result.resultImagePath,
-        creditsUsed: result.credits,
-      },
-    });
-    if (REAL_GHOST) {
+    // A cache hit did not generate anything: no ledger row, no decrement, and
+    // it therefore doesn't consume the AI quota either.
+    if (!result.cached) {
+      await tx.tryOnGeneration.create({
+        data: {
+          userId: user.id,
+          itemId,
+          resultImagePath: result.resultImagePath,
+          creditsUsed: result.credits,
+        },
+      });
+    }
+    if (REAL_GHOST && !result.cached) {
       const updated = await tx.user.update({
         where: { id: user.id },
         data: { credits: { decrement: result.credits } },
@@ -237,5 +260,10 @@ export async function runGenerateGhostViewFor(
     return dbUser?.credits ?? 0;
   });
 
-  return { ok: true, ghostImagePath: result.resultImagePath, creditsRemaining: remaining };
+  return {
+    ok: true,
+    ghostImagePath: result.resultImagePath,
+    creditsRemaining: remaining,
+    creditsUsed: result.credits,
+  };
 }

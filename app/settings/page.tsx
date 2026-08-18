@@ -17,6 +17,7 @@ export default async function SettingsPage() {
   });
   const initialPrefs = parseStylePrefs(dbUser?.stylePrefs);
   const categoryList = getCategoriesListFromPrefs(initialPrefs);
+  const categoryShapes = initialPrefs.categoryShapes ?? {};
   const styleTagsList = getStyleTagsListFromPrefs(initialPrefs);
   const ownersList = getOwnersFromPrefs(initialPrefs);
   const colorList = getColorsListFromPrefs(initialPrefs);
@@ -52,6 +53,7 @@ export default async function SettingsPage() {
         <SettingsClient
           initialPrefs={initialPrefs}
           categoryList={categoryList}
+        categoryShapes={categoryShapes}
           styleTagsList={styleTagsList}
           ownersList={ownersList}
           colorList={colorList}

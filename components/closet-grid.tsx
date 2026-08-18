@@ -14,7 +14,6 @@ import {
 } from "@/lib/closet-group-order";
 import { sortWardrobeItems, type ClosetSortKey, type SortOrders } from "@/lib/closet-sort";
 import { thumbnailUrl } from "@/lib/image-paths";
-import { springSoft, staggerFast, staggerItem } from "@/lib/ui-motion";
 
 export type ClosetGridItem = {
   id: string;
@@ -142,12 +141,9 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
   }
 
   return (
-    <motion.ul
-      className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4"
-      variants={staggerFast}
-      initial={reduce ? false : "hidden"}
-      animate="show"
-    >
+    // No entrance animation: the closet is the landing surface, and a rolling
+    // per-tile reveal delays the last tile behind ~100 staggered children.
+    <motion.ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4">
       {items.map((item) => {
         const isDragging = draggedId === item.id;
         const isDropTarget = dropTargetId === item.id && draggedId !== item.id;
@@ -160,8 +156,6 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
           <motion.li
             key={item.id}
             layout={!reduce}
-            variants={staggerItem}
-            whileHover={reduce || isDragging ? undefined : { y: -3, transition: springSoft }}
             className={`rounded-2xl transition ${
               isDragging ? "opacity-45 scale-[0.98]" : ""
             } ${isDropTarget ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""} ${
