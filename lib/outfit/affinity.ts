@@ -51,6 +51,27 @@ export type AffinityInput = {
 };
 
 /**
+ * Evidence backing an item's learned utility, in comparisons.
+ *
+ * The identity model has exactly one source: how many comparisons this item
+ * appeared in. The contextual model has two, and they cannot be added naively —
+ * an item nobody has compared still has a strength through the shared
+ * coefficients, and treating that as zero evidence would give it λ = 0, which
+ * collapses its affinity to a flat 0.5.
+ *
+ * That flat 0.5 is worse than no opinion at all. `blend` in
+ * lib/outfit/compatibility.ts *drops* absent terms and renormalizes, so an item
+ * with no affinity is scored on colour and formality alone — correctly. An item
+ * with a fabricated neutral 0.5 instead dilutes those terms with a number that
+ * means nothing. Before this credit existed, turning on the contextual model
+ * would have handed a neutral affinity to all 183 items and made the ranker
+ * worse while looking like more coverage.
+ */
+export function evidenceFor(fit: BradleyTerryFit, itemId: string): number {
+  return (fit.evidence.get(itemId) ?? 0) + fit.featureCredit;
+}
+
+/**
  * Blend the two sources into one affinity per item.
  *
  * Only items with an opinion are returned. An absent entry means "no opinion",
@@ -66,7 +87,7 @@ export function buildAffinityMap(input: AffinityInput): Map<string, number> {
   for (const itemId of ids) {
     const prior = stylePrior?.get(itemId);
     const utility = fit?.theta.get(itemId);
-    const evidence = fit?.evidence.get(itemId) ?? 0;
+    const evidence = fit ? evidenceFor(fit, itemId) : 0;
     const lambda = utility == null ? 0 : lambdaFor(evidence);
 
     if (prior == null && utility == null) continue;

@@ -29,7 +29,8 @@ export type PreferenceKind =
   | "accept" // took a suggestion
   | "protect" // marked an item exempt from dormancy
   | "train_pick" // picked a favourite from a training round
-  | "train_rate"; // liked/passed a single outfit while training
+  | "train_rate" // liked/passed a single outfit while training
+  | "train_item"; // liked/passed a single *garment* while training
 
 /**
  * How much each model should learn from one observation.
@@ -98,6 +99,21 @@ export const PREFERENCE_SIGNAL_WEIGHT: Record<PreferenceKind, SignalWeight> = {
    */
   train_pick: { affinity: 0.55, compatibility: 0.6, polarity: 1 },
   train_rate: { affinity: 0.45, compatibility: 0.5, polarity: 1 },
+  /**
+   * "Do you like this piece?" — the only *directly stated* affinity signal in the
+   * table, and the one thing §1 asks for that nothing was collecting.
+   *
+   * Compatibility is zero, not small: one garment on its own says nothing
+   * whatever about what goes with what. That is the point of having it. Every
+   * other signal here is set-level, so the model has had to infer item taste from
+   * outfit choices, where a three-piece pick spreads its 0.55 across three items
+   * and no answer can say which piece earned it.
+   *
+   * Affinity above `train_pick` because there is no attribution to undo — the
+   * judgement names one garment — but below a wear, since it is still an opinion
+   * about a photo rather than a decision to walk outside dressed that way.
+   */
+  train_item: { affinity: 0.6, compatibility: 0, polarity: 1 },
 };
 
 /**
@@ -128,10 +144,99 @@ export const CONTRASTIVE_KINDS: readonly PreferenceKind[] = [
   "accept",
   "train_pick",
   "train_rate",
+  "train_item",
 ];
 
 export function isContrastive(kind: PreferenceKind): boolean {
   return CONTRASTIVE_KINDS.includes(kind);
+}
+
+/** One logged row, in the shape both the model fit and the evaluator read. */
+export type LoggedPreference = {
+  kind: PreferenceKind;
+  /** The chosen set. */
+  itemIds: readonly string[];
+  /** Pooled union of the passed-over sets. Only used when `arms` is absent. */
+  rejectedIds: readonly string[];
+  /** Every outfit shown, in display order. Null on rows predating per-arm logging. */
+  arms?: readonly (readonly string[])[] | null;
+  chosenArm?: number | null;
+};
+
+/** A `winners ≻ losers` observation, weighted by how much the signal teaches. */
+export type PreferenceComparison = {
+  winners: string[];
+  losers: string[];
+  weight: number;
+  /** True when this came from logged arms rather than the pooled fallback. */
+  perArm: boolean;
+};
+
+/**
+ * Read one logged row as the comparisons it actually contains.
+ *
+ * The single place that decides how a row becomes model input, because the
+ * production fit (lib/wear/affinity-server.ts) and the offline evaluator
+ * (lib/eval/ranker.ts) must not disagree about it — a difference there shows up
+ * as an unexplained gap between measured and live behaviour.
+ *
+ * With `arms`, a pick over n outfits yields the n−1 shape-matched comparisons the
+ * user's single tap actually expressed. Each carries the row's full signal
+ * weight: an eight-way choice genuinely is more informative than a three-way one,
+ * and all-pairs expansion of a ranked choice is the standard reading. The
+ * practical consequence is that `evidence` counts — and therefore the λ ramp —
+ * now grow faster per answer than they did under pooled logging.
+ *
+ * Without `arms`, it falls back to the one pooled comparison, which is all the
+ * older rows can support.
+ */
+export function comparisonsFrom(row: LoggedPreference): PreferenceComparison[] {
+  const signal = PREFERENCE_SIGNAL_WEIGHT[row.kind];
+  // A reroll names only what was turned down, so there is no winning set to
+  // point at; the rejected pieces are handled by the slate's exclusion instead.
+  // A protect is bookkeeping, not taste.
+  if (!signal || signal.affinity <= 0 || signal.polarity !== 1) return [];
+
+  const arms = row.arms;
+  const chosen = row.chosenArm;
+  if (arms && arms.length > 1 && chosen != null && chosen >= 0 && chosen < arms.length) {
+    const winners = [...arms[chosen]];
+    if (winners.length > 0) {
+      const out: PreferenceComparison[] = [];
+      for (let i = 0; i < arms.length; i += 1) {
+        if (i === chosen || arms[i].length === 0) continue;
+        out.push({ winners, losers: [...arms[i]], weight: signal.affinity, perArm: true });
+      }
+      if (out.length > 0) return out;
+    }
+  }
+
+  if (row.itemIds.length === 0 || row.rejectedIds.length === 0) return [];
+  return [
+    {
+      winners: [...row.itemIds],
+      losers: [...row.rejectedIds],
+      weight: signal.affinity,
+      perArm: false,
+    },
+  ];
+}
+
+/** Parse an `armsJson` column, tolerating anything that is not the shape we wrote. */
+export function decodeArms(raw: string | null | undefined): string[][] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out: string[][] = [];
+    for (const arm of parsed) {
+      if (!Array.isArray(arm)) return null;
+      out.push(arm.filter((id): id is string => typeof id === "string"));
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 const WEAR_SOURCES = new Set<string>(["explicit", "photo", "packing", "backfill"]);
@@ -144,6 +249,7 @@ const PREFERENCE_KINDS = new Set<string>([
   "protect",
   "train_pick",
   "train_rate",
+  "train_item",
 ]);
 
 export function isWearSource(value: string): value is WearSource {

@@ -17,15 +17,15 @@ datasource db {
 // switch.
 
 model User {
-  id                String            @id @default(cuid())
-  email             String            @unique
+  id                String             @id @default(cuid())
+  email             String             @unique
   name              String?
-  emailVerified     DateTime?         // NextAuth adapter field
-  image             String?           // NextAuth adapter field (avatar URL)
-  stylePrefs        String?           // JSON: { sizes?, favoriteColors?: string[], styles?: string[] }
-  credits           Int               @default(0) // ghost-mannequin generations
-  autoGenerateGhost Boolean           @default(false)
-  createdAt         DateTime          @default(now())
+  emailVerified     DateTime? // NextAuth adapter field
+  image             String? // NextAuth adapter field (avatar URL)
+  stylePrefs        String? // JSON: { sizes?, favoriteColors?: string[], styles?: string[] }
+  credits           Int                @default(0) // ghost-mannequin generations
+  autoGenerateGhost Boolean            @default(false)
+  createdAt         DateTime           @default(now())
   items             WardrobeItem[]
   tryOns            TryOnGeneration[]
   personPhotos      PersonPhoto[]
@@ -36,6 +36,7 @@ model User {
   listingPlacements ListingPlacement[]
   packingBags       PackingBag[]
   packingTrips      PackingTrip[]
+  packingGear       PackingGear[]
   accounts          Account[]
   sessions          Session[]
   generationJobs    GenerationJob[]
@@ -186,23 +187,23 @@ model WardrobeItem {
   brand             String?
   category          String
   subcategory       String?
-  colors            String            // JSON: { hex, name }[]
+  colors            String // JSON: { hex, name }[]
   priceCents        Int?
   currency          String            @default("USD")
   retailer          String?
   productUrl        String?
   material          String?
   pattern           String?
-  styleTags         String            // JSON: string[]
-  season            String            // JSON: string[]
+  styleTags         String // JSON: string[]
+  season            String // JSON: string[]
   owners            String            @default("[]") // JSON: string[] of owner ids (see stylePrefs.owners roster)
-  dHash             String?           // perceptual hash of the garment image (duplicate detection); computed lazily
+  dHash             String? // perceptual hash of the garment image (duplicate detection); computed lazily
   originalImagePath String
-  originalThumbZoom Float             @default(1)     // zoom applied when framing the original in square tiles
+  originalThumbZoom Float             @default(1) // zoom applied when framing the original in square tiles
   originalMirror    Boolean           @default(false)
   ghostImagePath    String?
-  ghostViews        String?           // JSON: { label: string; imagePath: string }[]
-  extraImagePaths   String?           // JSON: string[] — extra context shots
+  ghostViews        String? // JSON: { label: string; imagePath: string }[]
+  extraImagePaths   String? // JSON: string[] — extra context shots
   isWishlist        Boolean           @default(false)
   // Wishlist budgeting. `budgetId` is the pot this item draws from;
   // `wishlistPriority` is 0 = must have, 1 = want, 2 = someday (see
@@ -214,7 +215,7 @@ model WardrobeItem {
   wishlistPriority  Int               @default(1)
   purchasedAt       DateTime?
   purchasedCents    Int?
-  priceHistory      String?           // JSON: { cents: number; at: string }[] — oldest first
+  priceHistory      String? // JSON: { cents: number; at: string }[] — oldest first
   priceCheckedAt    DateTime?
   // Wear history. `timesWorn` and `lastWornAt` predate WearEvent and are now
   // denormalized mirrors of it — recomputed by lib/wear/rollup.ts, never
@@ -234,8 +235,14 @@ model WardrobeItem {
   // lib/packing/estimate.ts; populated = manual or (future) AI override.
   weightGrams       Int?
   volumeLiters      Float?
+  /// Whether this belongs in the day-to-day rotation. Null = work it out from
+  /// the name (lib/packing/occasion.ts); true/false is the user overriding that
+  /// guess. Swim trunks classify as an ordinary `bottom`, so without this the
+  /// day planner schedules them for a Wednesday in Seoul and counts them toward
+  /// the trip's coverage.
+  dailyWear         Boolean?
   notes             String?
-  sourceData        String?           // JSON: raw stub/API response for debugging
+  sourceData        String? // JSON: raw stub/API response for debugging
   createdAt         DateTime          @default(now())
   tryOns            TryOnGeneration[]
   saleListing       SaleListing?
@@ -283,7 +290,7 @@ model Outfit {
   userId        String
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   name          String
-  itemIds       String         // JSON: string[] of WardrobeItem ids
+  itemIds       String // JSON: string[] of WardrobeItem ids
   createdAt     DateTime       @default(now())
   virtualTryOns VirtualTryOn[]
 
@@ -300,7 +307,7 @@ model VirtualTryOn {
   personPhoto     PersonPhoto @relation(fields: [personPhotoId], references: [id], onDelete: Cascade)
   outfitId        String?
   outfit          Outfit?     @relation(fields: [outfitId], references: [id], onDelete: SetNull)
-  itemIds         String      // JSON: string[] of WardrobeItem ids
+  itemIds         String // JSON: string[] of WardrobeItem ids
   prompt          String?
   resultImagePath String
   creditsUsed     Int         @default(1)
@@ -316,22 +323,22 @@ model VirtualTryOn {
 // Depop/Poshmark/etc. manually.
 //   status: "skipped" (keep) | "for_sale" | "listed" | "sold"
 model SaleListing {
-  id           String       @id @default(cuid())
-  userId       String
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  itemId       String       @unique
-  item         WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  status       String       @default("for_sale")
-  askingCents  Int?
-  soldPriceCents Int?       // actual sale proceeds, recorded when marked sold
-  currency     String       @default("USD")
-  condition    String?      // "new_with_tags" | "like_new" | "good" | "fair"
-  title        String?
-  description  String?
-  marketplaces String       @default("[]") // JSON: string[] of marketplace ids
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  placements   ListingPlacement[]
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId         String             @unique
+  item           WardrobeItem       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  status         String             @default("for_sale")
+  askingCents    Int?
+  soldPriceCents Int? // actual sale proceeds, recorded when marked sold
+  currency       String             @default("USD")
+  condition      String? // "new_with_tags" | "like_new" | "good" | "fair"
+  title          String?
+  description    String?
+  marketplaces   String             @default("[]") // JSON: string[] of marketplace ids
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  placements     ListingPlacement[]
 
   @@index([userId])
   @@index([userId, status])
@@ -391,7 +398,7 @@ model OutfitLayout {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   frameHeight Int
-  pieces      String   // JSON: { id, itemId, x, y, scale, z }[]
+  pieces      String // JSON: { id, itemId, x, y, scale, z }[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -419,22 +426,76 @@ model PackingBag {
 // destination + dates and summarised into `climateData`. `assignments` holds
 // the current per-bag item layout the algorithm produced (and the user edited).
 model PackingTrip {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  destination String
-  startDate   DateTime
-  endDate     DateTime
-  climateData String?  // JSON: ClimateSummary from lib/services/weather.ts
-  bagIds      String   @default("[]") // JSON: string[] of PackingBag ids
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  /// What the user picked, or typed: "Seoul, South Korea". Display only.
+  destination     String
+  startDate       DateTime
+  endDate         DateTime
+  /// Resolved coordinates from the city picker (lib/services/geocode.ts).
+  ///
+  /// Storing these is what stops the weather lookup re-geocoding the
+  /// destination string on every refresh — a search that is ambiguous by
+  /// nature and can silently start resolving somewhere else. Null on trips
+  /// created before the picker, and on any destination typed free-hand; the
+  /// lookup falls back to searching the string, exactly as it always did.
+  latitude        Float?
+  longitude       Float?
+  /// ISO 3166-1 alpha-2, e.g. "KR". Highlights the country on the trip map.
+  countryCode     String?
+  /// IANA zone, e.g. "Asia/Seoul". Used to show the destination's local time.
+  timezone        String?
+  climateData     String? // JSON: ClimateSummary from lib/services/weather.ts
+  bagIds          String   @default("[]") // JSON: string[] of PackingBag ids
   /// JSON: TripRequirements from lib/packing/requirements.ts — what the trip is
   /// FOR (activities, laundry). Without it every trip to the same place in the
   /// same week packs identically; see that module's header.
-  requirements String?
-  assignments String   @default("{}") // JSON: { [bagId]: string[] of WardrobeItem ids }
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  requirements    String?
+  assignments     String   @default("{}") // JSON: { [bagId]: string[] of WardrobeItem ids }
+  /// JSON: { [bagId]: string[] of PackingGear ids }. Kept apart from
+  /// `assignments` rather than mixed in, because the packing algorithm reasons
+  /// about garments — it counts tops against days and scores warmth — and a
+  /// toothbrush answers none of those questions. Both maps feed the same
+  /// volume and weight meters; only this one is off-limits to the planner.
+  gearAssignments String   @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// A non-garment thing you put in a bag: charger, passport, contact lens
+// solution. Deliberately a per-user library rather than per-trip rows — the
+// same charger goes on every trip, and re-typing it each time is the reason
+// people keep packing lists in Notes instead of here. A trip references these
+// by id through `PackingTrip.gearAssignments`.
+//
+// Weight and volume are optional and nullable, NOT zero-defaulted: an unknown
+// weight must not quietly read as "weighs nothing" in a bag meter. See
+// lib/packing/gear.ts, which supplies a per-category fallback and marks the
+// number as an estimate wherever it's shown.
+model PackingGear {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// GearCategory from lib/packing/gear.ts. Drives the icon and the fallbacks.
+  category     String    @default("misc")
+  /// Icon name from components/icons.tsx ICON_REGISTRY, when the user has
+  /// picked one. Null means "use the category's icon".
+  icon         String?
+  quantity     Int       @default(1)
+  /// Per unit, not per line — the row's total is quantity × this.
+  weightGrams  Int?
+  volumeLiters Float?
+  notes        String?
+  /// Gear you take every time. Powers one-tap "add my essentials" on a trip.
+  essential    Boolean   @default(false)
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([userId])
 }
@@ -520,8 +581,28 @@ model PreferenceEvent {
   /// JSON: string[] — the items the choice was *about*.
   itemIds     String
   /// JSON: string[] — for contrastive kinds, what was passed over. Empty otherwise.
+  ///
+  /// A deduplicated *union* across the passed-over outfits, so which piece
+  /// belonged to which rival is not recoverable from it. Superseded by `armsJson`
+  /// and kept for the rows written before that existed.
   rejectedIds String  @default("[]")
   contextJson String?
+
+  /// JSON: string[][] — every outfit shown, in display order, one entry each.
+  ///
+  /// A tap on one of n outfits expresses n−1 pairwise preferences; the pooled
+  /// `rejectedIds` above could only express one, so at the eight-outfit setting
+  /// roughly six sevenths of what the user said was being discarded at write
+  /// time. It also made the loser side structurally lopsided — five items
+  /// against the winner's three once two arms shared a piece — which let a model
+  /// fit composition noise as if it were taste.
+  ///
+  /// Null on rows written before this landed. Those cannot be un-pooled, so
+  /// readers must handle both shapes; lib/wear/signals.ts owns that fallback.
+  armsJson  String?
+  /// Index into `armsJson` of the outfit that was chosen. Null for unary kinds
+  /// (a like/pass names no winner among alternatives) and for older rows.
+  chosenArm Int?
 
   policyId   String?
   propensity Float?
@@ -579,18 +660,18 @@ model StyleNote {
   ///              resolves against the whole wardrobe. `subjectIds` is empty and
   ///              validation runs against the *current* closet instead, which
   ///              means a rule naming a deleted garment drops out on its own.
-  scope      String @default("outfit")
+  scope      String  @default("outfit")
   /// JSON: string[] of WardrobeItem ids visible when it was written. Empty for
   /// closet-scoped notes.
   subjectIds String
   /// JSON: StyleRule[] from lib/outfit/style-rules.ts. Empty when the note
   /// didn't resolve to anything actionable — kept anyway, since the text is
   /// still a record of intent and may parse later.
-  rules      String @default("[]")
+  rules      String  @default("[]")
   /// Plain-language restatement shown back for confirmation.
   summary    String?
   /// "ai" | "keywords" — how the rules were derived.
-  source     String @default("keywords")
+  source     String  @default("keywords")
 
   /// Cleared to switch a note off without deleting what the user wrote.
   active    Boolean  @default(true)

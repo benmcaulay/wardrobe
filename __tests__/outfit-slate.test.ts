@@ -4,6 +4,7 @@ import {
   buildSlate,
   MIN_DISTINCT_ITEMS,
   slotsForBand,
+  usablePropensity,
   type SlateCandidate,
 } from "@/lib/outfit/slate";
 import { scoreOutfit } from "@/lib/outfit/compatibility";
@@ -172,5 +173,45 @@ describe("propensity", () => {
       checked += 1;
     }
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+describe("usablePropensity", () => {
+  /**
+   * The propensity round-trips through the browser, so a bad value can arrive.
+   * slate.ts is explicit that recording the wrong one is worse than recording
+   * none — a corrupt number biases every future off-policy estimate with
+   * nothing in the data to show it happened. So the gate refuses rather than
+   * coerces.
+   */
+  it("accepts a probability", () => {
+    expect(usablePropensity(0.25)).toBe(0.25);
+    expect(usablePropensity(1)).toBe(1);
+    expect(usablePropensity(1e-9)).toBe(1e-9);
+  });
+
+  it("refuses anything that is not one", () => {
+    // Zero would divide by zero in an importance weight.
+    expect(usablePropensity(0)).toBeNull();
+    expect(usablePropensity(-0.5)).toBeNull();
+    // Above 1 is unreachable by multiplying softmax terms, so it is corrupt.
+    expect(usablePropensity(1.0001)).toBeNull();
+    expect(usablePropensity(Number.NaN)).toBeNull();
+    expect(usablePropensity(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("refuses non-numbers rather than coercing them", () => {
+    expect(usablePropensity(undefined)).toBeNull();
+    expect(usablePropensity(null)).toBeNull();
+    expect(usablePropensity("0.5")).toBeNull();
+    expect(usablePropensity({})).toBeNull();
+  });
+
+  it("passes through what buildSlate actually produces", () => {
+    const proposals = buildSlate(CLOSET, BASE_SLOTS, { rng: mulberry32(7) });
+    expect(proposals.length).toBeGreaterThan(0);
+    for (const proposal of proposals) {
+      expect(usablePropensity(proposal.propensity)).toBe(proposal.propensity);
+    }
   });
 });

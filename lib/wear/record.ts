@@ -193,6 +193,14 @@ export type RecordPreferenceInput = {
   itemIds: string[];
   /** What was passed over, for contrastive kinds. Enables `chosen ≻ rejected`. */
   rejectedIds?: string[];
+  /**
+   * Every outfit shown, in display order. Recording these instead of only their
+   * union is what lets a tap on one of n outfits be read as the n−1 comparisons
+   * it expresses — see `comparisonsFrom` in lib/wear/signals.ts.
+   */
+  arms?: readonly (readonly string[])[];
+  /** Index into `arms` of the chosen outfit. */
+  chosenArm?: number | null;
   context?: Record<string, unknown>;
   /** Identifies the ranker that produced the thing being reacted to. */
   policyId?: string | null;
@@ -209,12 +217,25 @@ export async function recordPreference(input: RecordPreferenceInput): Promise<st
   if (itemIds.length === 0) return null;
   const rejectedIds = [...new Set(input.rejectedIds ?? [])].filter(Boolean);
 
+  // Only stored when it carries more than the pooled form already does: a single
+  // arm has no rival to compare against, and a null column is a clearer "this row
+  // predates per-arm logging" than an array of one.
+  const arms = input.arms && input.arms.length > 1 ? input.arms.map((arm) => [...arm]) : null;
+  const chosenArm =
+    arms && input.chosenArm != null && input.chosenArm >= 0 && input.chosenArm < arms.length
+      ? input.chosenArm
+      : null;
+
   const event = await prisma.preferenceEvent.create({
     data: {
       userId: input.userId,
       kind: input.kind,
       itemIds: encode(itemIds),
       rejectedIds: encode(rejectedIds),
+      // Written together or not at all: an arms array with no valid index is
+      // unreadable, and a reader would have to guess which outfit won.
+      armsJson: chosenArm == null ? null : encode(arms),
+      chosenArm,
       contextJson: input.context ? encode(input.context) : null,
       policyId: input.policyId ?? null,
       propensity: input.propensity ?? null,

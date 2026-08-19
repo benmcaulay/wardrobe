@@ -376,6 +376,72 @@ Combine: `score = prior + λ(n)·residual`, with `λ(0) = 0` and λ rising with
 evidence count. A user with no history sees pure Layer 1 and never knows the
 personalization exists yet.
 
+### Layer 2 as built — contextual Bradley-Terry
+
+The identity model shipped first and `pnpm eval:ranker` found it memorizing:
+86.8% in-sample against 53.8% leave-one-out. That is not a tuning problem, it is
+the parameter count — one free θ per garment means 183 parameters against 59
+comparisons touching 76 items, so 107 items could hold no opinion at all and the
+ones that could were fit to themselves.
+
+Strength is now a function of what a garment *is*:
+
+    θᵢ = αᵢ + wᵀxᵢ
+
+`w` is shared across every comparison, so one choice informs every similar
+garment and an item nobody has compared still gets a strength. `x` is nine
+dimensions from fields with 100% coverage (`lib/outfit/features.ts`): colour
+geometry in LCh — lightness, chroma, hue as sin/cos, neutral share, colour count
+— plus formality and two pattern flags. Nothing reads `season`, `styleTags` or
+`material` at 0–7% populated.
+
+**Measured, leave-one-out, 52 cases (± clustered by case):**
+
+| | pairwise | top-1 | items with an opinion |
+| --- | --- | --- | --- |
+| identity BT | 62.9% ± 4.9% | 28.8% | 100 |
+| contextual BT | 62.9% ± 5.3% | 32.7% | **180** |
+| affinity only, identity | 54.4% ± 4.7% | 19.2% | |
+| affinity only, contextual | **58.7% ± 5.6%** | 26.9% | |
+
+Memorization gap: 7.9 → 5.7 points. Every reading is inside one standard error,
+so nothing here is individually significant — but four independent ones move the
+same way, and the coverage change is not a statistical claim at all.
+
+**The blended ranker did not improve, and the reason is instructive.** The three
+strongest coefficients are hueCos (+1.58), neutralShare (+1.56) and lightness
+(+1.02) — Layer 2 is learning a *colour* preference, which is what Layer 1's
+dominant term already encodes. The gain shows up in Layer 2 alone and washes out
+in the blend because the two are largely the same signal. Features orthogonal to
+colour — the MobileCLIP embedding dimensions, deliberately left out of this pass —
+are where a blended gain would have to come from.
+
+Two things that had to be got right, both of which measured worse when got wrong:
+
+- **Unary rows do not fit `w`.** A like/pass against `NEUTRAL_ANCHOR` has no
+  feature contrast — the anchor has no features, so the "difference" is just the
+  outfit's own vector. Those rows still train the intercepts.
+- **No garment-kind one-hot.** In a comparison between two outfits of the same
+  shape, kind composition is identical on both sides and cancels, so a kind
+  coefficient can only fit the artifact that `rejectedIds` is a deduplicated
+  union — five items on the loser side against three on the winner's. With them
+  in, the two largest coefficients were kindTop (−1.59) and neutralShare (+1.56),
+  and like/pass AUC came out *below* using no affinity at all. They measured
+  slightly better on blended pairwise, which is why they are worth revisiting —
+  but only once per-arm logging makes them identifiable, since the evaluation
+  reconstructs rivals from the same pooled union.
+
+The λ ramp needed one addition. An uncompared item now has a utility but no
+evidence of its own, and λ(0) = 0 would collapse its affinity to a flat 0.5 —
+worse than absent, because `blend` drops absent terms and renormalizes while a
+fabricated neutral dilutes the terms that work. `evidenceFor` credits the shared
+model at comparisons/dimensions, an order-of-magnitude argument rather than a
+derivation, which is why its effect is measured rather than assumed.
+
+Posterior σ still reads *own* evidence only, so the explore slot and the dormancy
+lens keep targeting genuinely untouched garments rather than ones the feature
+model merely has an opinion about.
+
 ### Layer 3 — Slate construction
 
 Not top-k. Greedy submodular maximization under the slot matroid — coverage plus
@@ -675,6 +741,120 @@ and category (§4, Layer 1), which are the fields that are actually there.
 - **Guardrail: protect-rate.** If users increasingly mark items protected, the
   dormancy model is overreaching — back off automatically.
 
+### Built — `pnpm eval:ranker`
+
+`lib/eval/ranker.ts` (metrics, pure) + `scripts/eval-ranker.ts` (data + report).
+Runs in about a second against the dev database.
+
+**FITB is not runnable as specified, and the substitute is better.** Hold-one-out
+over saved outfits needs saved outfits: there are zero `Outfit` rows, because
+`acceptProposal` writes a `WearEvent` and a `PreferenceEvent` and only virtual
+try-on ever creates an `Outfit`. The choice log is the better substrate anyway —
+a `train_pick` *is* the task FITB approximates, with real alternatives instead of
+synthetic distractors.
+
+### Per-arm logging — recording what the user actually said
+
+The first run exposed a write-time problem, not a model problem. A tap on one of
+n outfits expresses n−1 pairwise preferences; `recordTrainingPick` stored one, with
+`rejectedIds` as a deduplicated union of the passed-over pieces. At the
+eight-outfit setting that discarded roughly six sevenths of the answer — and the
+mode hint had been promising the stronger reading all along: *"your pick beat
+every other outfit on screen"*.
+
+It also corrupted what could be learned. The pooled loser side holds five items
+where the winner has three once two arms share a piece, so its per-kind
+proportions shift for reasons unrelated to taste, and a model with kind features
+fits that shift as if it were preference (§4, Layer 2).
+
+`PreferenceEvent` now carries `armsJson` (every outfit shown, in display order)
+and `chosenArm`. `comparisonsFrom` in `lib/wear/signals.ts` is the single reader —
+used by both the production fit and this harness, so the two cannot disagree about
+what a row means. Verified end to end: an eight-arm round logs 7 comparisons where
+it used to log 1, a three-arm round logs 2, and `chosenArm` records the arm that
+was actually tapped rather than defaulting to the first.
+
+Consequences worth stating:
+
+- **Each comparison carries the row's full signal weight.** An eight-way choice
+  genuinely is more informative than a three-way one, and all-pairs expansion of a
+  ranked choice is the standard reading — but `evidence` counts, and therefore the
+  λ ramp, now grow faster per answer than under pooled logging.
+- **Rivals are read, not reconstructed.** `rivalsFor` prefers logged arms, so top-1
+  on those rows is exact rather than a lower bound.
+- **Old rows cannot be un-pooled.** The 53 pre-existing picks keep the fallback
+  path: `reconstructRivals` enumerates every same-shape outfit from the pool, a
+  superset of what was shown. The report prints how many cases fall in each group,
+  because a number mixing them is only as precise as its weaker half.
+- **`rejectedIds` is still written**, so anything reading the old shape keeps
+  working.
+
+**First run — 59 contrastive cases, 27 rated, 180 items.** Pairwise accuracy,
+Layer 2 refit per case with that case held out, ± clustered by case:
+
+| Ranker | pairwise | top-1 |
+| --- | --- | --- |
+| full (as shipped) | 62.4% ± 5.0% | 27.5% |
+| layer 1 only (no affinity) | 62.6% ± 4.7% | 13.7% |
+| affinity only (layer 2) | 53.8% ± 4.8% | 19.6% |
+| colour only | 60.5% ± 5.0% | 19.6% |
+| no colour | 54.3% ± 5.0% | 19.6% |
+| formality only | 50.6% ± 1.9% | 0.0% |
+| climate only | 51.7% ± 1.4% | 3.9% |
+| chance (200 random rankers) | 50.6% ± 6.5% | — |
+
+Read with the sample size in mind — one closet, one person, 51 scored cases, and
+a noise floor of ±5 points. What it does support:
+
+- **The ranker beats chance, by about a standard error and a half.** Suggestive,
+  not established. It is the first evidence that any of this works at all.
+- **Colour is the ranker.** Colour-only nearly matches the full model; removing
+  colour costs 8 points and lands inside the noise floor. This confirms the
+  weighting decision in §4 on outcome data rather than on coverage statistics.
+- **Formality and climate are inert.** Formality-only is exactly chance. Their
+  small ± is itself the tell: both produce mostly ties.
+- **Layer 2 pays for itself only in tie-breaking.** Out of sample it adds −0.2
+  points pairwise, but doubles top-1 (13.7% → 27.5%) by separating outfits Layer 1
+  scores identically. Its 0.35 weight is not earning what the weight implies.
+  *(This is what prompted the contextual model in §4; the identity-model figures
+  in this list are the "before".)*
+- **In-sample affinity reads 70.3% against 62.4% leave-one-out.** That 8-point gap
+  is memorization, and it is why the ablation table refits per case. Any future
+  number quoted from the production affinity map is inflated by roughly this much.
+- **Like/pass AUC 0.753** (18 liked, 9 passed), affinity fit on picks only — an
+  independent read that agrees with the pairwise result.
+
+**SNIPS is plumbed, and now fed.** At first run two of 86 events carried a
+propensity. The cause was not the write path — `rerollProposal` and `dismissSlate`
+always forwarded one — but that `getTrainingRound` dropped `Proposal.propensity`
+before returning, so the client had nothing to send back, and the training surface
+is the only live producer (the daily-proposal actions in `lib/actions/daily-outfit.ts`
+have had no caller since the outfits page was reorganized). Since fixed:
+`TrainingOutfit` carries `propensity` and `strategy`, and all three answer paths —
+pick, rate, swipe — echo it back. Verified end to end: a pick logs 1.7e-4, a like
+1.0e-5, a dislike 2.3e-5.
+
+Two things this pins down:
+
+- **Client-supplied numbers are gated, not trusted.** `usablePropensity` in
+  `lib/outfit/slate.ts` accepts only (0, 1] and stores null otherwise. Zero would
+  divide by zero in an importance weight and anything above one is unreachable by
+  multiplying softmax terms, so both mean the value is corrupt — and per §5B a
+  wrong propensity is worse than a missing one, because nothing in the data shows
+  it happened.
+- **Training propensities are conditional on the Thompson draw**, since every
+  training arm is `explore`. They are comparable with each other and not with a
+  marginal propensity from some future non-explore surface, so `strategy` is
+  written into `contextJson` to keep that boundary visible in the data.
+
+Rows written before the fix carry null and cannot be backfilled — the sampler's
+slot order and candidate pool were never recorded. The estimator refuses to print
+below 30 usable rows rather than report a number dominated by one small
+propensity, so off-policy evaluation switches on as new answers accumulate.
+
+**Protect-rate baseline: 0% (0/180).** The guardrail has somewhere to write and
+nothing to say yet; compare future runs against this.
+
 ## 9. Staging
 
 | Phase | Contents | User-visible? |
@@ -785,8 +965,51 @@ Two shapes, reducing to the same thing:
 
 | Mode | Interaction | Becomes |
 | --- | --- | --- |
-| Pick a favourite | three outfits, tap one | `chosen ≻ the other two` |
+| Pick a favourite | n outfits, tap one | `chosen ≻ each of the other n−1` |
 | One at a time | one outfit, love/pass | a comparison against `NEUTRAL_ANCHOR` |
+| Rate pieces | one **garment**, like/pass | `train_item`, against `NEUTRAL_ANCHOR` |
+
+### Rate pieces — the affinity question, asked directly
+
+The first three modes all ask about outfits, which is compatibility evidence with
+item taste tangled into it. §1 is explicit that affinity and compatibility are
+different quantities that must not be conflated, and nothing was collecting the
+first one: a three-piece pick spreads its 0.55 across three garments and no answer
+can say which piece earned it. The measured consequence is in §4 — Layer 2's
+coefficients came out as a *colour* preference, duplicating Layer 1's dominant
+term, because outfit-level colour averages were the clearest thing in the data.
+
+`train_item` fixes that at the source. Weight `{ affinity: 0.6, compatibility: 0 }`
+— compatibility is zero, not small, because one garment on its own says nothing
+whatever about what goes with what, and that is the point of having it. Affinity
+sits above `train_pick` since there is no attribution to undo, and below a wear
+since it is still an opinion about a photo.
+
+Three things make it the cleanest evidence in the log:
+
+- **It trains the shared coefficients, unlike an outfit rating.** Features are
+  centred on the closet mean, so a single garment against the anchor reads as "how
+  this piece differs from an average garment" — a real contrast. A three-piece
+  look is *not* a fair draw from a closet that is 40% hats, so its offset from the
+  mean is compositional rather than personal, which is why those rows are excluded
+  from the `w` gradient. `isFeatureContrast` in `lib/outfit/bradley-terry.ts` draws
+  the line at set size.
+- **The queue is self-clearing.** Pieces are ordered by posterior uncertainty —
+  `noveltyScore`, the same quantity the explore slot and the dormancy lens read —
+  so it leads with what the model knows least about, and rating a piece drops it
+  out. Deliberately deterministic: there is no slate whose composition could be
+  varied, and a sampled order would re-show a garment just judged.
+- **No propensity.** The logged decision is a judgement about one garment, not a
+  choice among alternatives, so there is no ranking policy whose value an
+  off-policy estimator could recover. Logging a number would invite exactly the
+  error §5B warns about.
+
+Verified end to end: a like records the garment as winner against the anchor, a
+pass reverses it, and `featureCredit` rose from 7.222 to 7.444 as the two ratings
+joined the coefficient fit. `pnpm eval:ranker` reports item-level AUC for these
+rows, held out against a map fit on picks only — and refuses to print a number
+below five of each class, because one like against one pass is exactly 1.000 and
+that is the figure most likely to get quoted without its sample size.
 
 **The anchor is what makes swiping usable.** Bradley-Terry only consumes
 comparisons, and a swipe is a unary judgement. Pairing it against a fixed

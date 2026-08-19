@@ -17,21 +17,35 @@ import { classifyGarmentKind, type GarmentKind } from "@/lib/categories";
 import { itemMatchesCategories, itemMatchesColorRule, type OutfitPickItem } from "@/lib/outfit-random";
 import type { SlateSlot } from "@/lib/outfit/slate";
 
-export type TrainingMode = "pick" | "rate" | "swipe";
+/**
+ * `pieces` is the odd one out and deliberately so: the other three ask about
+ * *outfits*, which is compatibility evidence with item taste tangled into it. It
+ * asks about one garment at a time, which is the only way to get affinity on its
+ * own — see `train_item` in lib/wear/signals.ts.
+ */
+export type TrainingMode = "pick" | "rate" | "swipe" | "pieces";
 
-export const TRAINING_MODES: readonly TrainingMode[] = ["pick", "rate", "swipe"];
+export const TRAINING_MODES: readonly TrainingMode[] = ["pick", "rate", "swipe", "pieces"];
 
 export const TRAINING_MODE_LABELS: Record<TrainingMode, string> = {
   pick: "Pick your favourite",
   rate: "Like or dislike",
   swipe: "Swipe",
+  pieces: "Rate pieces",
 };
 
 export const TRAINING_MODE_HINTS: Record<TrainingMode, string> = {
   pick: "One tap says your pick beat every other outfit on screen — the most informative answer there is.",
   rate: "Rate each outfit in the set on its own. Slower per outfit, but you're not forced to choose a winner.",
   swipe: "One outfit at a time. Swipe right if you'd wear it, left if you wouldn't.",
+  pieces:
+    "One garment at a time, no outfit around it. The fastest way to teach me what you actually like — it starts with the pieces I know least about.",
 };
+
+/** Modes that ask about a single garment rather than an outfit. */
+export function isPieceMode(mode: TrainingMode): boolean {
+  return mode === "pieces";
+}
 
 /** The sample-size range the multi-outfit modes offer. */
 export const MIN_SAMPLE_SIZE = 2;
@@ -48,7 +62,10 @@ export function sampleSizeFor(mode: TrainingMode, requested: unknown): number {
   if (mode === "swipe") return 1;
   const n = Math.floor(Number(requested));
   if (!Number.isFinite(n)) return DEFAULT_SAMPLE_SIZE;
-  return Math.min(MAX_SAMPLE_SIZE, Math.max(MIN_SAMPLE_SIZE, n));
+  // Piece rounds are a sweep rather than a comparison, so a bigger tray is
+  // strictly better — there is no "forced to choose a winner" cost to pay.
+  const floor = isPieceMode(mode) ? 1 : MIN_SAMPLE_SIZE;
+  return Math.min(MAX_SAMPLE_SIZE, Math.max(floor, n));
 }
 
 export type TrainingFocus = {

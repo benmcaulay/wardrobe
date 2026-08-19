@@ -48,6 +48,26 @@ import {
  */
 export const SLATE_POLICY_ID = "slate-thompson-v2";
 
+/**
+ * Accept a client-reported propensity, or refuse it.
+ *
+ * The propensity has to make the round trip through the browser: it is computed
+ * while the slate is built and only spent when the user answers, and the server
+ * has no memory of a round in between. That means a bad number can arrive, and
+ * per this module's header, recording the wrong propensity is worse than
+ * recording none — it silently biases every future off-policy estimate, with
+ * nothing in the data to show it happened.
+ *
+ * So the only two outcomes are "a probability" and null. Anything outside (0, 1]
+ * is not a probability: zero would divide by zero in an importance weight, and
+ * above one is not reachable by multiplying softmax terms.
+ */
+export function usablePropensity(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  if (raw <= 0 || raw > 1) return null;
+  return raw;
+}
+
 export type SlateCandidate = ScorableItem;
 
 export type SlateSlot = {

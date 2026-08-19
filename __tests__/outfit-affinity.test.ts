@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_REGULARIZATION,
   fitBradleyTerry,
+  NEUTRAL_ANCHOR,
   utilityToScore,
   type Comparison,
 } from "@/lib/outfit/bradley-terry";
 import {
   buildAffinityMap,
+  evidenceFor,
   LAMBDA_HALF_LIFE,
   lambdaFor,
   NEUTRAL_AFFINITY,
@@ -132,11 +134,11 @@ describe("buildAffinityMap", () => {
     const prior = new Map([["a", 0.9]]);
     const thin = buildAffinityMap({
       stylePrior: prior,
-      fit: { theta: new Map([["a", -2]]), evidence: new Map([["a", 1]]) },
+      fit: { theta: new Map([["a", -2]]), evidence: new Map([["a", 1]]), weights: [], featureCredit: 0 },
     });
     const thick = buildAffinityMap({
       stylePrior: prior,
-      fit: { theta: new Map([["a", -2]]), evidence: new Map([["a", 40]]) },
+      fit: { theta: new Map([["a", -2]]), evidence: new Map([["a", 40]]), weights: [], featureCredit: 0 },
     });
     // Choices contradict the prompt; with more of them, they should win.
     expect(thin.get("a")!).toBeGreaterThan(thick.get("a")!);
@@ -145,7 +147,7 @@ describe("buildAffinityMap", () => {
 
   it("blends learned data against neutral when there is no prior", () => {
     const out = buildAffinityMap({
-      fit: { theta: new Map([["a", 2]]), evidence: new Map([["a", 6]]) },
+      fit: { theta: new Map([["a", 2]]), evidence: new Map([["a", 6]]), weights: [], featureCredit: 0 },
     });
     expect(out.get("a")!).toBeGreaterThan(NEUTRAL_AFFINITY);
     // Half weight at the half-life, so it can't be a full-strength opinion.
@@ -175,5 +177,143 @@ describe("outfitAffinity", () => {
   it("returns null when nothing in the set is known", () => {
     expect(outfitAffinity(["x"], new Map())).toBeNull();
     expect(outfitAffinity([], new Map([["a", 1]]))).toBeNull();
+  });
+});
+
+describe("contextual fitBradleyTerry", () => {
+  // A closet where taste is perfectly explained by one feature: dark items win.
+  const DARK = new Float64Array([-0.5, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const LIGHT = new Float64Array([0.5, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const features = new Map<string, Float64Array>([
+    ["dark1", DARK],
+    ["dark2", DARK],
+    ["light1", LIGHT],
+    ["light2", LIGHT],
+    // Never appears in a comparison — the cold-start case.
+    ["unseen-dark", DARK],
+  ]);
+
+  const darkWins: Comparison[] = [
+    { winners: ["dark1"], losers: ["light1"] },
+    { winners: ["dark2"], losers: ["light2"] },
+    { winners: ["dark1"], losers: ["light2"] },
+  ];
+
+  it("reproduces the identity model when no features are supplied", () => {
+    const fit = fitBradleyTerry(darkWins);
+    expect(fit.weights).toEqual([]);
+    expect(fit.featureCredit).toBe(0);
+    // Only compared items get a parameter at all.
+    expect([...fit.theta.keys()].sort()).toEqual(["dark1", "dark2", "light1", "light2"]);
+  });
+
+  it("learns the feature that explains the choices", () => {
+    const fit = fitBradleyTerry(darkWins, { features });
+    expect(fit.weights).toHaveLength(9);
+    // Dark items carry a negative lightness feature and keep winning, so the
+    // coefficient must be negative for their utility to come out high.
+    expect(fit.weights[0]).toBeLessThan(0);
+    expect(fit.theta.get("dark1")!).toBeGreaterThan(fit.theta.get("light1")!);
+  });
+
+  /**
+   * The entire point of the change: an item nobody has compared still gets a
+   * strength, because the shared coefficients apply to anything with features.
+   * The identity model cannot do this at all — 107 of 183 real items had no
+   * obtainable opinion before.
+   */
+  it("scores an item that was never compared", () => {
+    const fit = fitBradleyTerry(darkWins, { features });
+    expect(fit.theta.has("unseen-dark")).toBe(true);
+    // It looks like the items that won, so it should score like them.
+    expect(fit.theta.get("unseen-dark")!).toBeGreaterThan(fit.theta.get("light1")!);
+    // ...but on its own it has no direct evidence.
+    expect(fit.evidence.get("unseen-dark") ?? 0).toBe(0);
+  });
+
+  it("credits the shared model as comparisons over dimensions", () => {
+    const fit = fitBradleyTerry(darkWins, { features });
+    expect(fit.featureCredit).toBeCloseTo(3 / 9, 10);
+  });
+
+  /**
+   * The anchor rule turns on how many garments are on the other side, and this
+   * pins both halves of it.
+   *
+   * One garment against the anchor is a real feature contrast: features are
+   * centred on the closet mean, so the difference reads as "how this piece differs
+   * from an average garment", and a single piece is a fair draw from the closet.
+   * That is what makes the garment-swipe mode (`train_item`) the cleanest feature
+   * evidence in the log.
+   */
+  it("fits coefficients from a single garment judged against the anchor", () => {
+    const swipes: Comparison[] = [
+      { winners: ["dark1"], losers: [NEUTRAL_ANCHOR] },
+      { winners: ["dark2"], losers: [NEUTRAL_ANCHOR] },
+      { winners: [NEUTRAL_ANCHOR], losers: ["light1"] },
+    ];
+    const fit = fitBradleyTerry(swipes, { features, anchorId: NEUTRAL_ANCHOR });
+    // Dark pieces liked, a light one passed → the lightness coefficient moves.
+    expect(fit.weights[0]).toBeLessThan(0);
+    expect(fit.featureCredit).toBeCloseTo(3 / 9, 10);
+    // ...and it generalizes to a garment never judged.
+    expect(fit.theta.get("unseen-dark")!).toBeGreaterThan(fit.theta.get("light1")!);
+  });
+
+  /**
+   * An *outfit* against the anchor is the trap. A top-plus-bottom-plus-shoes look
+   * is not a fair draw from a closet that is 40% hats, so its feature mean is
+   * offset from zero for reasons unrelated to taste — and every rating pushed `w`
+   * the same way. See `isFeatureContrast` in lib/outfit/bradley-terry.ts.
+   */
+  it("ignores a multi-piece outfit judged against the anchor", () => {
+    const outfitRatings: Comparison[] = [
+      { winners: ["dark1", "dark2"], losers: [NEUTRAL_ANCHOR] },
+      { winners: [NEUTRAL_ANCHOR], losers: ["light1", "light2"] },
+    ];
+    const fit = fitBradleyTerry(outfitRatings, { features, anchorId: NEUTRAL_ANCHOR });
+    for (const weight of fit.weights) expect(weight).toBe(0);
+    expect(fit.featureCredit).toBe(0);
+    // The level still lands somewhere: the intercepts absorb it.
+    expect(fit.theta.get("dark1")!).toBeGreaterThan(0);
+  });
+
+  it("counts only the feature-contrastive rows in a mixed log", () => {
+    const mixed: Comparison[] = [
+      ...darkWins,
+      // Fits `w` — one garment.
+      { winners: ["dark1"], losers: [NEUTRAL_ANCHOR] },
+      // Does not — a two-piece outfit against the anchor.
+      { winners: ["light1", "light2"], losers: [NEUTRAL_ANCHOR] },
+    ];
+    const fit = fitBradleyTerry(mixed, { features, anchorId: NEUTRAL_ANCHOR });
+    expect(fit.weights[0]).toBeLessThan(0);
+    // Four of the five rows are genuine contrasts.
+    expect(fit.featureCredit).toBeCloseTo(4 / 9, 10);
+  });
+
+  it("gives an uncompared item a real opinion rather than a flat neutral", () => {
+    const fit = fitBradleyTerry(darkWins, { features });
+    const affinity = buildAffinityMap({ fit });
+    const unseen = affinity.get("unseen-dark");
+    expect(unseen).toBeDefined();
+    // Without the feature credit in the λ ramp this would be exactly 0.5, which
+    // dilutes the blend instead of informing it.
+    expect(unseen!).not.toBeCloseTo(NEUTRAL_AFFINITY, 6);
+    expect(unseen!).toBeGreaterThan(NEUTRAL_AFFINITY);
+  });
+
+  it("keeps evidenceFor at own-evidence when there are no features", () => {
+    const fit = fitBradleyTerry(darkWins);
+    expect(evidenceFor(fit, "dark1")).toBe(fit.evidence.get("dark1"));
+    expect(evidenceFor(fit, "nobody")).toBe(0);
+  });
+
+  it("adds the shared credit on top of own evidence", () => {
+    const fit = fitBradleyTerry(darkWins, { features });
+    expect(evidenceFor(fit, "dark1")).toBeCloseTo(
+      (fit.evidence.get("dark1") ?? 0) + fit.featureCredit,
+      10,
+    );
   });
 });
