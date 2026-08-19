@@ -1,36 +1,62 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { thumbnailUrl } from "@/lib/image-paths";
+import { CityPicker } from "@/components/city-picker";
+import { GearIcon } from "@/components/gear-icon";
+import { WorldMap } from "@/components/world-map";
+import { flagEmoji, localTimeAt, placeLabel, type Place } from "@/lib/places";
 import type { Season } from "@/lib/json";
 import { formatVolume, formatWeight } from "@/lib/packing/estimate";
-import { computeUsage, seasonScore, type CategoryBucket } from "@/lib/packing/plan";
+import { computeUsage, type CategoryBucket } from "@/lib/packing/plan";
 import {
   completeDayCount,
   distinctOutfitCount,
   planDailyOutfits,
   rewearDayCount,
-  type DayOutfit,
 } from "@/lib/packing/outfits";
 import {
   ACTIVITIES,
+  activityDayCount,
+  activityDaySchedule,
+  activityLabel,
   wearMultiplier,
+  type TripActivity,
   type TripRequirements,
 } from "@/lib/packing/requirements";
+import {
+  GEAR_CATEGORIES,
+  gearCategoryLabel,
+  gearFootprint,
+  gearIconName,
+  suggestGear,
+  type GearCategory,
+} from "@/lib/packing/gear";
+import { BAG_PANEL_PREFIX } from "@/lib/packing/panel-state";
+import { EMPTY_LOOK_PREFS, type LookLayoutPrefs } from "@/lib/packing/look";
+import { occasionForActivity, occasionLabel, type OccasionKind } from "@/lib/packing/occasion";
+import { getSilhouette } from "@/lib/packing/silhouettes";
 import { formatTripRange } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import { formatTemperature, type TemperatureUnit } from "@/lib/temperature";
-import {
-  PLANE_FLIGHT_MS,
-  isScrolledToEnd,
-  planeFlightVars,
-} from "@/lib/packing/planner-view";
+import { PLANE_FLIGHT_MS } from "@/lib/packing/planner-view";
+import { SpaceTile } from "@/components/space-tile";
+import { thumbnailUrl } from "@/lib/image-paths";
+import { easeOutExpo } from "@/lib/ui-motion";
+import { CapacityMeter } from "./capacity-meter";
+import { CollapsibleSection, PanelStateProvider, usePanels } from "./collapsible-section";
+import { LooksCarousel, type LookDay } from "./looks-carousel";
+import { PackMode, RAIL_ZONE, type PackBag, type PackCandidate } from "./pack-mode";
+import { type DragPayload } from "./packing-drag";
 import {
   fetchTripClimate,
+  searchDestinations,
   setTripClimate,
+  setTripGear,
   setTripRequirements,
+  setItemDailyWear,
   parseTripDescription,
   generatePackingPlan,
   setItemPacking,
@@ -50,6 +76,9 @@ export type PlannerBag = {
   name: string;
   volumeLiters: number;
   maxWeightKg: number | null;
+  /** Silhouette id and photo, for the bag artwork in Pack mode. */
+  silhouette: string;
+  imagePath: string | null;
 };
 
 export type PlannerItem = {
@@ -57,6 +86,8 @@ export type PlannerItem = {
   name: string;
   imagePath: string;
   category: string;
+  /** Matched against the activity needs in lib/packing/requirements.ts. */
+  subcategory: string | null;
   bucket: CategoryBucket;
   colors: { name: string; hex: string }[];
   season: Season[];
@@ -65,6 +96,12 @@ export type PlannerItem = {
   priceCents: number | null;
   currency: string;
   hasOverride: boolean;
+  /** False for pieces packed for one occasion — swimwear, formalwear. */
+  dailyWear: boolean;
+  /** What made it an occasion piece, when it is one. */
+  occasion: OccasionKind | null;
+  /** The user's answer, when they've given one. Null means "use the guess". */
+  dailyWearOverride: boolean | null;
 };
 
 const BUCKET_LABELS: Record<CategoryBucket, string> = {
@@ -103,8 +140,26 @@ export type PlannerTrip = {
   id: string;
   name: string;
   destination: string;
+  /** Null until the destination is picked from the list rather than typed. */
+  latitude: number | null;
+  longitude: number | null;
+  countryCode: string | null;
+  timezone: string | null;
   startDate: string;
   endDate: string;
+};
+
+/** One line of the user's gear library, as the planner needs it. */
+export type PlannerGear = {
+  id: string;
+  name: string;
+  category: GearCategory;
+  icon: string | null;
+  quantity: number;
+  weightGrams: number | null;
+  volumeLiters: number | null;
+  notes: string | null;
+  essential: boolean;
 };
 
 const NONE = "__none__";
@@ -113,17 +168,24 @@ export function TripPlanner({
   trip,
   bags,
   items,
+  gear,
   initialClimate,
   initialRequirements,
   initialAssignments,
+  initialGearAssignments,
+  lookPrefs = EMPTY_LOOK_PREFS,
   temperatureUnit,
 }: {
   trip: PlannerTrip;
   bags: PlannerBag[];
   items: PlannerItem[];
+  gear: PlannerGear[];
   initialClimate: ClimateSummary | null;
   initialRequirements: TripRequirements;
   initialAssignments: Record<string, string[]>;
+  initialGearAssignments: Record<string, string[]>;
+  /** The outfit canvas's placement rules, for the looks carousel. */
+  lookPrefs?: LookLayoutPrefs;
   temperatureUnit: TemperatureUnit;
 }) {
   const router = useRouter();
@@ -133,13 +195,14 @@ export function TripPlanner({
   const [parsing, setParsing] = useState(false);
   const [parseNote, setParseNote] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments);
+  const [gearAssignments, setGearAssignments] =
+    useState<Record<string, string[]>>(initialGearAssignments);
   const [estimates, setEstimates] = useState<Map<string, { weightGrams: number; volumeLiters: number }>>(
     () => new Map(items.map((i) => [i.id, { weightGrams: i.weightGrams, volumeLiters: i.volumeLiters }])),
   );
   const [loadingClimate, setLoadingClimate] = useState(false);
   const [packing, setPacking] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [filter, setFilter] = useState("");
 
   /**
    * The departure animation runs on its own clock: one flight per press,
@@ -161,20 +224,6 @@ export function TripPlanner({
     flightTimer.current = window.setTimeout(() => setFlying(false), PLANE_FLIGHT_MS);
   }
 
-  /**
-   * The bag column is a capped, independently scrolling panel, so its content
-   * meets the viewport edge mid-item and reads as truncated rather than
-   * scrollable. A scrim fades that edge — and lifts once you reach the end, so
-   * it never suggests content that isn't there.
-   */
-  const bagColumn = useRef<HTMLDivElement>(null);
-  const [bagColumnAtEnd, setBagColumnAtEnd] = useState(true);
-  const measureBagColumn = useCallback(() => {
-    const el = bagColumn.current;
-    if (!el) return;
-    setBagColumnAtEnd(isScrolledToEnd(el));
-  }, []);
-
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
   // Which bag (if any) each item currently sits in.
@@ -186,10 +235,37 @@ export function TripPlanner({
     return map;
   }, [assignments]);
 
-  const usage = useMemo(
-    () => computeUsage(assignments, bags, estimates),
-    [assignments, bags, estimates],
-  );
+  const gearById = useMemo(() => new Map(gear.map((g) => [g.id, g])), [gear]);
+
+  /** Which bag (if any) each piece of gear is in. */
+  const bagOfGear = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [bagId, ids] of Object.entries(gearAssignments)) {
+      for (const id of ids) map.set(id, bagId);
+    }
+    return map;
+  }, [gearAssignments]);
+
+  /**
+   * Bag meters count clothes and gear together, because a bag doesn't care
+   * which is which — it only has so many litres. `computeUsage` is id-agnostic,
+   * so feeding it the union of both maps and both size tables is all it takes.
+   * The two stay separate everywhere else; see lib/packing/gear.ts.
+   */
+  const usage = useMemo(() => {
+    const merged: Record<string, string[]> = {};
+    for (const bag of bags) {
+      merged[bag.id] = [...(assignments[bag.id] ?? []), ...(gearAssignments[bag.id] ?? [])];
+    }
+    const sizes = new Map(estimates);
+    for (const g of gear) {
+      const { weightGrams, volumeLiters } = gearFootprint(g);
+      sizes.set(g.id, { weightGrams, volumeLiters });
+    }
+    return computeUsage(merged, bags, sizes);
+  }, [assignments, gearAssignments, bags, estimates, gear]);
+
+  const packedGearCount = bagOfGear.size;
 
   // Persist assignment edits (debounced) so a refresh keeps the layout.
   const firstRun = useRef(true);
@@ -204,6 +280,33 @@ export function TripPlanner({
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignments]);
+
+  // Same debounced write as garment assignments, on its own column.
+  const firstGearRun = useRef(true);
+  useEffect(() => {
+    if (firstGearRun.current) {
+      firstGearRun.current = false;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void setTripGear({ tripId: trip.id, assignments: gearAssignments });
+    }, 700);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gearAssignments]);
+
+  function moveGear(gearId: string, targetBagId: string) {
+    setGearAssignments((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const bag of bags) {
+        next[bag.id] = (prev[bag.id] ?? []).filter((id) => id !== gearId);
+      }
+      if (targetBagId !== NONE && next[targetBagId]) {
+        next[targetBagId] = [...next[targetBagId], gearId];
+      }
+      return next;
+    });
+  }
 
   function moveItem(itemId: string, targetBagId: string) {
     setAssignments((prev) => {
@@ -255,30 +358,31 @@ export function TripPlanner({
         return next;
       });
     } else {
-      // Cleared override — re-derive from the server heuristic.
+      /*
+       * Cleared. Dropping the local entry matters as much as the refresh:
+       * `estimates` shadows the item's own numbers everywhere it has a key, so
+       * leaving the old override in the map means "Reset to estimate" saves
+       * server-side and then keeps showing the value it just cleared.
+       */
+      setEstimates((prev) => {
+        if (!prev.has(itemId)) return prev;
+        const next = new Map(prev);
+        next.delete(itemId);
+        return next;
+      });
       router.refresh();
     }
   }
 
   const packedIds = new Set(bagOfItem.keys());
-  const unpackedAll = items.filter((i) => !packedIds.has(i.id));
 
-  // Re-measure on scroll, on resize, and whenever the column's contents change
-  // — moving an item between bags changes how much there is left to scroll.
-  useEffect(() => {
-    const el = bagColumn.current;
-    if (!el) return;
-    measureBagColumn();
-    el.addEventListener("scroll", measureBagColumn, { passive: true });
-    window.addEventListener("resize", measureBagColumn);
-    return () => {
-      el.removeEventListener("scroll", measureBagColumn);
-      window.removeEventListener("resize", measureBagColumn);
-    };
-  }, [measureBagColumn, assignments, filter, bags.length]);
-
-  const unpacked = unpackedAll.filter((i) =>
-    filter ? i.name.toLowerCase().includes(filter.toLowerCase()) : true,
+  /**
+   * Packed, but never put on a day. Worth naming: a garment in your bag that
+   * the plan never mentions otherwise looks like the planner forgot it.
+   */
+  const occasionPacked = useMemo(
+    () => items.filter((i) => bagOfItem.has(i.id) && !i.dailyWear),
+    [items, bagOfItem],
   );
 
   // Per-garment-type counts and total value of everything currently packed.
@@ -311,18 +415,189 @@ export function TripPlanner({
   // Derived from the live assignment rather than the last auto-pack, so
   // swapping a piece re-plans the week immediately. This is why lib/packing is
   // pure — the same code the server used runs here with no round trip.
+  /** Which day belongs to which activity, from the chips above. */
+  const activityByDay = useMemo(
+    () => activityDaySchedule(climate?.days ?? 0, requirements),
+    [climate?.days, requirements],
+  );
+
   const dayPlan = useMemo(() => {
+    // Occasion pieces are packed but never scheduled *by the rotation*: swim
+    // trunks are a `bottom` like any other, so without this they turn up as the
+    // bottom half of an ordinary Wednesday. They come back below, on the days
+    // their activity actually falls. See lib/packing/occasion.ts.
     const packed = items
-      .filter((i) => bagOfItem.has(i.id))
+      .filter((i) => bagOfItem.has(i.id) && i.dailyWear)
       .map((i) => ({ id: i.id, bucket: i.bucket, colors: i.colors }));
+
+    /*
+     * Beach day: wear the trunks. Each scheduled day gets whatever packed
+     * occasion pieces match its activity — one per bucket, so a beach day swaps
+     * the bottom rather than stacking two.
+     */
+    const occasionByDay: Record<number, { id: string; bucket: CategoryBucket }[]> = {};
+    for (const [day, activity] of activityByDay) {
+      const perBucket = new Map<CategoryBucket, PlannerItem>();
+
+      // The activity's own wardrobe first — swimwear on a beach day.
+      const kind = occasionForActivity(activity);
+      if (kind) {
+        for (const i of items) {
+          if (!bagOfItem.has(i.id) || i.dailyWear || i.occasion !== kind) continue;
+          if (!perBucket.has(i.bucket)) perBucket.set(i.bucket, i);
+        }
+      }
+
+      /*
+       * Then whatever else the activity asks for. The needs already say a beach
+       * day wants sandals; until now they only guaranteed sandals were *packed*,
+       * so the rotation could still put you on the sand in walking boots.
+       */
+      for (const need of ACTIVITIES.find((a) => a.id === activity)?.needs ?? []) {
+        if (perBucket.has(need.bucket)) continue;
+        const match = items.find(
+          (i) =>
+            bagOfItem.has(i.id) &&
+            i.bucket === need.bucket &&
+            need.match.test(`${i.subcategory ?? ""} ${i.name}`.toLowerCase()),
+        );
+        if (match) perBucket.set(need.bucket, match);
+      }
+
+      if (perBucket.size > 0) {
+        occasionByDay[day] = [...perBucket.values()].map((i) => ({ id: i.id, bucket: i.bucket }));
+      }
+    }
+
     const cold = climate ? ["cool", "cold"].includes(climate.band) || climate.rainChance >= 0.4 : false;
     return planDailyOutfits({
       packed,
       days: climate?.days ?? 0,
       includeOuterwear: cold,
       wearMultiplier: wearMultiplier(requirements),
+      occasionByDay,
     });
-  }, [items, bagOfItem, climate, requirements]);
+  }, [items, bagOfItem, climate, requirements, activityByDay]);
+
+  /**
+   * Everything dropped in Pack mode lands here, garment or gear. The rail is a
+   * zone too — dropping an orbiting piece back on it takes it out of the bag.
+   */
+  function handleDrop(payload: DragPayload, zoneId: string) {
+    const target = zoneId === RAIL_ZONE ? NONE : zoneId;
+    if (payload.kind === "gear") moveGear(payload.id, target);
+    else moveItem(payload.id, target);
+  }
+
+  /* ------------------------------------------------------------ pack mode --- */
+
+  const [packOpen, setPackOpen] = useState(false);
+  const [looksOpen, setLooksOpen] = useState(false);
+  const [activeBagId, setActiveBagId] = useState<string>(bags[0]?.id ?? NONE);
+
+  const itemCandidate = useCallback(
+    (item: PlannerItem): PackCandidate => {
+      const est = estimates.get(item.id);
+      return {
+        kind: "item",
+        id: item.id,
+        name: item.name,
+        imagePath: item.imagePath,
+        group: BUCKET_LABELS[item.bucket],
+        volumeLiters: est?.volumeLiters ?? item.volumeLiters,
+        weightGrams: est?.weightGrams ?? item.weightGrams,
+        occasion: item.occasion,
+        dailyWearOverride: item.dailyWearOverride,
+      };
+    },
+    [estimates],
+  );
+
+  const gearCandidate = useCallback((row: PlannerGear): PackCandidate => {
+    const { volumeLiters, weightGrams } = gearFootprint(row);
+    return {
+      kind: "gear",
+      id: row.id,
+      name: row.name,
+      icon: gearIconName(row),
+      group: gearCategoryLabel(row.category),
+      volumeLiters,
+      weightGrams,
+    };
+  }, []);
+
+  /** Everything not in any bag, garments and gear together. */
+  const packCandidates = useMemo(
+    () => [
+      ...items.filter((i) => !bagOfItem.has(i.id)).map(itemCandidate),
+      ...gear.filter((g) => !bagOfGear.has(g.id)).map(gearCandidate),
+    ],
+    [items, gear, bagOfItem, bagOfGear, itemCandidate, gearCandidate],
+  );
+
+  const packBags = useMemo<PackBag[]>(
+    () =>
+      bags.map((bag) => {
+        const u = usage.perBag.find((p) => p.bagId === bag.id);
+        return {
+          id: bag.id,
+          name: bag.name,
+          silhouette: getSilhouette(bag.silhouette).id,
+          imagePath: bag.imagePath,
+          volumeLiters: bag.volumeLiters,
+          maxWeightGrams: u?.maxWeightGrams ?? null,
+          usedVolumeLiters: u?.usedVolumeLiters ?? 0,
+          usedWeightGrams: u?.usedWeightGrams ?? 0,
+          overVolume: u?.overVolume ?? false,
+          overWeight: u?.overWeight ?? false,
+        };
+      }),
+    [bags, usage],
+  );
+
+  const packContents = useCallback(
+    (bagId: string): PackCandidate[] => [
+      ...(assignments[bagId] ?? [])
+        .map((id) => itemById.get(id))
+        .filter(Boolean)
+        .map((i) => itemCandidate(i as PlannerItem)),
+      ...(gearAssignments[bagId] ?? [])
+        .map((id) => gearById.get(id))
+        .filter(Boolean)
+        .map((g) => gearCandidate(g as PlannerGear)),
+    ],
+    [assignments, gearAssignments, itemById, gearById, itemCandidate, gearCandidate],
+  );
+
+  /** Persist the whole requirements object; the chips are the source of truth. */
+  async function saveRequirements(next: TripRequirements) {
+    const previous = requirements;
+    setRequirements(next);
+    const res = await setTripRequirements({
+      tripId: trip.id,
+      activities: next.activities,
+      activityDays: next.activityDays as Record<string, number> | undefined,
+      laundry: next.laundry,
+    });
+    if (!res.ok) setRequirements(previous);
+  }
+
+  function toggleActivity(id: TripActivity) {
+    const on = requirements.activities.includes(id);
+    void saveRequirements({
+      ...requirements,
+      activities: on
+        ? requirements.activities.filter((a) => a !== id)
+        : [...requirements.activities, id],
+    });
+  }
+
+  function setActivityDays(id: TripActivity, days: number) {
+    void saveRequirements({
+      ...requirements,
+      activityDays: { ...requirements.activityDays, [id]: days },
+    });
+  }
 
   async function describeTrip() {
     const text = tripText.trim();
@@ -339,100 +614,151 @@ export function TripPlanner({
     // suggestion the user confirms, never a silent write of something they
     // didn't say.
     const next = res.parsed.requirements;
-    setRequirements(next);
     setParseNote(
       res.parsed.summary +
         (res.parsed.source === "keywords" ? " (matched on keywords — check the chips.)" : ""),
     );
-    await setTripRequirements({
-      tripId: trip.id,
-      activities: next.activities,
-      laundry: next.laundry,
-    });
+    await saveRequirements(next);
   }
 
-  async function toggleActivity(id: string) {
-    const next = requirements.activities.includes(id as never)
-      ? requirements.activities.filter((a) => a !== id)
-      : [...requirements.activities, id as never];
-    const optimistic = { ...requirements, activities: next };
-    setRequirements(optimistic);
-    const res = await setTripRequirements({ tripId: trip.id, activities: next, laundry: requirements.laundry });
-    if (!res.ok) setRequirements(requirements);
+  /** The day plan, resolved to real pieces the carousel can compose. */
+  const lookDays = useMemo<LookDay[]>(
+    () =>
+      dayPlan.map((day) => {
+        const date = new Date(trip.startDate);
+        date.setUTCDate(date.getUTCDate() + day.day - 1);
+        return {
+          day: day.day,
+          label: date.toLocaleDateString(undefined, {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            timeZone: "UTC",
+          }),
+          complete: day.complete,
+          rewear: day.rewear,
+          activity: activityByDay.get(day.day) ? activityLabel(activityByDay.get(day.day)!) : null,
+          pieces: day.itemIds
+            .map((id) => itemById.get(id))
+            .filter(Boolean)
+            .map((i) => ({
+              id: (i as PlannerItem).id,
+              category: (i as PlannerItem).category,
+              imagePath: (i as PlannerItem).imagePath,
+              name: (i as PlannerItem).name,
+            })),
+        };
+      }),
+    [dayPlan, itemById, trip.startDate, activityByDay],
+  );
+
+  /** Persist a daily-rotation override, then re-read so the plan reflects it. */
+  async function setDailyWear(itemId: string, dailyWear: boolean | null) {
+    const res = await setItemDailyWear({ itemId, dailyWear });
+    if (res.ok) router.refresh();
   }
 
-  async function toggleLaundry() {
-    const optimistic = { ...requirements, laundry: !requirements.laundry };
-    setRequirements(optimistic);
-    const res = await setTripRequirements({
-      tripId: trip.id,
-      activities: requirements.activities,
-      laundry: optimistic.laundry,
-    });
-    if (!res.ok) setRequirements(requirements);
+  /** Open Pack mode, optionally straight onto a particular bag. */
+  function openPackMode(bagId?: string) {
+    const target = bagId && bags.some((b) => b.id === bagId) ? bagId : null;
+    if (target) setActiveBagId(target);
+    else if (!bags.some((b) => b.id === activeBagId)) setActiveBagId(bags[0]?.id ?? NONE);
+    setPackOpen(true);
   }
 
   return (
     // Two columns from lg up: the plan on the left, what's actually in the bags
     // on the right. Below lg they stack in the same order.
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-8">
-      {/* Left: the trip and what it asks of the bag. */}
+    <PanelStateProvider>
+    {/* One column now. Packing used to run down a sticky right-hand rail
+        beside all of this; Pack mode replaced it. */}
+    <div className="mx-auto max-w-3xl">
       <div className="space-y-8">
         <TripHeader trip={trip} onSaved={() => router.refresh()} />
 
-      {/* Climate */}
-      <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-serif text-xl">Climate</h2>
-          <button
-            type="button"
-            onClick={handleFetchClimate}
-            disabled={loadingClimate}
-            className="rounded-full border border-ink/15 px-4 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
-          >
-            {loadingClimate ? "Checking…" : climate ? "Refresh climate" : "Check climate"}
-          </button>
-        </div>
-        {/* When the climate is "unknown" we have no latitude and therefore no
-            real numbers — showing the placeholder as a forecast is how a June
-            trip to Ireland used to read "Hot, 28°C". Ask instead. */}
-        {climate && climate.source === "unknown" ? (
-          <ClimateUnknown
-            tripId={trip.id}
-            destination={trip.destination}
-            temperatureUnit={temperatureUnit}
-            onSet={(next) => setClimate(next)}
-          />
-        ) : climate ? (
-          <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-2">
-            {/* Not "Forecast" — the same row also carries past records and the
-                user's own guess. The footnote below says which. */}
-            <Stat label="Conditions" value={BAND_LABELS[climate.band]} />
-            <Stat label="Avg high" value={formatTemperature(climate.avgHighC, temperatureUnit)} />
-            <Stat label="Avg low" value={formatTemperature(climate.avgLowC, temperatureUnit)} />
-            <Stat label="Rain" value={`${Math.round(climate.rainChance * 100)}%`} />
-            <Stat label="Days" value={String(climate.days)} />
-            <span className="text-[11px] text-ink-muted">
-              {climate.source === "forecast"
-                ? "Live forecast"
-                : climate.source === "climatology"
-                  ? "From past records"
-                  : "You set this"}
-            </span>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-ink-muted">
-            Check the climate to tailor the packing list to the weather.
-          </p>
-        )}
+      {/* Destination — where you're going, drawn, and what it'll be doing there.
+          The city used to exist only as a string in the edit form, which meant
+          the one fact the whole plan hangs on was the least visible thing on
+          the page. */}
+      <DestinationCard
+        trip={trip}
+        climate={climate}
+        temperatureUnit={temperatureUnit}
+        loadingClimate={loadingClimate}
+        onRefreshClimate={handleFetchClimate}
+        onClimateSet={(next) => setClimate(next)}
+        onMoved={() => router.refresh()}
+      />
+
+      {/* The two doors. Both lead to a full-screen animated space, so they're
+          built as a matched, mirrored pair rather than as two more pills in a
+          row of pills — and each carries the number that says what's waiting
+          inside. Auto-pack used to sit here; it moved into Pack mode, next to
+          the bags it fills. */}
+      <section className="flex flex-col gap-3 sm:flex-row">
+        <SpaceTile
+          title="Pack"
+          glyph="orbit"
+          align="left"
+          disabled={bags.length === 0}
+          onClick={() => openPackMode()}
+          summary={
+            packedIds.size + packedGearCount === 0
+              ? "Nothing in the bags yet"
+              : /* Split because the numbers answer different questions: the
+                   litres and kilos are what the bag has to carry, garments are
+                   what the day plan can dress you from. */
+                `${formatVolume(usage.totals.volumeLiters)} · ${formatWeight(usage.totals.weightGrams)} · ${
+                  packedIds.size
+                } ${packedIds.size === 1 ? "garment" : "garments"}${
+                  packedGearCount > 0 ? ` · ${packedGearCount} gear` : ""
+                }`
+          }
+        />
+        <SpaceTile
+          title="Day by day"
+          glyph="carousel"
+          align="right"
+          disabled={dayPlan.length === 0}
+          onClick={() => setLooksOpen(true)}
+          summary={
+            dayPlan.length === 0
+              ? "Pack some clothes first"
+              : `${completeDayCount(dayPlan)} of ${dayPlan.length} days dressed${
+                  distinctOutfitCount(dayPlan) > 0
+                    ? ` · ${distinctOutfitCount(dayPlan)} distinct ${
+                        distinctOutfitCount(dayPlan) === 1 ? "outfit" : "outfits"
+                      }`
+                    : ""
+                }${
+                  /* Reconciles with the packing warning's "covers N of M days",
+                     which counts only days you can dress in clean clothes. */
+                  rewearDayCount(dayPlan) > 0 ? ` · ${rewearDayCount(dayPlan)} need a re-wear` : ""
+                }`
+          }
+        />
       </section>
 
-      {/* What the trip is for — the input that stops every trip packing alike */}
-      <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
-        <h2 className="font-serif text-xl">What&apos;s this trip for?</h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          We&apos;ll make sure the bag covers it.
-        </p>
+      {warnings.length > 0 ? (
+        <ul className="space-y-1 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+          {warnings.map((w, i) => (
+            <li key={i}>• {w}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {/* What the trip is for — the input that stops every trip packing alike,
+          and the only thing that can say a day is a beach day. */}
+      <CollapsibleSection
+        id="purpose"
+        title="What's this trip for?"
+        summary={
+          requirements.activities.length > 0
+            ? requirements.activities.map((a) => activityLabel(a)).join(", ")
+            : "Nothing set"
+        }
+      >
+        <p className="text-sm text-ink-muted">We&apos;ll make sure the bag covers it.</p>
 
         <div className="mt-3 flex flex-wrap items-start gap-2">
           <input
@@ -453,7 +779,7 @@ export function TripPlanner({
             {parsing ? "Reading…" : "Read it"}
           </button>
         </div>
-        {parseNote && <p className="mt-2 text-xs text-ink-muted">{parseNote}</p>}
+        {parseNote ? <p className="mt-2 text-xs text-ink-muted">{parseNote}</p> : null}
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {ACTIVITIES.map((a) => {
@@ -462,7 +788,7 @@ export function TripPlanner({
               <button
                 key={a.id}
                 type="button"
-                onClick={() => void toggleActivity(a.id)}
+                onClick={() => toggleActivity(a.id)}
                 aria-pressed={on}
                 className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
                   on
@@ -477,7 +803,7 @@ export function TripPlanner({
           <span aria-hidden className="mx-1 w-px self-stretch bg-ink/10" />
           <button
             type="button"
-            onClick={() => void toggleLaundry()}
+            onClick={() => void saveRequirements({ ...requirements, laundry: !requirements.laundry })}
             aria-pressed={requirements.laundry}
             className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
               requirements.laundry
@@ -488,67 +814,85 @@ export function TripPlanner({
             Laundry available
           </button>
         </div>
-      </section>
 
-      {/* Auto-pack. The flight track is the flex-1 gap between the button and
-          the total, so the plane's route is exactly the distance between them
-          however wide the column gets. The total sits at the right edge. */}
-      <section className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={handleAutoPack}
-          disabled={packing || bags.length === 0}
-          className="rounded-full bg-ink px-6 py-2.5 text-sm tracking-wide text-paper transition hover:bg-ink-soft disabled:opacity-50"
-        >
-          {packing ? "Packing…" : "Auto-pack my bags"}
-        </button>
-        <PlaneRoute key={flightId} flying={flying} />
-        <span className="ml-auto text-xs text-ink-muted">
-          Total packed: {formatVolume(usage.totals.volumeLiters)} · {formatWeight(usage.totals.weightGrams)} ·{" "}
-          {usage.totals.count} {usage.totals.count === 1 ? "item" : "items"}
-        </span>
-      </section>
-
-      {warnings.length > 0 ? (
-        <ul className="space-y-1 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-          {warnings.map((w, i) => (
-            <li key={i}>• {w}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {/* Day by day — the output contract that makes a bad bag obvious */}
-      {dayPlan.length > 0 ? (
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 className="font-serif text-xl">Day by day</h2>
-            <p className="text-xs text-ink-muted">
-              {completeDayCount(dayPlan)} of {dayPlan.length} days dressed
-              {distinctOutfitCount(dayPlan) > 0
-                ? ` · ${distinctOutfitCount(dayPlan)} distinct ${
-                    distinctOutfitCount(dayPlan) === 1 ? "outfit" : "outfits"
-                  }`
-                : ""}
-              {/* Reconciles with the packing warning's "covers N of M days",
-                  which counts only days you can dress in clean clothes. */}
-              {rewearDayCount(dayPlan) > 0
-                ? ` · ${rewearDayCount(dayPlan)} need a re-wear`
-                : ""}
-            </p>
+        {/* How many days each one takes. Ticking "Beach" says the trip has
+            beach days; only you can say how many, and it's the difference
+            between packing swimwear and wearing it. */}
+        {requirements.activities.length > 0 ? (
+          <div className="mt-4 space-y-2 border-t border-ink/10 pt-3">
+            {ACTIVITIES.filter((a) => requirements.activities.includes(a.id)).map((a) => {
+              const count = activityDayCount(requirements, a.id);
+              const scheduled = [...activityByDay.entries()]
+                .filter(([, id]) => id === a.id)
+                .map(([day]) => day);
+              return (
+                <div key={a.id} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="w-28 shrink-0">{a.label}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={count}
+                    onChange={(e) => setActivityDays(a.id, Number(e.target.value))}
+                    className="w-16 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+                  />
+                  <span className="text-ink-muted">
+                    {count === 1 ? "day" : "days"}
+                    {scheduled.length > 0 ? ` · day ${scheduled.join(", ")}` : ""}
+                    {occasionForActivity(a.id) ? "" : " · no special clothes"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-          <ul className="mt-4 grid gap-2.5 sm:grid-cols-2">
-            {dayPlan.map((day) => (
-              <DayCard key={day.day} day={day} itemById={itemById} startDate={trip.startDate} />
-            ))}
-          </ul>
-        </section>
+        ) : null}
+      </CollapsibleSection>
+
+      {/* The occasion pieces are called out because they're deliberately
+          missing from the day plan: without a line saying so, "11 of 11 days
+          dressed" looks like it forgot the trunks. */}
+      {occasionPacked.length > 0 ? (
+        <p
+          className="text-xs text-ink-muted"
+          title={occasionPacked.map((i) => i.name).join(", ")}
+        >
+          Plus{" "}
+          {[...new Set(occasionPacked.map((i) => i.occasion))]
+            .filter(Boolean)
+            .map((k) => occasionLabel(k as OccasionKind).toLowerCase())
+            .join(" and ")}
+          , kept out of the daily rotation
+        </p>
       ) : null}
+
+      {/* What each bag is carrying. Read-only: this is the plan reporting on
+          itself, and every change to it happens in Pack mode. */}
+      <BagsOverview
+        bags={bags}
+        usage={usage}
+        contentsOf={packContents}
+        onPack={openPackMode}
+      />
+
+      {/* Gear — the half of the bag that isn't clothes. Sits after the day
+          plan because the outfits are the reason for the trip; the charger is
+          the reason you're annoyed when you land without one. */}
+      <GearSection
+        gear={gear}
+        bags={bags}
+        bagOfGear={bagOfGear}
+        climate={climate}
+        onPack={() => openPackMode()}
+      />
 
       {/* Packed summary: garment-type counts + total value */}
       {summary.total > 0 ? (
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 className="font-serif text-xl">Packed summary</h2>
+        <CollapsibleSection
+          id="summary"
+          title="Packed summary"
+          summary={`${summary.total} ${summary.total === 1 ? "piece" : "pieces"}`}
+        >
+          <div className="flex flex-wrap items-baseline justify-end gap-3">
             <div className="text-right">
               <div className="text-[10px] uppercase tracking-[0.18em] text-ink-muted">
                 Total value
@@ -573,90 +917,447 @@ export function TripPlanner({
               {summary.total === 1 ? "item" : "items"} with a recorded price.
             </p>
           ) : null}
-        </section>
+        </CollapsibleSection>
       ) : null}
       </div>
 
-      {/* Right: the bags themselves, plus the pool you fill them from. Sticky
-          so the contents stay in view while you read the plan beside them. */}
-      <aside className="relative mt-8 lg:sticky lg:top-6 lg:mt-0">
-      <div
-        ref={bagColumn}
-        className="space-y-5 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pb-10 lg:pr-1"
-      >
-      {/* Bags */}
-      {bags.length === 0 ? (
-        <div className="rounded-2xl bg-paper-warm p-6 text-sm text-ink-muted">
-          This trip has no bags.{" "}
-          <Link href="/closet/smartpakker/bags" className="text-ink underline">
-            Add a bag
-          </Link>{" "}
-          then edit the trip to include it.
-        </div>
-      ) : (
-        <div className="space-y-5">
-          {bags.map((bag) => {
-            const u = usage.perBag.find((p) => p.bagId === bag.id)!;
-            return (
-              <BagPanel
-                key={bag.id}
-                bag={bag}
-                usage={u}
-                items={(assignments[bag.id] ?? []).map((id) => itemById.get(id)).filter(Boolean) as PlannerItem[]}
-                addableItems={unpackedAll}
-                allBags={bags}
-                estimates={estimates}
-                climate={climate}
-                onMove={moveItem}
-                onSaveOverride={saveOverride}
-              />
-            );
-          })}
-        </div>
-      )}
+    </div>
 
-      {/* Unpacked pool */}
-      <section>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-serif text-xl">Not packed ({unpacked.length})</h2>
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter…"
-            className="rounded-full border border-ink/15 bg-paper px-4 py-1.5 text-xs focus:border-ink/40 focus:outline-none"
-          />
-        </div>
-        {unpacked.length === 0 ? (
-          <p className="text-sm text-ink-muted">Everything&apos;s packed.</p>
-        ) : (
-          // No inner scroller: the column already scrolls, and nesting the two
-          // makes the wheel fight over which one moves.
-          <ul className="space-y-2">
-            {unpacked.map((item) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                currentBagId={NONE}
-                allBags={bags}
-                estimate={estimates.get(item.id)}
-                climate={climate}
-                onMove={moveItem}
-                onSaveOverride={saveOverride}
-              />
+    {/* The packing surface. Full screen, not a panel beside the plan. */}
+    <AnimatePresence>
+      {packOpen ? (
+        <PackMode
+          bags={packBags}
+          candidates={packCandidates}
+          contentsOf={packContents}
+          activeBagId={activeBagId}
+          onActiveBagChange={setActiveBagId}
+          onDrop={handleDrop}
+          onAdjustSize={saveOverride}
+          onSetDailyWear={setDailyWear}
+          onAutoPack={handleAutoPack}
+          autoPacking={packing}
+          flightId={flightId}
+          flying={flying}
+          warnings={warnings}
+          onClose={() => setPackOpen(false)}
+        />
+      ) : null}
+    </AnimatePresence>
+
+    <AnimatePresence>
+      {looksOpen ? (
+        <LooksCarousel
+          days={lookDays}
+          prefs={lookPrefs}
+          onClose={() => setLooksOpen(false)}
+        />
+      ) : null}
+    </AnimatePresence>
+    </PanelStateProvider>
+  );
+}
+
+/**
+ * The gear on this trip, grouped by what kind of thing it is.
+ *
+ * Reads from the user's library rather than from a per-trip list, so the
+ * charger you described once is one tap away on every trip afterwards. Packing
+ * a piece of gear is the same gesture as packing a garment — pick a bag — and
+ * it lands in the same meters.
+ */
+function GearSection({
+  gear,
+  bags,
+  bagOfGear,
+  climate,
+  onPack,
+}: {
+  gear: PlannerGear[];
+  bags: PlannerBag[];
+  bagOfGear: Map<string, string>;
+  climate: ClimateSummary | null;
+  onPack: () => void;
+}) {
+  const packedCount = gear.filter((g) => bagOfGear.has(g.id)).length;
+
+  const suggestions = useMemo(
+    () =>
+      suggestGear({
+        library: gear.map((g) => ({
+          id: g.id,
+          name: g.name,
+          category: g.category,
+          packed: bagOfGear.has(g.id),
+        })),
+        rainChance: climate?.rainChance ?? null,
+        band: climate?.band ?? null,
+        days: climate?.days ?? 0,
+      }),
+    [gear, bagOfGear, climate],
+  );
+
+  // Preserve GEAR_CATEGORIES order rather than whatever the query returned, so
+  // documents stay at the top where the things you can't replace live.
+  const groups = GEAR_CATEGORIES.map((category) => ({
+    category: category.id,
+    label: category.label,
+    rows: gear.filter((g) => g.category === category.id),
+  })).filter((group) => group.rows.length > 0);
+
+  return (
+    <CollapsibleSection
+      id="gear"
+      title="Gear"
+      summary={gear.length > 0 ? `${packedCount} of ${gear.length} packed` : undefined}
+      actions={
+        <Link
+          href="/closet/smartpakker/gear"
+          className="text-xs text-ink-muted underline hover:text-ink"
+        >
+          Manage gear
+        </Link>
+      }
+    >
+      {gear.length === 0 ? (
+        <p className="text-sm text-ink-muted">
+          Chargers, passport, toiletries — the things that aren&apos;t clothes but still
+          fill the bag.{" "}
+          <Link href="/closet/smartpakker/gear" className="text-ink underline">
+            Set up your gear
+          </Link>{" "}
+          once and it&apos;s here for every trip.
+        </p>
+      ) : (
+        <>
+          {suggestions.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5">
+              {suggestions.map((suggestion) => (
+                <li key={suggestion.id}>
+                  {/* A suggestion, not an action: it opens the place where
+                      packing happens rather than being a third way to do it. */}
+                  <button
+                    type="button"
+                    disabled={bags.length === 0}
+                    onClick={() => onPack()}
+                    title={bags.length === 0 ? "Add a bag first" : "Open Pack mode"}
+                    className="rounded-full border border-accent/50 bg-accent/10 px-3 py-1.5 text-xs transition hover:bg-accent/20 disabled:opacity-40"
+                  >
+                    {suggestion.name}
+                    <span className="ml-1.5 text-ink-muted">— {suggestion.reason}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="mt-4 space-y-4">
+            {groups.map((group) => (
+              <div key={group.category}>
+                <h3 className="text-[10px] uppercase tracking-[0.18em] text-ink-muted">
+                  {group.label}
+                </h3>
+                <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {group.rows.map((row) => (
+                    <GearRow
+                      key={row.id}
+                      gear={row}
+                      bagName={bags.find((b) => b.id === bagOfGear.get(row.id))?.name ?? null}
+                    />
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
-        )}
-      </section>
+          </div>
+        </>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+/**
+ * One piece of gear: what it is, what it costs, and where it ended up.
+ *
+ * Read-only, like `BagsOverview`. It used to carry a drag handle and a bag
+ * picker, but with the packing rail gone there is nowhere on this page to drop
+ * anything, and a second way to assign bags is exactly what Pack mode replaced.
+ */
+function GearRow({
+  gear,
+  bagName,
+}: {
+  gear: PlannerGear;
+  /** Null when it isn't in a bag. */
+  bagName: string | null;
+}) {
+  const { weightGrams, volumeLiters, estimated } = gearFootprint(gear);
+  const packed = bagName != null;
+
+  return (
+    <li
+      className={`flex items-center gap-3 rounded-xl border p-2.5 ${
+        packed ? "border-ink/15 bg-paper" : "border-ink/10 bg-paper/40"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          packed ? "bg-accent/20 text-ink" : "bg-paper-warm text-ink-muted"
+        }`}
+      >
+        <GearIcon name={gearIconName(gear)} className="h-5 w-5" />
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-1.5">
+          <span className="truncate text-sm">{gear.name}</span>
+          {gear.quantity > 1 ? (
+            <span className="shrink-0 text-[11px] text-ink-muted">×{gear.quantity}</span>
+          ) : null}
+        </div>
+        <div className="text-[11px] text-ink-muted">
+          {formatWeight(weightGrams)} · {formatVolume(volumeLiters)}
+          {/* Say so when the numbers are ours rather than theirs, so a bag
+              reading 94% full can be trusted exactly as far as its inputs. */}
+          {estimated ? <span className="ml-1 opacity-70">(est.)</span> : null}
+        </div>
       </div>
 
-      <div
-        aria-hidden="true"
-        className={`pointer-events-none absolute inset-x-0 bottom-0 hidden h-14 bg-gradient-to-t from-paper via-paper/80 to-transparent transition-opacity duration-200 lg:block ${
-          bagColumnAtEnd ? "opacity-0" : "opacity-100"
-        }`}
+      <span className="shrink-0 text-[11px] text-ink-muted">{bagName ?? "Not packed"}</span>
+    </li>
+  );
+}
+
+/**
+ * Local time at the destination.
+ *
+ * Rendered empty on the server and filled in after mount: `new Date()` differs
+ * between the server render and the client hydration, and React treats that as
+ * a mismatch. Ticks every 30 seconds, which is enough for a clock showing only
+ * hours and minutes.
+ */
+function LocalTime({ timezone }: { timezone: string | null }) {
+  const [time, setTime] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!timezone) {
+      setTime(null);
+      return;
+    }
+    const tick = () => setTime(localTimeAt(timezone, new Date()));
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [timezone]);
+
+  if (!time) return null;
+  return <span className="tabular-nums">{time} there</span>;
+}
+
+/**
+ * The destination: a map window, the city itself, and the weather.
+ *
+ * These three were previously either missing or scattered — the city was a
+ * text input buried in the edit form, the weather was its own card, and there
+ * was no map at all. They belong together because they are one fact: where
+ * this trip is and what it will be like.
+ */
+function DestinationCard({
+  trip,
+  climate,
+  temperatureUnit,
+  loadingClimate,
+  onRefreshClimate,
+  onClimateSet,
+  onMoved,
+}: {
+  trip: PlannerTrip;
+  climate: ClimateSummary | null;
+  temperatureUnit: TemperatureUnit;
+  loadingClimate: boolean;
+  onRefreshClimate: () => void;
+  onClimateSet: (climate: ClimateSummary) => void;
+  onMoved: () => void;
+}) {
+  const [changing, setChanging] = useState(false);
+  const [draft, setDraft] = useState(trip.destination);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function pick(place: Place) {
+    setSaving(true);
+    setError(null);
+    const res = await updateTrip({
+      id: trip.id,
+      place: {
+        destination: placeLabel(place),
+        latitude: place.latitude,
+        longitude: place.longitude,
+        countryCode: place.countryCode,
+        timezone: place.timezone,
+      },
+    });
+    setSaving(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setChanging(false);
+    onMoved();
+  }
+
+  /** Saving free text keeps the label but gives up the pin — see `updateTrip`. */
+  async function saveTyped() {
+    const text = draft.trim();
+    if (!text || text === trip.destination) {
+      setChanging(false);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await updateTrip({ id: trip.id, destination: text });
+    setSaving(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setChanging(false);
+    onMoved();
+  }
+
+  const located = trip.latitude != null && trip.longitude != null;
+
+  return (
+    <CollapsibleSection
+      id="destination"
+      title="Destination"
+      summary={
+        climate && climate.source !== "unknown"
+          ? `${trip.destination} · ${BAND_LABELS[climate.band]}`
+          : trip.destination
+      }
+      actions={
+        <button
+          type="button"
+          onClick={onRefreshClimate}
+          disabled={loadingClimate}
+          className="rounded-full border border-ink/15 px-4 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+        >
+          {loadingClimate ? "Checking…" : climate ? "Refresh weather" : "Check the weather"}
+        </button>
+      }
+    >
+      <WorldMap
+        latitude={trip.latitude}
+        longitude={trip.longitude}
+        countryCode={trip.countryCode}
+        label={trip.destination}
       />
-      </aside>
-    </div>
+
+      {/* The city itself. Read-only until you ask to change it, so a stray
+          keystroke can't quietly move the trip somewhere else. */}
+      <div className="mt-4">
+        {changing ? (
+          <div>
+            <CityPicker
+              value={draft}
+              onChange={setDraft}
+              onPick={(place) => void pick(place)}
+              search={async (query) => {
+                const res = await searchDestinations(query);
+                return res.ok ? res.places : [];
+              }}
+              autoFocus
+            />
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void saveTyped()}
+                disabled={saving}
+                className="rounded-full border border-ink/25 px-3.5 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-40"
+              >
+                {saving ? "Saving…" : "Use what I typed"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(trip.destination);
+                  setChanging(false);
+                  setError(null);
+                }}
+                className="text-xs text-ink-muted underline hover:text-ink"
+              >
+                Cancel
+              </button>
+              <span className="text-[11px] text-ink-muted">
+                Pick from the list to pin it on the map.
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span aria-hidden className="text-base leading-none">
+              {flagEmoji(trip.countryCode)}
+            </span>
+            <span className="text-lg">{trip.destination}</span>
+            <span className="text-xs text-ink-muted">
+              <LocalTime timezone={trip.timezone} />
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(trip.destination);
+                setChanging(true);
+              }}
+              className="text-xs text-ink-muted underline hover:text-ink"
+            >
+              Change
+            </button>
+          </div>
+        )}
+        {error ? <p className="mt-2 text-xs text-rose-700">{error}</p> : null}
+        {!located && !changing ? (
+          <p className="mt-1.5 text-[11px] text-ink-muted">
+            Not pinned to a place yet — choose it from the list and we&apos;ll map it and
+            fetch a real forecast.
+          </p>
+        ) : null}
+      </div>
+
+      {/* Weather. When the climate is "unknown" we have no coordinates and
+          therefore no real numbers — showing the placeholder as a forecast is
+          how a June trip to Ireland used to read "Hot, 28°C". Ask instead. */}
+      <div className="mt-4 border-t border-ink/10 pt-4">
+        {climate && climate.source === "unknown" ? (
+          <ClimateUnknown
+            tripId={trip.id}
+            destination={trip.destination}
+            temperatureUnit={temperatureUnit}
+            onSet={onClimateSet}
+          />
+        ) : climate ? (
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+            {/* Not "Forecast" — the same row also carries past records and the
+                user's own guess. The footnote below says which. */}
+            <Stat label="Conditions" value={BAND_LABELS[climate.band]} />
+            <Stat label="Avg high" value={formatTemperature(climate.avgHighC, temperatureUnit)} />
+            <Stat label="Avg low" value={formatTemperature(climate.avgLowC, temperatureUnit)} />
+            <Stat label="Rain" value={`${Math.round(climate.rainChance * 100)}%`} />
+            <Stat label="Days" value={String(climate.days)} />
+            <span className="text-[11px] text-ink-muted">
+              {climate.source === "forecast"
+                ? "Live forecast"
+                : climate.source === "climatology"
+                  ? "From past records"
+                  : "You set this"}
+            </span>
+          </div>
+        ) : (
+          <p className="text-sm text-ink-muted">
+            Check the weather to tailor the packing list to it.
+          </p>
+        )}
+      </div>
+    </CollapsibleSection>
   );
 }
 
@@ -725,109 +1426,6 @@ function ClimateUnknown({
   );
 }
 
-/** One day of the trip: what you'd wear, or what's missing. */
-function DayCard({
-  day,
-  itemById,
-  startDate,
-}: {
-  day: DayOutfit;
-  itemById: Map<string, PlannerItem>;
-  startDate: string;
-}) {
-  const pieces = day.itemIds.map((id) => itemById.get(id)).filter((i): i is PlannerItem => !!i);
-  const date = new Date(startDate);
-  date.setUTCDate(date.getUTCDate() + day.day - 1);
-  const label = date.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-
-  return (
-    <li
-      className={`rounded-xl border p-3 ${
-        day.complete ? "border-ink/10 bg-paper" : "border-amber-300/60 bg-amber-50"
-      }`}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-medium">{label}</span>
-        {!day.complete ? (
-          <span className="text-[11px] text-amber-900">Nothing to wear</span>
-        ) : day.rewear ? (
-          <span className="text-[11px] text-ink-muted">Re-wear</span>
-        ) : !day.coherent ? (
-          <span className="text-[11px] text-ink-muted">Bold combination</span>
-        ) : null}
-      </div>
-      {pieces.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {pieces.map((piece) => (
-            <img
-              key={piece.id}
-              src={thumbnailUrl(piece.imagePath)}
-              alt={piece.name}
-              title={piece.name}
-              className="h-12 w-12 rounded-lg bg-white object-contain"
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="mt-2 text-[11px] text-ink-muted">Pack a top, a bottom and shoes.</p>
-      )}
-    </li>
-  );
-}
-
-/**
- * The plane that leaves the auto-pack button and flies the gap to the "Total
- * packed" total — one second, once per press, then it and its trail fade.
- *
- * The wrapper is the flight track: a flex-1 item filling whatever space is left
- * between the button and the total, so the route is the real distance between
- * them at any column width and nothing has to be measured in JS. The plane and
- * trail then animate in percentages of it.
- *
- * Purely decorative — the button's own label already says "Packing…" — so it's
- * hidden from the accessibility tree. Motion lives in globals.css under
- * `.plane-route`, which puts it behind the app's prefers-reduced-motion rule
- * for free.
- */
-function PlaneRoute({ flying }: { flying: boolean }) {
-  return (
-    <span
-      className="plane-route pointer-events-none relative hidden h-4 min-w-[2.5rem] flex-1 text-ink sm:block"
-      data-state={flying ? "flying" : "idle"}
-      style={planeFlightVars() as CSSProperties}
-      aria-hidden="true"
-    >
-      {/* Dashed trail, growing behind the plane — its right edge tracks the
-          plane because both run 0→100% of the same track. */}
-      <span className="plane-trail absolute left-0 top-1/2 h-px -translate-y-1/2" />
-
-      {/* Airliner from above, nose right. One closed silhouette: nose, swept
-          wing, tailplane, tail cone, then the mirror of all four back up the
-          other side. Centred on its own position so it meets the total nose-first. */}
-      <span className="plane-craft absolute top-1/2 -translate-x-1/2 -translate-y-1/2">
-        <svg width="17" height="13" viewBox="-8.5 -6.5 17 13" className="block">
-          <path
-            d="M 7.2 0
-               C 7.2 -0.64 6 -1.1 4.25 -1.15
-               L 1.36 -1.15 L -2.55 -5.45 L -3.75 -5.45 L -1.87 -1.28
-               L -4.6 -1.28 L -6.1 -3.06 L -7 -3.06 L -6.3 -1.15
-               L -7.2 -0.47 L -7.2 0.47
-               L -6.3 1.15 L -7 3.06 L -6.1 3.06 L -4.6 1.28
-               L -1.87 1.28 L -3.75 5.45 L -2.55 5.45 L 1.36 1.15
-               L 4.25 1.15
-               C 6 1.1 7.2 0.64 7.2 0 Z"
-            fill="currentColor"
-          />
-        </svg>
-      </span>
-    </span>
-  );
-}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -838,9 +1436,16 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Trip name and dates.
+ *
+ * The destination used to be edited here too. It moved to `DestinationCard`,
+ * next to the map it pins and the forecast it drives — two places to change
+ * the same field is one place too many, and this was the one where you
+ * couldn't see the consequence of the change.
+ */
 function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
-  const [destination, setDestination] = useState(trip.destination);
   const [startDate, setStartDate] = useState(trip.startDate.slice(0, 10));
   const [endDate, setEndDate] = useState(trip.endDate.slice(0, 10));
   const [busy, setBusy] = useState(false);
@@ -851,7 +1456,7 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
   async function save() {
     setBusy(true);
     setError(null);
-    const res = await updateTrip({ id: trip.id, destination, startDate, endDate });
+    const res = await updateTrip({ id: trip.id, startDate, endDate });
     setBusy(false);
     if (!res.ok) {
       setError(res.error);
@@ -864,17 +1469,7 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
   if (editing) {
     return (
       <div className="rounded-2xl border border-ink/15 bg-white p-5 shadow-tile">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="sm:col-span-3">
-            <label className="block text-[11px] uppercase tracking-wide text-ink-muted">
-              Destination
-            </label>
-            <input
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-ink/15 bg-paper px-3 py-2 text-sm focus:border-ink/40 focus:outline-none"
-            />
-          </div>
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Leaving</label>
             <input
@@ -915,7 +1510,7 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
           </button>
         </div>
         <p className="mt-2 text-[11px] text-ink-muted">
-          Changing the destination or dates resets the climate — check it again afterwards.
+          Changing the dates resets the weather — check it again afterwards.
         </p>
       </div>
     );
@@ -934,316 +1529,169 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
         onClick={() => setEditing(true)}
         className="rounded-full border border-ink/15 px-4 py-1.5 text-xs transition hover:bg-paper-warm"
       >
-        Edit trip
+        Edit dates
       </button>
     </header>
   );
 }
 
-function BagPanel({
-  bag,
+/**
+ * Each bag and how full it is — a readout, not a control.
+ *
+ * This replaces the sticky rail that used to run down the right of the page
+ * with its own copy of every item row, bag picker and remove button. That rail
+ * was a second packing interface competing with Pack mode; what's worth keeping
+ * on the plan is the answer it gave at a glance, which is this.
+ */
+function BagsOverview({
+  bags,
   usage,
-  items,
-  addableItems,
-  allBags,
-  estimates,
-  climate,
-  onMove,
-  onSaveOverride,
+  contentsOf,
+  onPack,
 }: {
-  bag: PlannerBag;
-  usage: ReturnType<typeof computeUsage>["perBag"][number];
-  items: PlannerItem[];
-  addableItems: PlannerItem[];
-  allBags: PlannerBag[];
-  estimates: Map<string, { weightGrams: number; volumeLiters: number }>;
-  climate: ClimateSummary | null;
-  onMove: (itemId: string, targetBagId: string) => void;
-  onSaveOverride: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
+  bags: PlannerBag[];
+  usage: ReturnType<typeof computeUsage>;
+  contentsOf: (bagId: string) => PackCandidate[];
+  onPack: (bagId: string) => void;
 }) {
-  const [adding, setAdding] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState("");
-
-  const volumePct = Math.min(100, (usage.usedVolumeLiters / bag.volumeLiters) * 100);
-  const weightPct =
-    usage.maxWeightGrams != null
-      ? Math.min(100, (usage.usedWeightGrams / usage.maxWeightGrams) * 100)
-      : null;
-
-  const pickerMatches = addableItems.filter((i) =>
-    pickerSearch ? i.name.toLowerCase().includes(pickerSearch.toLowerCase()) : true,
-  );
+  if (bags.length === 0) {
+    return (
+      <div className="rounded-2xl bg-paper-warm p-6 text-sm text-ink-muted">
+        This trip has no bags.{" "}
+        <Link href="/closet/smartpakker/bags" className="text-ink underline">
+          Add a bag
+        </Link>{" "}
+        then edit the trip to include it.
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="font-medium">{bag.name}</h3>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-ink-muted">
-            {items.length} {items.length === 1 ? "item" : "items"}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setAdding((o) => !o);
-              setPickerSearch("");
-            }}
-            className="rounded-full border border-ink/15 px-3 py-1 text-xs transition hover:bg-paper-warm"
-          >
-            {adding ? "Done" : "+ Add items"}
-          </button>
-        </div>
-      </div>
+    <CollapsibleSection
+      id="bags"
+      title="Bags"
+      summary={`${bags.length} ${bags.length === 1 ? "bag" : "bags"}`}
+    >
+      <ul className="space-y-4">
+        {bags.map((bag) => {
+          const u = usage.perBag.find((p) => p.bagId === bag.id);
+          const count = u?.itemIds.length ?? 0;
+          return (
+            <li key={bag.id} className="rounded-xl border border-ink/10 bg-paper/60 p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium">{bag.name}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-ink-muted">
+                    {count} {count === 1 ? "item" : "items"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onPack(bag.id)}
+                    className="rounded-full border border-ink/15 px-3 py-1 text-xs transition hover:bg-paper-warm"
+                  >
+                    Pack this
+                  </button>
+                </div>
+              </div>
 
-      {/* Volume meter */}
-      <div className="mt-4">
-        <div className="flex items-center justify-between text-[11px] text-ink-muted">
-          <span>Volume</span>
-          <span className={usage.overVolume ? "text-rose-700" : ""}>
-            {formatVolume(usage.usedVolumeLiters)} / {formatVolume(bag.volumeLiters)}
-          </span>
-        </div>
-        <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-paper-warm">
-          <div
-            className={`h-full rounded-full transition-all ${
-              usage.overVolume ? "bg-rose-500" : "bg-ink"
-            }`}
-            style={{ width: `${volumePct}%` }}
-          />
-        </div>
-      </div>
+              <div className="mt-3 space-y-2">
+                <CapacityMeter
+                  label="Volume"
+                  used={u?.usedVolumeLiters ?? 0}
+                  capacity={bag.volumeLiters}
+                  incoming={null}
+                  format={formatVolume}
+                  over={u?.overVolume ?? false}
+                />
+                {u?.maxWeightGrams != null ? (
+                  <CapacityMeter
+                    label="Weight"
+                    used={u.usedWeightGrams}
+                    capacity={u.maxWeightGrams}
+                    incoming={null}
+                    format={formatWeight}
+                    over={u.overWeight}
+                  />
+                ) : null}
+              </div>
 
-      {/* Weight meter (only if a cap is set) */}
-      {weightPct != null ? (
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-[11px] text-ink-muted">
-            <span>Weight</span>
-            <span className={usage.overWeight ? "text-rose-700" : ""}>
-              {formatWeight(usage.usedWeightGrams)} / {formatWeight(usage.maxWeightGrams!)}
-            </span>
-          </div>
-          <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-paper-warm">
-            <div
-              className={`h-full rounded-full transition-all ${
-                usage.overWeight ? "bg-rose-500" : "bg-ink"
-              }`}
-              style={{ width: `${weightPct}%` }}
-            />
-          </div>
-        </div>
-      ) : null}
-
-      {/* Add-items picker */}
-      {adding ? (
-        <div className="mt-4 rounded-xl border border-ink/15 bg-paper/60 p-3">
-          <input
-            value={pickerSearch}
-            onChange={(e) => setPickerSearch(e.target.value)}
-            placeholder={`Search items to add to ${bag.name}…`}
-            autoFocus
-            className="w-full rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-xs focus:border-ink/40 focus:outline-none"
-          />
-          {pickerMatches.length === 0 ? (
-            <p className="mt-3 px-1 text-center text-xs text-ink-muted">
-              {addableItems.length === 0 ? "Everything's already packed." : "No matching items."}
-            </p>
-          ) : (
-            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
-              {pickerMatches.map((item) => {
-                const est = estimates.get(item.id);
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => onMove(item.id, bag.id)}
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-paper-warm"
-                    >
-                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-paper-warm">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={thumbnailUrl(item.imagePath)}
-                          alt={item.name}
-                          className="h-full w-full object-cover"
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-xs">{item.name}</span>
-                      <span className="text-[11px] text-ink-muted">
-                        {formatVolume(est?.volumeLiters ?? item.volumeLiters)}
-                      </span>
-                      <span className="text-[11px] font-medium text-ink">Add</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      ) : null}
-
-      <ul className="mt-4 space-y-2">
-        {items.length === 0 ? (
-          <li className="rounded-xl bg-paper-warm/60 px-3 py-6 text-center text-xs text-ink-muted">
-            Empty — auto-pack or use “+ Add items” above.
-          </li>
-        ) : (
-          items.map((item) => (
-            <ItemRow
-              key={item.id}
-              item={item}
-              currentBagId={bag.id}
-              allBags={allBags}
-              estimate={estimates.get(item.id)}
-              climate={climate}
-              onMove={onMove}
-              onSaveOverride={onSaveOverride}
-            />
-          ))
-        )}
+              <BagContents contents={contentsOf(bag.id)} />
+            </li>
+          );
+        })}
       </ul>
-    </div>
+    </CollapsibleSection>
   );
 }
 
-function ItemRow({
-  item,
-  currentBagId,
-  allBags,
-  estimate,
-  climate,
-  onMove,
-  onSaveOverride,
-}: {
-  item: PlannerItem;
-  currentBagId: string;
-  allBags: PlannerBag[];
-  estimate?: { weightGrams: number; volumeLiters: number };
-  climate: ClimateSummary | null;
-  onMove: (itemId: string, targetBagId: string) => void;
-  onSaveOverride: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
-}) {
+/**
+ * What's actually inside one bag.
+ *
+ * Closed by default: the point of the overview is the meters, and five bags
+ * unrolled would put the page back where it was before Pack mode. Read-only —
+ * this says what's in there, Pack mode changes it.
+ */
+function BagContents({ contents }: { contents: PackCandidate[] }) {
   const [open, setOpen] = useState(false);
-  const weightGrams = estimate?.weightGrams ?? item.weightGrams;
-  const volumeLiters = estimate?.volumeLiters ?? item.volumeLiters;
-  const [w, setW] = useState(String(weightGrams));
-  const [v, setV] = useState(String(volumeLiters));
+  const reduceMotion = useReducedMotion();
 
-  const wrongSeason = climate ? seasonScore(item.season, climate.band) === 0 : false;
+  if (contents.length === 0) {
+    return <p className="mt-3 text-[11px] text-ink-muted">Empty.</p>;
+  }
 
   return (
-    <li className="rounded-xl border border-ink/10 bg-paper/60 p-2">
-      <div className="flex items-center gap-3">
-        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-paper-warm">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={thumbnailUrl(item.imagePath)} alt={item.name} className="h-full w-full object-cover" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm">{item.name}</div>
-          <div className="flex items-center gap-2 text-[11px] text-ink-muted">
-            <span>
-              {formatWeight(weightGrams)} · {formatVolume(volumeLiters)}
-            </span>
-            {wrongSeason ? (
-              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
-                off-season
-              </span>
-            ) : null}
-          </div>
-        </div>
-        {currentBagId === NONE ? (
-          <select
-            value={NONE}
-            onChange={(e) => onMove(item.id, e.target.value)}
-            className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
-          >
-            <option value={NONE}>Add to…</option>
-            {allBags.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <>
-            {allBags.length > 1 ? (
-              <select
-                value={currentBagId}
-                onChange={(e) => onMove(item.id, e.target.value)}
-                className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
-                title="Move to another bag"
-              >
-                {allBags.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => onMove(item.id, NONE)}
-              className="rounded-lg border border-rose-200 px-2 py-1 text-[11px] text-rose-700 transition hover:bg-rose-50"
-            >
-              Remove
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="text-[11px] text-ink-muted underline hover:text-ink"
-        >
-          {open ? "Close" : "Adjust"}
-        </button>
-      </div>
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="text-[11px] text-ink-muted underline hover:text-ink"
+      >
+        {open ? "Hide contents" : `Show all ${contents.length}`}
+      </button>
 
-      {open ? (
-        <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-ink/10 pt-2">
-          <div>
-            <label className="block text-[10px] uppercase tracking-wide text-ink-muted">Grams</label>
-            <input
-              value={w}
-              onChange={(e) => setW(e.target.value)}
-              inputMode="numeric"
-              className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] uppercase tracking-wide text-ink-muted">Litres</label>
-            <input
-              value={v}
-              onChange={(e) => setV(e.target.value)}
-              inputMode="decimal"
-              className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              const wn = Number(w);
-              const vn = Number(v);
-              onSaveOverride(
-                item.id,
-                Number.isFinite(wn) ? wn : null,
-                Number.isFinite(vn) ? vn : null,
-              );
-              setOpen(false);
-            }}
-            className="rounded-full bg-ink px-3 py-1 text-[11px] text-paper transition hover:bg-ink-soft"
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div
+            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.24, ease: easeOutExpo }}
+            className="overflow-hidden"
           >
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onSaveOverride(item.id, null, null);
-              setOpen(false);
-            }}
-            className="text-[11px] text-ink-muted underline hover:text-ink"
-          >
-            Reset to estimate
-          </button>
-        </div>
-      ) : null}
-    </li>
+            <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+              {contents.map((entry) => (
+                <li
+                  key={`${entry.kind}:${entry.id}`}
+                  className="flex items-center gap-2 rounded-lg bg-paper px-2 py-1.5"
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded bg-paper-warm">
+                    {entry.kind === "item" && entry.imagePath ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={thumbnailUrl(entry.imagePath)}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <GearIcon name={entry.icon ?? "pouch"} className="h-3.5 w-3.5 text-ink-muted" />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[11px]">{entry.name}</span>
+                  {entry.occasion ? (
+                    <span className="shrink-0 rounded-full bg-paper-warm px-1.5 text-[10px] text-ink-muted">
+                      {occasionLabel(entry.occasion)}
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 text-[10px] text-ink-muted">
+                    {formatVolume(entry.volumeLiters)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
   );
 }

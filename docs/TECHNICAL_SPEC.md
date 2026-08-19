@@ -253,6 +253,7 @@ documented one-migration path to native `Json` columns (§11.1).
 | `reverseImageSearch` | Stub | SerpAPI (Google Lens), Bing Visual Search |
 | `productScraper` | Stub | ScrapingBee, Bright Data, Apify |
 | `weather` (SmartPakker) | Real-capable | Open-Meteo (keyless) |
+| `geocode` (city picker) | Real-capable | Open-Meteo geocoding (keyless) |
 
 Every stub returns realistic shapes so the full UX runs offline; `USE_REAL_*`
 flags flip each to production independently.
@@ -365,6 +366,105 @@ and lifecycle controls. It's the staging area until cross-listing is automated
   into the user's bags under volume/weight caps. Weight/volume are estimated by a
   heuristic table (category base × material modifier) with per-item overrides.
   Weather via Open-Meteo (keyless) or a deterministic climatology stub.
+  - *Destination* is chosen from a geocoded city picker (`lib/services/geocode.ts`,
+    Open-Meteo, keyless) and the trip stores the resulting lat/lon, ISO country
+    code and IANA zone. Pinning the coordinates is what stops the climate lookup
+    re-resolving an ambiguous place name on every refresh.
+  - *Map* (`components/world-map.tsx`) is a baked SVG of Natural Earth country
+    outlines (`pnpm map:build` → `lib/packing/world-map-data.ts`, ~33kB gzipped
+    on that one route). Resolution is chosen per country: 110m for anything it
+    already describes with 80+ points, 50m for the rest. Natural Earth spends
+    vertices by coastline length, so 110m gives China 240 points and South
+    Korea 19 — too few to be a peninsula at any tolerance. Simplification is
+    then Douglas–Peucker at a per-ring tolerance proportional to that ring's
+    own extent, so error stays constant *relative* to what's being drawn rather
+    than in absolute units. Equirectangular, no tiles, no key, no network;
+    the destination's country is highlighted and the city pinned. Projection and
+    viewport maths are pure in `lib/packing/world-map.ts`.
+  - *Packing* is a drag: grab an item's thumbnail and drop it on a bag, on
+    another bag, or back on the unpacked pool. Pointer events rather than HTML5
+    drag-and-drop (which can't be styled and does nothing on touch); the
+    thumbnail alone is the handle so `touch-action: none` doesn't stop the
+    column scrolling on a phone. While something hovers a bag its meters draw
+    the incoming volume and weight as a ghost segment and turn rose with an
+    "N L over" readout if it wouldn't fit, so the question is answered before
+    you let go. Hit-testing and the fit maths are pure in `lib/packing/drag.ts`.
+    The per-row `<select>` stays as the keyboard path.
+  - *Pack* and *Day by day* are a matched, mirrored pair of tiles
+    (`components/space-tile.tsx`) rather than two more pills in a row of pills:
+    they're the two full-screen animated spaces, so they're built to look like
+    a single choice with two sides. Each glyph is a still of what's behind it —
+    a bag ringed by satellites, three cards on an arc — and starts moving on
+    hover. Each carries the count that says what's waiting: what the bags weigh,
+    how many days are dressed. A tile with nothing behind it disables rather
+    than disappears, so the pair stays a pair.
+  - *Pack mode* (`pack-mode.tsx`) is where packing happens — the trip page is
+    the plan and reports on it, but changes nothing. It replaced a sticky rail
+    that ran down the right of the plan carrying its own copy of every item row,
+    bag picker and remove button. One bag fills the screen, with a
+    searchable/filterable rail to drag out of, and
+    the bag's contents orbiting it — each on its own ellipse, at its own radius
+    and Kepler-derived speed, dimmed toward the far side so the bag stays the
+    subject (`lib/packing/orbit.ts`). Each orbit is derived from the item's own
+    id rather than its index, so packing or removing one leaves every other body
+    exactly where it was, and the animation clock lives in a ref so a content
+    change can't reset it. Hovering brightens the system without stopping it;
+    clicking an orbiting item takes it out. Bags without an uploaded photo get
+    drawn artwork with a fill wash (`components/bag-art.tsx`). Positions are
+    written from one rAF loop straight to the DOM rather than through React.
+    *Auto-pack* lives in this header, not on the plan: it changes the bags, and
+    everything else on the plan only describes them. Its warnings follow it
+    here, on top of the bags they're about. The plane that marks a press
+    (`components/plane-route.tsx`) flies the header's flex-1 gap to "Done", so
+    its route is the real distance between them at any width with nothing
+    measured in JS.
+  - *Every section folds* and remembers whether it was open, in localStorage
+    keyed by section rather than by trip (`lib/packing/panel-state.ts`).
+  - The plan's *Bags* and *Gear* sections are read-only: capacity meters, counts
+    and which bag each thing ended up in, with "Pack this" opening Pack mode on
+    that bag and a click-to-open list of a bag's contents. In the orbit, a
+    click opens a piece's adjust panel and a drag onto the rail takes it out of
+    the bag — the drag threshold is what lets one gesture be both. Correcting a
+    garment's estimated weight or volume moved into Pack mode's rail, which is
+    now the only place that edits a trip's contents.
+  - *Day by day* opens a looks carousel (`looks-carousel.tsx`): every day of the
+    trip on one ring at once, seen from the front, each outfit assembled on the
+    outfit canvas's 560x960 frame with backgrounds cut away. Moving the cursor
+    left or right of centre spins it — further out, faster, with a dead zone in
+    the middle — and clicking any near-side look glides it to the front and
+    holds it until the cursor returns to centre. `lib/packing/carousel.ts` owns
+    the ring: even spacing, the size/opacity falloff toward the back, and the
+    pointer-to-spin mapping. Deliberately separate from `orbit.ts`, which
+    scatters items onto their own orbits — same trigonometry, opposite intent.
+    `lib/packing/look.ts` composes each outfit by reusing the
+    outfits tab's own rules — saved slot defaults, visual layers, per-
+    combination positions and sizes, layer stacking order — so a look reads the
+    same here as it would if you'd built it by hand there.
+  - *Activities* say what the trip is for. Each selected one claims a number of
+    days (`TripRequirements.activityDays`), which `activityDaySchedule` spreads
+    evenly through the trip — never two activities on one day, since the planner
+    couldn't dress you for both. On a scheduled day the look is built from that
+    activity's wardrobe instead of the rotation: its occasion pieces first, then
+    whatever else its `needs` ask for, so a beach day gets trunks *and* sandals
+    rather than trunks and walking boots. A displaced piece isn't charged a
+    wear, so a beach day doesn't quietly eat the clean clothes.
+  - *Occasion pieces* (`lib/packing/occasion.ts`) are clothes packed for one
+    thing, not for Tuesday. Swim trunks classify as an ordinary `bottom`, so the
+    day planner scheduled them for a Wednesday in Seoul *and* counted them
+    toward `coveredDays` — inflating the "covers N of M days" figure. They're
+    now kept out of the general selection, out of `planDailyOutfits`, and out of
+    the coverage maths, while remaining reachable through `withNeededItems` so
+    ticking an activity can still pull them in. Derived from the same vocabulary
+    the activity needs already use, deliberately narrow (athletic kit is *not*
+    on the list — plenty of people wear it daily), with a per-item
+    `WardrobeItem.dailyWear` override in Pack mode's rail for the cases the
+    guess gets wrong in either direction.
+  - *Gear* (`PackingGear`, `lib/packing/gear.ts`) is the non-garment half of the
+    bag — charger, passport, wash bag. A reusable per-user library, assigned to
+    bags through `PackingTrip.gearAssignments`, deliberately kept out of the
+    packing algorithm: it only consumes capacity. The planner packs into the
+    space gear leaves, so a bag holding a 2.5L wash bag is no longer filled to
+    its full rated volume with clothes.
 
 ---
 
@@ -599,7 +699,7 @@ app/        App Router pages, route handlers, server actions
   settings/ style prefs, credits
 lib/
   services/ external-API seam (ghost mannequin, try-on, vision, search, weather)
-  packing/  deterministic SmartPakker algorithm + estimator
+  packing/  deterministic SmartPakker algorithm, estimator, gear, world map
   actions/  shared server actions
   sale-listing.ts, marketplaces.ts   recommerce domain logic
   auth.ts, db.ts, uploads.ts, image-paths.ts   infra seams

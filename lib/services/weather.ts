@@ -1,8 +1,9 @@
 /**
  * Destination climate lookup for SmartPakker.
  *
- * Provider: Open-Meteo (free, no API key). Geocoding resolves a place name to
- * lat/lon, then we pull real numbers from two endpoints:
+ * Provider: Open-Meteo (free, no API key). A trip carries its own coordinates
+ * once the user picks a city; otherwise `lib/services/geocode.ts` resolves the
+ * destination string. Either way we then pull real numbers from two endpoints:
  *
  *   • Forecast  — an actual forecast, available from 92 days back to 16 days out.
  *   • Archive   — ERA5 reanalysis. Used two ways: for a trip already in the past
@@ -18,7 +19,8 @@
  * USE_REAL_* + stub convention from serpapi-client.ts.
  */
 
-const GEOCODE_BASE = "https://geocoding-api.open-meteo.com/v1/search";
+import { placeLabel, resolvePlace } from "./geocode";
+
 const FORECAST_BASE = "https://api.open-meteo.com/v1/forecast";
 const ARCHIVE_BASE = "https://archive-api.open-meteo.com/v1/archive";
 
@@ -189,46 +191,6 @@ async function getJson(url: URL, revalidate: number): Promise<unknown | null> {
   return res.json().catch(() => null);
 }
 
-type GeocodeHit = {
-  name: string;
-  latitude: number;
-  longitude: number;
-  country?: string;
-  admin1?: string;
-  population?: number;
-};
-
-/**
- * Resolve a place name to coordinates.
- *
- * We ask for several candidates and take the most populous rather than the
- * provider's first hit, because its ranking is name-similarity first: "Bali"
- * comes back as Bāli in West Bengal (pop. 297k) ahead of Bali, Indonesia
- * (pop. 4.2m), and a beach holiday would have been packed for inland India.
- * Where the first hit is already the famous one — Paris, Sydney — it is also
- * the largest, so this changes nothing.
- */
-async function geocode(query: string): Promise<GeocodeHit | null> {
-  const url = new URL(GEOCODE_BASE);
-  url.searchParams.set("name", query);
-  url.searchParams.set("count", "5");
-  // Place coordinates don't move; a day of caching saves a round trip per plan.
-  const body = (await getJson(url, 60 * 60 * 24)) as { results?: GeocodeHit[] } | null;
-  const hits = (body?.results ?? []).filter(
-    (h) => Number.isFinite(h.latitude) && Number.isFinite(h.longitude),
-  );
-  if (hits.length === 0) return null;
-  // Stable: only overtake the incumbent on a strictly larger population.
-  return hits.reduce((best, h) => ((h.population ?? 0) > (best.population ?? 0) ? h : best));
-}
-
-/** "Springfield, Missouri, United States" — enough to spot a wrong pick. */
-function placeLabel(hit: GeocodeHit): string {
-  return [hit.name, hit.admin1 !== hit.name ? hit.admin1 : null, hit.country]
-    .filter(Boolean)
-    .join(", ");
-}
-
 /**
  * A stretch of days, averaged. `days` is the weight when we combine a forecast
  * segment with a historical one.
@@ -373,28 +335,53 @@ async function fetchHistory(
 /**
  * Summarise the climate for a destination across the trip dates. Never throws:
  * anything we can't measure comes back as `source: "unknown"`.
+ *
+ * Pass `latitude`/`longitude` when the trip has them — a destination chosen
+ * from the city picker is already resolved, and re-running a name search on
+ * every refresh is both a wasted round trip and a chance for an ambiguous
+ * name to start resolving somewhere new. Without them we fall back to
+ * searching `destination`, which is what every trip did before the picker.
  */
 export async function getClimateSummary(input: {
   destination: string;
   start: Date;
   end: Date;
+  latitude?: number | null;
+  longitude?: number | null;
 }): Promise<ClimateSummary> {
   const destination = input.destination.trim();
   const days = inclusiveDays(input.start, input.end);
-  // No provider (or nowhere to look up) means no coordinates, and without
-  // coordinates there is nothing honest to say about the weather.
-  if (!weatherEnabled() || !destination) {
+  const pinned =
+    input.latitude != null &&
+    input.longitude != null &&
+    Number.isFinite(input.latitude) &&
+    Number.isFinite(input.longitude);
+
+  // No provider means no numbers. Without a provider we also can't resolve a
+  // name, so an unpinned trip has nowhere to look and nothing honest to say.
+  if (!weatherEnabled() || (!destination && !pinned)) {
     return unknownSummary(destination || "Unknown", input.start, input.end);
   }
 
   try {
-    const hit = await geocode(destination);
-    if (!hit) {
+    const resolved = pinned
+      ? {
+          latitude: input.latitude as number,
+          longitude: input.longitude as number,
+          label: destination || "Your destination",
+        }
+      : await (async () => {
+          const hit = await resolvePlace(destination);
+          return hit
+            ? { latitude: hit.latitude, longitude: hit.longitude, label: placeLabel(hit) }
+            : null;
+        })();
+
+    if (!resolved) {
       // Couldn't resolve the place — don't guess a climate for it.
       return unknownSummary(destination, input.start, input.end);
     }
-    const label = placeLabel(hit);
-    const { latitude, longitude } = hit;
+    const { latitude, longitude, label } = resolved;
 
     const today = utcDay(new Date());
     const tripStart = utcDay(input.start);

@@ -114,6 +114,13 @@ export function planDailyOutfits(input: {
   includeOuterwear?: boolean;
   /** Laundry stretches every piece; must match what the packer used. */
   wearMultiplier?: number;
+  /**
+   * Pieces that belong to a specific day rather than the rotation — swimwear on
+   * a beach day. They replace whatever the day would otherwise have picked for
+   * the same bucket, because you wear trunks *instead of* your jeans, not as
+   * well as. See ./occasion.ts.
+   */
+  occasionByDay?: Record<number, readonly OutfitPiece[]>;
 }): DayOutfit[] {
   const days = Math.max(0, Math.floor(input.days));
   if (days === 0) return [];
@@ -145,6 +152,13 @@ export function planDailyOutfits(input: {
 
     const preferDress = !!dress && (!top || !bottom || dress.lastWornDay < top.lastWornDay);
 
+    const forced = input.occasionByDay?.[day] ?? [];
+    // Snapshot before the rotation is charged, so a piece displaced by an
+    // occasion swap can be handed back exactly what it had.
+    const previousWear = new Map<string, number>(
+      [...tops, ...bottoms, ...dresses, ...shoes, ...outerwear].map((p) => [p.id, p.lastWornDay]),
+    );
+
     let core: Tracked[] = [];
     if (preferDress && dress) {
       core = [dress];
@@ -169,16 +183,35 @@ export function planDailyOutfits(input: {
       core = [dress];
     }
 
-    const worn = [...(layer ? [layer] : []), ...core, ...(shoe ? [shoe] : [])];
+    let worn = [...(layer ? [layer] : []), ...core, ...(shoe ? [shoe] : [])];
     const rewear = day > cleanDays;
     for (const piece of worn) {
       piece.wearsLeft -= 1;
       piece.lastWornDay = day;
     }
 
+    /*
+     * Swap in the day's occasion pieces last, after the rotation has been
+     * charged for what it picked. Trunks replace the bottom rather than joining
+     * it, and the jeans they displaced stay clean — they were never worn.
+     */
+    if (forced.length > 0) {
+      const replaced = new Set(forced.map((p) => p.bucket));
+      for (const piece of worn) {
+        if (!replaced.has(piece.bucket)) continue;
+        piece.wearsLeft += 1;
+        piece.lastWornDay = previousWear.get(piece.id) ?? 0;
+      }
+      worn = [
+        ...worn.filter((p) => !replaced.has(p.bucket)),
+        ...forced.map((p) => ({ ...p, wearsLeft: 0, lastWornDay: day }) as Tracked),
+      ];
+    }
+
     // "Complete" means you could actually leave the house: something covering
     // the torso and legs, plus shoes.
-    const hasCore = core.length > 0 && (core[0].bucket === "dress" || core.length === 2);
+    const buckets = new Set(worn.map((p) => p.bucket));
+    const hasCore = buckets.has("dress") || (buckets.has("top") && buckets.has("bottom"));
     out.push({
       day,
       itemIds: worn.map((p) => p.id),

@@ -48,9 +48,14 @@ export default async function SmartPakkerPage() {
         <Link href="/closet" className="hover:text-ink">
           ← Closet
         </Link>
-        <Link href="/closet/smartpakker/bags" className="hover:text-ink">
-          Manage bags{bags.length > 0 ? ` (${bags.length})` : ""} →
-        </Link>
+        <span className="flex items-center gap-4">
+          <Link href="/closet/smartpakker/gear" className="hover:text-ink">
+            Gear
+          </Link>
+          <Link href="/closet/smartpakker/bags" className="hover:text-ink">
+            Manage bags{bags.length > 0 ? ` (${bags.length})` : ""} →
+          </Link>
+        </span>
       </nav>
 
       <header className="mb-10">

@@ -31,7 +31,8 @@
     "eval:catalog": "tsx --env-file=.env scripts/eval-catalog.ts",
     "ghost:lora:build": "tsx --env-file=.env scripts/ghost-lora-build.ts",
     "ghost:lora:train": "tsx --env-file=.env scripts/ghost-lora-train.ts",
-    "audit:layout": "tsx --env-file=.env scripts/audit-layout.ts"
+    "audit:layout": "tsx --env-file=.env scripts/audit-layout.ts",
+    "map:build": "tsx scripts/build-world-map.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

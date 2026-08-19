@@ -24,11 +24,84 @@ export type TripActivity = "beach" | "hiking" | "business" | "formal" | "city" |
 
 export type TripRequirements = {
   activities: TripActivity[];
+  /**
+   * How many days of the trip each activity takes up.
+   *
+   * Ticking "Beach" says the trip has beach days; it can't say how many, and
+   * the app has no way to know — a weekend by the sea and a fortnight in
+   * Thailand are the same chip. So the count is the user's to give, defaulting
+   * to one. It's what turns an activity from "pack swimwear" into "wear
+   * swimwear on these days"; see `activityDaySchedule`.
+   */
+  activityDays?: Partial<Record<TripActivity, number>>;
   /** Laundry mid-trip — roughly doubles what each piece covers. */
   laundry: boolean;
 };
 
 export const EMPTY_REQUIREMENTS: TripRequirements = { activities: [], laundry: false };
+
+/** Days an activity claims when the user hasn't said. */
+export const DEFAULT_ACTIVITY_DAYS = 1;
+
+/** Nobody is at the beach for more than a month. */
+const MAX_ACTIVITY_DAYS = 30;
+
+/** How many days an activity claims, clamped to something sane. */
+export function activityDayCount(
+  requirements: TripRequirements,
+  activity: TripActivity,
+): number {
+  const raw = requirements.activityDays?.[activity];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_ACTIVITY_DAYS;
+  return Math.min(MAX_ACTIVITY_DAYS, Math.max(1, Math.round(raw)));
+}
+
+/**
+ * Which days of the trip belong to which activity.
+ *
+ * Spread evenly rather than bunched at the start: a beach trip with two beach
+ * days wants them apart, and the arithmetic is the same either way. Deterministic
+ * — the same trip always produces the same schedule, so the day plan doesn't
+ * reshuffle itself between renders.
+ *
+ * Activities are laid out in the order they appear in `ACTIVITIES`, and a day
+ * already claimed is skipped rather than doubled up: two things on one day is a
+ * scheduling conflict the planner has no way to resolve, and silently dressing
+ * you for both would be worse than dropping one.
+ */
+export function activityDaySchedule(
+  days: number,
+  requirements: TripRequirements,
+): Map<number, TripActivity> {
+  const total = Math.max(0, Math.floor(days));
+  const schedule = new Map<number, TripActivity>();
+  if (total === 0) return schedule;
+
+  // ACTIVITIES order, not selection order, so the result doesn't depend on
+  // which chip was tapped first.
+  const chosen = ACTIVITIES.map((a) => a.id).filter((id) => requirements.activities.includes(id));
+
+  for (const activity of chosen) {
+    const wanted = Math.min(activityDayCount(requirements, activity), total);
+    for (let i = 0; i < wanted; i += 1) {
+      // Evenly through the trip: for one day that's the middle, for two the
+      // thirds, and so on.
+      const ideal = Math.round(((i + 1) * total) / (wanted + 1));
+      let day = Math.min(total, Math.max(1, ideal));
+      // Walk to the nearest free day if that one is taken.
+      let step = 0;
+      while (schedule.has(day) && step < total) {
+        step += 1;
+        const forward = day + step;
+        const back = day - step;
+        if (forward <= total && !schedule.has(forward)) day = forward;
+        else if (back >= 1 && !schedule.has(back)) day = back;
+      }
+      if (!schedule.has(day)) schedule.set(day, activity);
+    }
+  }
+  return schedule;
+}
 
 /** One thing a trip needs at least `count` of. */
 export type ActivityNeed = {
@@ -140,7 +213,21 @@ export function parseTripRequirements(raw: string | null | undefined): TripRequi
     const activities = Array.isArray(parsed.activities)
       ? [...new Set(parsed.activities.filter((a): a is TripActivity => typeof a === "string" && isTripActivity(a)))]
       : [];
-    return { activities, laundry: parsed.laundry === true };
+    const activityDays: Partial<Record<TripActivity, number>> = {};
+    if (parsed.activityDays && typeof parsed.activityDays === "object") {
+      for (const [key, value] of Object.entries(parsed.activityDays)) {
+        if (!isTripActivity(key) || typeof value !== "number" || !Number.isFinite(value)) continue;
+        activityDays[key] = Math.min(MAX_ACTIVITY_DAYS, Math.max(1, Math.round(value)));
+      }
+    }
+    // Omitted when empty rather than written as `{}`: the field is optional,
+    // and an absent key is the same statement as an empty one with less noise
+    // in the column and in every equality check against EMPTY_REQUIREMENTS.
+    return {
+      activities,
+      laundry: parsed.laundry === true,
+      ...(Object.keys(activityDays).length > 0 ? { activityDays } : {}),
+    };
   } catch {
     return EMPTY_REQUIREMENTS;
   }

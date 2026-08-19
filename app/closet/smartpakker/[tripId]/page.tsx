@@ -7,10 +7,21 @@ import { readTemperatureUnit } from "@/lib/temperature";
 import { estimateItemPacking } from "@/lib/packing/estimate";
 import { bucketFor } from "@/lib/packing/plan";
 import { parseTripRequirements } from "@/lib/packing/requirements";
+import { parseGearCategory } from "@/lib/packing/gear";
+import { deriveOccasion, isDailyWear } from "@/lib/packing/occasion";
+import type { LookLayoutPrefs } from "@/lib/packing/look";
+import {
+  sanitizeComboLayouts,
+  sanitizeLayerArrangements,
+  sanitizeLayerOrder,
+  sanitizeOutfitSlotDefaults,
+  sanitizeVisualLayers,
+} from "@/lib/outfit-slot-defaults";
 import type { ClimateSummary } from "@/lib/services/weather";
 import {
   TripPlanner,
   type PlannerBag,
+  type PlannerGear,
   type PlannerItem,
   type PlannerTrip,
 } from "./trip-planner";
@@ -23,7 +34,7 @@ export default async function TripPage({ params }: { params: { tripId: string } 
   if (!trip || trip.userId !== user.id) notFound();
 
   const bagIds = parseStringArray(trip.bagIds);
-  const [prefRow, bagRows, itemRows] = await Promise.all([
+  const [prefRow, bagRows, itemRows, gearRows] = await Promise.all([
     prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
     prisma.packingBag.findMany({
       where: { userId: user.id, id: { in: bagIds.length ? bagIds : ["__none__"] } },
@@ -51,7 +62,12 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         volumeLiters: true,
         priceCents: true,
         currency: true,
+        dailyWear: true,
       },
+    }),
+    prisma.packingGear.findMany({
+      where: { userId: user.id, archivedAt: null },
+      orderBy: [{ essential: "desc" }, { createdAt: "asc" }],
     }),
   ]);
 
@@ -62,6 +78,8 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       name: b.name,
       volumeLiters: b.volumeLiters,
       maxWeightKg: b.maxWeightKg,
+      silhouette: b.silhouette,
+      imagePath: b.imagePath,
     }));
 
   const items: PlannerItem[] = itemRows.map((r) => {
@@ -86,13 +104,49 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       priceCents: r.priceCents,
       currency: r.currency,
       hasOverride: r.weightGrams != null || r.volumeLiters != null,
+      // Resolved server-side so the planner and the packer agree on which
+      // pieces are occasion-only; see lib/packing/occasion.ts.
+      subcategory: r.subcategory,
+      dailyWear: isDailyWear(r),
+      occasion: deriveOccasion(r),
+      dailyWearOverride: r.dailyWear,
     };
   });
+
+  const gear: PlannerGear[] = gearRows.map((g) => ({
+    id: g.id,
+    name: g.name,
+    category: parseGearCategory(g.category),
+    icon: g.icon,
+    quantity: g.quantity,
+    weightGrams: g.weightGrams,
+    volumeLiters: g.volumeLiters,
+    notes: g.notes,
+    essential: g.essential,
+  }));
+
+  /*
+   * The outfit canvas's placement rules, so the looks carousel composes a day
+   * exactly the way the outfits tab would. All of it lives in stylePrefs; see
+   * lib/packing/look.ts.
+   */
+  const outfitPrefs = parseStylePrefs(prefRow?.stylePrefs);
+  const lookPrefs: LookLayoutPrefs = {
+    slotDefaults: sanitizeOutfitSlotDefaults(outfitPrefs.outfitSlotDefaults),
+    visualLayers: sanitizeVisualLayers(outfitPrefs.outfitVisualLayers),
+    comboLayouts: sanitizeComboLayouts(outfitPrefs.outfitComboLayouts),
+    layerArrangements: sanitizeLayerArrangements(outfitPrefs.outfitLayerArrangements),
+    layerOrder: sanitizeLayerOrder(outfitPrefs.outfitLayerOrder),
+  };
 
   const tripView: PlannerTrip = {
     id: trip.id,
     name: trip.name,
     destination: trip.destination,
+    latitude: trip.latitude,
+    longitude: trip.longitude,
+    countryCode: trip.countryCode,
+    timezone: trip.timezone,
     startDate: trip.startDate.toISOString(),
     endDate: trip.endDate.toISOString(),
   };
@@ -106,15 +160,29 @@ export default async function TripPage({ params }: { params: { tripId: string } 
     }
   }
 
-  const assignments = (() => {
+  const parseMap = (json: string): Record<string, string[]> => {
     try {
-      return JSON.parse(trip.assignments) as Record<string, string[]>;
+      const parsed = JSON.parse(json) as Record<string, string[]>;
+      return parsed && typeof parsed === "object" ? parsed : {};
     } catch {
       return {};
     }
-  })();
+  };
+
+  const assignments = parseMap(trip.assignments);
+  const gearAssignments = parseMap(trip.gearAssignments);
   // Make sure every current bag has an entry so the UI renders empty bags.
-  for (const bag of bags) if (!assignments[bag.id]) assignments[bag.id] = [];
+  for (const bag of bags) {
+    if (!assignments[bag.id]) assignments[bag.id] = [];
+    if (!gearAssignments[bag.id]) gearAssignments[bag.id] = [];
+  }
+  // Gear deleted from the library leaves its id behind in this JSON, which no
+  // foreign key cleans up — see `deleteGear`. Drop anything unresolvable here
+  // so a stale id can't count toward a bag meter.
+  const liveGear = new Set(gear.map((g) => g.id));
+  for (const bagId of Object.keys(gearAssignments)) {
+    gearAssignments[bagId] = gearAssignments[bagId].filter((id) => liveGear.has(id));
+  }
 
   return (
     // Wider than the rest of SmartPakker: this page runs the plan and the bag
@@ -130,10 +198,13 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         trip={tripView}
         bags={bags}
         items={items}
+        gear={gear}
         initialRequirements={parseTripRequirements(trip.requirements)}
         initialClimate={climate}
         initialAssignments={assignments}
-        temperatureUnit={readTemperatureUnit(parseStylePrefs(prefRow?.stylePrefs).temperatureUnit)}
+        initialGearAssignments={gearAssignments}
+        lookPrefs={lookPrefs}
+        temperatureUnit={readTemperatureUnit(outfitPrefs.temperatureUnit)}
       />
     </main>
   );

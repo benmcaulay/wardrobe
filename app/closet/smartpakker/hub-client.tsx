@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { CityPicker } from "@/components/city-picker";
+import { flagEmoji, placeLabel, type Place } from "@/lib/places";
 import { formatVolume } from "@/lib/packing/estimate";
 import { formatTripRange } from "@/lib/packing/trip-dates";
-import { createTrip, deleteTrip } from "./actions";
+import { createTrip, deleteTrip, searchDestinations } from "./actions";
 
 export type BagOption = { id: string; name: string; volumeLiters: number };
 
@@ -36,6 +38,13 @@ export function HubClient({
   const [trips, setTrips] = useState<TripView[]>(initialTrips);
   const [name, setName] = useState("");
   const [destination, setDestination] = useState("");
+  /**
+   * The picked place, when there is one. Held alongside the text rather than
+   * replacing it so typing a destination we can't resolve still creates a trip
+   * — it just won't be pinned. See `createTrip`, which drops a pick whose
+   * label no longer matches what's in the box.
+   */
+  const [place, setPlace] = useState<Place | null>(null);
   const [startDate, setStartDate] = useState(isoToday());
   const [endDate, setEndDate] = useState(isoToday(7));
   const [selectedBags, setSelectedBags] = useState<string[]>(bags.map((b) => b.id));
@@ -52,6 +61,15 @@ export function HubClient({
     const res = await createTrip({
       name: name.trim() || destination.trim() || "Trip",
       destination,
+      place: place
+        ? {
+            destination: placeLabel(place),
+            latitude: place.latitude,
+            longitude: place.longitude,
+            countryCode: place.countryCode,
+            timezone: place.timezone,
+          }
+        : null,
       startDate,
       endDate,
       bagIds: selectedBags,
@@ -86,12 +104,35 @@ export function HubClient({
               <label className="block text-[11px] uppercase tracking-wide text-ink-muted">
                 Destination
               </label>
-              <input
+              <CityPicker
+                className="mt-1"
                 value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                placeholder="Lisbon, Portugal"
-                className="mt-1 w-full rounded-xl border border-ink/15 bg-paper px-3 py-2 text-sm focus:border-ink/40 focus:outline-none"
+                onChange={(text) => {
+                  setDestination(text);
+                  // Editing the text abandons the pin; the label and the
+                  // coordinates have to describe the same place.
+                  setPlace(null);
+                }}
+                onPick={(picked) => {
+                  setPlace(picked);
+                  setDestination(placeLabel(picked));
+                }}
+                search={async (query) => {
+                  const res = await searchDestinations(query);
+                  return res.ok ? res.places : [];
+                }}
+                placeholder="Seoul, Lisbon, Reykjavík…"
               />
+              <p className="mt-1 text-[11px] text-ink-muted">
+                {place ? (
+                  <>
+                    <span aria-hidden>{flagEmoji(place.countryCode)}</span> Pinned — we&apos;ll map
+                    it and pull a real forecast.
+                  </>
+                ) : (
+                  "Pick from the list to pin it on the map and get a real forecast."
+                )}
+              </p>
             </div>
             <div>
               <label className="block text-[11px] uppercase tracking-wide text-ink-muted">

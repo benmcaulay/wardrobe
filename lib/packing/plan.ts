@@ -20,6 +20,7 @@ import type { Color, Season } from "@/lib/json";
 import { classifyGarmentKind, type GarmentKind } from "@/lib/categories";
 import { estimateItemPacking, type EstimableItem } from "./estimate";
 import { colorVersatility } from "./palette";
+import { isOccasionPiece, partitionByDailyWear } from "./occasion";
 import {
   activityNeeds,
   EMPTY_REQUIREMENTS,
@@ -34,6 +35,8 @@ export type PackableItem = EstimableItem & {
   season?: Season[];
   /** Drives the versatility term in `climateScore`. See ./palette.ts. */
   colors?: Color[];
+  /** Override for the daily-rotation guess. See ./occasion.ts. */
+  dailyWear?: boolean | null;
 };
 
 export type PackBag = {
@@ -783,6 +786,7 @@ export function buildPackingPlan(input: {
   rainChance: number;
   requirements?: TripRequirements;
 }): PackingPlan {
+  const byId = new Map(input.items.map((i) => [i.id, i]));
   const totalCapacityLiters = input.bags.reduce((sum, b) => sum + b.volumeLiters, 0);
   const requirements = input.requirements ?? EMPTY_REQUIREMENTS;
   const multiplier = wearMultiplier(requirements);
@@ -794,8 +798,16 @@ export function buildPackingPlan(input: {
     multiplier,
   );
   const needs = activityNeeds(requirements);
+  /*
+   * Occasion pieces are kept out of the general selection but left available to
+   * the activity needs below. Swim trunks are a `bottom` like any other, so
+   * without this the packer picks them to cover an ordinary day — and then
+   * counts them as one. Ticking "Beach" still reaches them, through
+   * `withNeededItems`, which is handed the full list on purpose.
+   */
+  const { daily: dailyWearItems } = partitionByDailyWear(input.items);
   const selected = withNeededItems(
-    selectItems(input.items, input.band, targets),
+    selectItems(dailyWearItems, input.band, targets),
     input.items,
     needs,
   );
@@ -821,7 +833,21 @@ export function buildPackingPlan(input: {
   // buying a bucket once the trip is covered — so the old "N items didn't fit"
   // was both alarming and useless. What the user actually needs to know is
   // whether the bag dresses them for the whole trip.
-  const covered = coveredDays(counts, input.days, multiplier);
+  /*
+   * Coverage counts only what you'd actually wear on an ordinary day. An
+   * activity may have pulled trunks into the bag, but they don't dress you on
+   * Tuesday, and counting them here is what used to inflate "covers N of M".
+   */
+  const bucketById = new Map(selected.map((s) => [s.id, s.bucket]));
+  const dailyCounts: BucketCounts = {};
+  for (const ids of Object.values(assignments)) {
+    for (const id of ids) {
+      if (isOccasionPiece(byId.get(id) ?? {})) continue;
+      const bucket = bucketById.get(id);
+      if (bucket) dailyCounts[bucket] = (dailyCounts[bucket] ?? 0) + 1;
+    }
+  }
+  const covered = coveredDays(dailyCounts, input.days, multiplier);
   if (input.bags.length > 0 && covered < input.days) {
     const short = Math.max(1, Math.round(input.days - covered));
     warnings.push(

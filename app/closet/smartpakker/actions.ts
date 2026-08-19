@@ -8,12 +8,20 @@ import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
 import { buildPackingPlan, type PackableItem, type PackingPlan } from "@/lib/packing/plan";
 import {
+  GEAR_PRESETS,
+  gearFootprint,
+  isGearCategory,
+  parseGearCategory,
+  type GearCategory,
+} from "@/lib/packing/gear";
+import {
   isTripActivity,
   parseTripRequirements,
   type TripActivity,
   type TripRequirements,
 } from "@/lib/packing/requirements";
 import { parseTripText, type TripParse } from "@/lib/services/tripParser";
+import { searchPlaces, type Place } from "@/lib/services/geocode";
 import {
   getClimateSummary,
   manualClimateSummary,
@@ -127,6 +135,64 @@ export async function deleteBag(id: string): Promise<Result> {
   return { ok: true };
 }
 
+/* ------------------------------------------------------------- places --- */
+
+/**
+ * Type-ahead for the destination field.
+ *
+ * Read-only and rate-limited by nothing but the provider's own day-long cache,
+ * so it's safe to call per keystroke from a debounced input. Requires a signed-in
+ * user purely so an open endpoint can't be used to proxy the geocoder.
+ */
+export async function searchDestinations(query: string): Promise<Result<{ places: Place[] }>> {
+  await requireUser();
+  return { ok: true, places: await searchPlaces(query) };
+}
+
+/**
+ * A destination chosen from the picker, rather than typed.
+ *
+ * Carrying the coordinates through from the moment of choice is the whole
+ * point: the trip stores where it actually is, so the map can pin it and the
+ * climate lookup never has to guess at the string again.
+ */
+export type PlacePick = {
+  destination: string;
+  latitude: number;
+  longitude: number;
+  countryCode?: string | null;
+  timezone?: string | null;
+};
+
+/** Reject a pick whose coordinates aren't real coordinates. */
+function normalizePlace(place: PlacePick): Result<{ data: Required<PlacePick> }> {
+  const destination = place.destination.trim().slice(0, DEST_MAX);
+  if (!destination) return { ok: false, error: "Where are you going?" };
+  const { latitude, longitude } = place;
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    Math.abs(latitude) > 90 ||
+    Math.abs(longitude) > 180
+  ) {
+    return { ok: false, error: "That place has no usable coordinates" };
+  }
+  const countryCode =
+    typeof place.countryCode === "string" && /^[A-Za-z]{2}$/.test(place.countryCode)
+      ? place.countryCode.toUpperCase()
+      : null;
+  return {
+    ok: true,
+    data: {
+      destination,
+      latitude,
+      longitude,
+      countryCode,
+      timezone: place.timezone?.slice(0, 64) || null,
+    },
+  };
+}
+
 /* ---------------------------------------------------------------- trips --- */
 
 function parseDate(value: string | Date): Date | null {
@@ -137,6 +203,8 @@ function parseDate(value: string | Date): Date | null {
 export async function createTrip(input: {
   name: string;
   destination: string;
+  /** Set when the destination came from the picker; carries its coordinates. */
+  place?: PlacePick | null;
   startDate: string;
   endDate: string;
   bagIds?: string[];
@@ -146,6 +214,17 @@ export async function createTrip(input: {
   const destination = input.destination.trim().slice(0, DEST_MAX);
   if (!name) return { ok: false, error: "Trip name is required" };
   if (!destination) return { ok: false, error: "Where are you going?" };
+
+  // A pick is only honoured if it agrees with the text in the field. Otherwise
+  // someone who chose Seoul and then typed over it would get a trip labelled
+  // "Busan" pinned to Seoul's coordinates.
+  let located: Required<PlacePick> | null = null;
+  if (input.place && input.place.destination.trim() === destination) {
+    const norm = normalizePlace(input.place);
+    if (!norm.ok) return norm;
+    located = norm.data;
+  }
+
   const start = parseDate(input.startDate);
   const end = parseDate(input.endDate);
   if (!start || !end) return { ok: false, error: "Enter valid dates" };
@@ -158,6 +237,10 @@ export async function createTrip(input: {
       userId: user.id,
       name,
       destination,
+      latitude: located?.latitude ?? null,
+      longitude: located?.longitude ?? null,
+      countryCode: located?.countryCode ?? null,
+      timezone: located?.timezone ?? null,
       startDate: start,
       endDate: end,
       bagIds: encode(bagIds),
@@ -173,6 +256,8 @@ export async function updateTrip(input: {
   id: string;
   name?: string;
   destination?: string;
+  /** A destination chosen from the picker. Takes precedence over `destination`. */
+  place?: PlacePick | null;
   startDate?: string;
   endDate?: string;
   bagIds?: string[];
@@ -191,11 +276,28 @@ export async function updateTrip(input: {
     if (!name) return { ok: false, error: "Trip name is required" };
     data.name = name;
   }
-  if (input.destination !== undefined) {
+  if (input.place) {
+    const norm = normalizePlace(input.place);
+    if (!norm.ok) return norm;
+    data.destination = norm.data.destination;
+    data.latitude = norm.data.latitude;
+    data.longitude = norm.data.longitude;
+    data.countryCode = norm.data.countryCode;
+    data.timezone = norm.data.timezone;
+    // Somewhere else → stored climate is stale.
+    data.climateData = null;
+  } else if (input.destination !== undefined) {
     const destination = input.destination.trim().slice(0, DEST_MAX);
     if (!destination) return { ok: false, error: "Where are you going?" };
     data.destination = destination;
-    // Destination changed → stored climate is stale.
+    // Typed over by hand, so the old coordinates no longer describe the text.
+    // Clearing them sends the climate lookup back to searching the string —
+    // worse than a pin, but honest, where stale coordinates would silently
+    // forecast the previous city.
+    data.latitude = null;
+    data.longitude = null;
+    data.countryCode = null;
+    data.timezone = null;
     data.climateData = null;
   }
   if (input.startDate !== undefined) {
@@ -278,6 +380,8 @@ export async function fetchTripClimate(tripId: string): Promise<Result<{ climate
     destination: trip.destination,
     start: trip.startDate,
     end: trip.endDate,
+    latitude: trip.latitude,
+    longitude: trip.longitude,
   });
   await prisma.packingTrip.update({
     where: { id: tripId },
@@ -340,6 +444,8 @@ export async function setTripClimate(input: {
 export async function setTripRequirements(input: {
   tripId: string;
   activities: string[];
+  /** How many days each activity claims. See lib/packing/requirements.ts. */
+  activityDays?: Record<string, number>;
   laundry: boolean;
 }): Promise<Result<{ requirements: TripRequirements }>> {
   const user = await requireUser();
@@ -349,9 +455,20 @@ export async function setTripRequirements(input: {
   });
   if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
 
+  const activities = [...new Set(input.activities.filter(isTripActivity))] as TripActivity[];
+  const activityDays: Partial<Record<TripActivity, number>> = {};
+  for (const [key, value] of Object.entries(input.activityDays ?? {})) {
+    // Only for activities actually selected: a count left behind by an
+    // unticked chip would come back the moment it was re-ticked.
+    if (!isTripActivity(key) || !activities.includes(key)) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    activityDays[key] = Math.min(30, Math.max(1, Math.round(value)));
+  }
+
   const requirements: TripRequirements = {
-    activities: [...new Set(input.activities.filter(isTripActivity))] as TripActivity[],
+    activities,
     laundry: input.laundry === true,
+    ...(Object.keys(activityDays).length > 0 ? { activityDays } : {}),
   };
   await prisma.packingTrip.update({
     where: { id: input.tripId },
@@ -359,6 +476,258 @@ export async function setTripRequirements(input: {
   });
   revalidatePath(`/closet/smartpakker/${input.tripId}`);
   return { ok: true, requirements };
+}
+
+
+/* ----------------------------------------------------------------- gear --- */
+
+const GEAR_NAME_MAX = 60;
+const GEAR_NOTES_MAX = 200;
+/** Nobody packs 500 of anything, and a huge quantity is a typo that wrecks a meter. */
+const GEAR_QUANTITY_MAX = 99;
+
+export type GearInput = {
+  name: string;
+  category: string;
+  icon?: string | null;
+  quantity?: number | null;
+  weightGrams?: number | null;
+  volumeLiters?: number | null;
+  notes?: string | null;
+  essential?: boolean;
+};
+
+type NormalizedGear = {
+  name: string;
+  category: GearCategory;
+  icon: string | null;
+  quantity: number;
+  weightGrams: number | null;
+  volumeLiters: number | null;
+  notes: string | null;
+  essential: boolean;
+};
+
+/**
+ * Blank and unparseable measurements both become null, not zero.
+ *
+ * The distinction matters downstream: null means "we'll estimate this from the
+ * category and say so", while zero means "this genuinely weighs nothing" and
+ * would silently under-report a full bag. See lib/packing/gear.ts.
+ */
+function optionalNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function normalizeGear(input: GearInput): Result<{ data: NormalizedGear }> {
+  const name = input.name.trim().slice(0, GEAR_NAME_MAX);
+  if (!name) return { ok: false, error: "Give it a name" };
+
+  const quantity = Math.min(
+    GEAR_QUANTITY_MAX,
+    Math.max(1, Math.round(Number(input.quantity ?? 1) || 1)),
+  );
+  const weightGrams = optionalNumber(input.weightGrams);
+  const volumeLiters = optionalNumber(input.volumeLiters);
+
+  return {
+    ok: true,
+    data: {
+      name,
+      category: isGearCategory(input.category ?? "") ? (input.category as GearCategory) : parseGearCategory(null),
+      icon: input.icon?.trim().slice(0, 40) || null,
+      quantity,
+      weightGrams: weightGrams == null ? null : Math.round(weightGrams),
+      volumeLiters: volumeLiters == null ? null : Math.round(volumeLiters * 10) / 10,
+      notes: input.notes?.trim().slice(0, GEAR_NOTES_MAX) || null,
+      essential: input.essential === true,
+    },
+  };
+}
+
+export async function createGear(input: GearInput): Promise<Result<{ id: string }>> {
+  const user = await requireUser();
+  const norm = normalizeGear(input);
+  if (!norm.ok) return norm;
+  const gear = await prisma.packingGear.create({
+    data: { userId: user.id, ...norm.data },
+    select: { id: true },
+  });
+  revalidateGear();
+  return { ok: true, id: gear.id };
+}
+
+export async function updateGear(input: GearInput & { id: string }): Promise<Result> {
+  const user = await requireUser();
+  const existing = await prisma.packingGear.findUnique({
+    where: { id: input.id },
+    select: { userId: true },
+  });
+  if (!existing || existing.userId !== user.id) return { ok: false, error: "Gear not found" };
+  const norm = normalizeGear(input);
+  if (!norm.ok) return norm;
+  await prisma.packingGear.update({ where: { id: input.id }, data: norm.data });
+  revalidateGear();
+  return { ok: true };
+}
+
+/**
+ * Delete a piece of gear.
+ *
+ * Trips reference gear by id inside a JSON blob, which no foreign key protects,
+ * so a delete would leave dangling ids in every trip that packed it. Rather
+ * than rewrite every trip's assignment map on the way out, the read path drops
+ * ids it can't resolve — the same thing `sanitizeAssignments` already does for
+ * garments.
+ */
+export async function deleteGear(id: string): Promise<Result> {
+  const user = await requireUser();
+  const gear = await prisma.packingGear.findUnique({ where: { id }, select: { userId: true } });
+  if (!gear || gear.userId !== user.id) return { ok: false, error: "Gear not found" };
+  await prisma.packingGear.delete({ where: { id } });
+  revalidateGear();
+  return { ok: true };
+}
+
+/**
+ * Fill an empty library from the preset list.
+ *
+ * Only adds what isn't already there by name, so pressing it twice doesn't
+ * double your toothbrush.
+ */
+export async function addGearPresets(names: string[]): Promise<Result<{ added: number }>> {
+  const user = await requireUser();
+  const wanted = new Set(names);
+  const presets = GEAR_PRESETS.filter((p) => wanted.has(p.name));
+  if (presets.length === 0) return { ok: true, added: 0 };
+
+  const existing = await prisma.packingGear.findMany({
+    where: { userId: user.id, name: { in: presets.map((p) => p.name) } },
+    select: { name: true },
+  });
+  const have = new Set(existing.map((g) => g.name.toLowerCase()));
+  const fresh = presets.filter((p) => !have.has(p.name.toLowerCase()));
+  if (fresh.length === 0) return { ok: true, added: 0 };
+
+  await prisma.packingGear.createMany({
+    data: fresh.map((p) => ({
+      userId: user.id,
+      name: p.name,
+      category: p.category,
+      icon: p.icon ?? null,
+      quantity: 1,
+      weightGrams: p.weightGrams,
+      volumeLiters: p.volumeLiters,
+      essential: p.essential === true,
+    })),
+  });
+  revalidateGear();
+  return { ok: true, added: fresh.length };
+}
+
+/**
+ * Save which gear sits in which bag for a trip.
+ *
+ * Mirrors `updateTrip`'s handling of garment assignments, including dropping
+ * ids the user doesn't own — the map arrives from the client and is not to be
+ * trusted with either bag ids or gear ids.
+ */
+export async function setTripGear(input: {
+  tripId: string;
+  assignments: Record<string, string[]>;
+}): Promise<Result> {
+  const user = await requireUser();
+  const trip = await prisma.packingTrip.findUnique({
+    where: { id: input.tripId },
+    select: { userId: true },
+  });
+  if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
+
+  const bagIds = Object.keys(input.assignments);
+  const gearIds = [...new Set(Object.values(input.assignments).flat())];
+  const [bags, gear] = await Promise.all([
+    prisma.packingBag.findMany({ where: { userId: user.id, id: { in: bagIds } }, select: { id: true } }),
+    gearIds.length
+      ? prisma.packingGear.findMany({
+          where: { userId: user.id, id: { in: gearIds } },
+          select: { id: true },
+        })
+      : Promise.resolve([] as { id: string }[]),
+  ]);
+  const okBags = new Set(bags.map((b) => b.id));
+  const okGear = new Set(gear.map((g) => g.id));
+
+  const clean: Record<string, string[]> = {};
+  for (const [bagId, list] of Object.entries(input.assignments)) {
+    if (!okBags.has(bagId)) continue;
+    clean[bagId] = list.filter((id) => okGear.has(id));
+  }
+
+  await prisma.packingTrip.update({
+    where: { id: input.tripId },
+    data: { gearAssignments: encode(clean) },
+  });
+  revalidatePath(`/closet/smartpakker/${input.tripId}`);
+  return { ok: true };
+}
+
+/**
+ * How much volume and weight the gear assigned to each bag accounts for.
+ *
+ * Shared by the planner so it packs into what's left rather than into the
+ * bag's rated size. Unknown gear ids are skipped, which is the same tolerance
+ * the read path applies — see `deleteGear`.
+ */
+async function reservedByGear(
+  userId: string,
+  gearAssignmentsJson: string,
+): Promise<Map<string, { volumeLiters: number; weightGrams: number }>> {
+  let assignments: Record<string, string[]>;
+  try {
+    const parsed = JSON.parse(gearAssignmentsJson) as Record<string, string[]>;
+    assignments = parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return new Map();
+  }
+
+  const gearIds = [...new Set(Object.values(assignments).flat())];
+  if (gearIds.length === 0) return new Map();
+
+  const rows = await prisma.packingGear.findMany({
+    where: { userId, id: { in: gearIds } },
+    select: { id: true, category: true, quantity: true, weightGrams: true, volumeLiters: true },
+  });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  const out = new Map<string, { volumeLiters: number; weightGrams: number }>();
+  for (const [bagId, ids] of Object.entries(assignments)) {
+    let volumeLiters = 0;
+    let weightGrams = 0;
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) continue;
+      const footprint = gearFootprint({
+        category: parseGearCategory(row.category),
+        quantity: row.quantity,
+        weightGrams: row.weightGrams,
+        volumeLiters: row.volumeLiters,
+      });
+      volumeLiters += footprint.volumeLiters;
+      weightGrams += footprint.weightGrams;
+    }
+    out.set(bagId, { volumeLiters, weightGrams });
+  }
+  return out;
+}
+
+const formatLiters = (liters: number) => `${Math.round(liters * 10) / 10} L`;
+
+/** Gear shows up on the library page and inside every trip. */
+function revalidateGear() {
+  revalidatePath("/closet/smartpakker/gear");
+  revalidatePath("/closet/smartpakker");
 }
 
 /* ---------------------------------------------------------------- plan --- */
@@ -379,6 +748,8 @@ export async function generatePackingPlan(
       destination: trip.destination,
       start: trip.startDate,
       end: trip.endDate,
+      latitude: trip.latitude,
+      longitude: trip.longitude,
     });
     await prisma.packingTrip.update({
       where: { id: tripId },
@@ -395,6 +766,27 @@ export async function generatePackingPlan(
   )
     // Preserve the user's chosen bag order.
     .sort((a, b) => bagIds.indexOf(a.id) - bagIds.indexOf(b.id));
+
+  // Space the gear has already taken, per bag.
+  //
+  // The planner only ever sees garments, so without this it fills each bag to
+  // its full rated volume and lands on top of whatever is already in there —
+  // an 18L daypack holding a 2.5L wash bag got packed to 20.3L. Handing it the
+  // *remaining* capacity keeps the plan honest without the packing algorithm
+  // needing to learn what a toothbrush is.
+  const reserved = await reservedByGear(user.id, trip.gearAssignments);
+  const packable = bags.map((bag) => {
+    const used = reserved.get(bag.id);
+    const maxWeightGrams = bag.maxWeightKg == null ? null : bag.maxWeightKg * 1000;
+    return {
+      id: bag.id,
+      volumeLiters: Math.max(0, Math.round((bag.volumeLiters - (used?.volumeLiters ?? 0)) * 10) / 10),
+      maxWeightKg:
+        maxWeightGrams == null
+          ? null
+          : Math.max(0, Math.round(maxWeightGrams - (used?.weightGrams ?? 0)) / 1000),
+    };
+  });
 
   const rows = await prisma.wardrobeItem.findMany({
     where: {
@@ -415,6 +807,7 @@ export async function generatePackingPlan(
       colors: true,
       weightGrams: true,
       volumeLiters: true,
+      dailyWear: true,
     },
   });
   const items: PackableItem[] = rows.map((r) => ({
@@ -429,16 +822,27 @@ export async function generatePackingPlan(
     colors: parseColors(r.colors),
     weightGrams: r.weightGrams,
     volumeLiters: r.volumeLiters,
+    // Lets the packer keep swimwear out of the ordinary rotation while still
+    // reaching it for an activity that asks for it. See lib/packing/occasion.ts.
+    dailyWear: r.dailyWear,
   }));
 
   const plan = buildPackingPlan({
     items,
-    bags: bags.map((b) => ({ id: b.id, volumeLiters: b.volumeLiters, maxWeightKg: b.maxWeightKg })),
+    bags: packable,
     days: climate.days,
     band: climate.band,
     requirements: parseTripRequirements(trip.requirements),
     rainChance: climate.rainChance,
   });
+
+  for (const bag of packable) {
+    if (bag.volumeLiters > 0.05) continue;
+    const original = bags.find((b) => b.id === bag.id);
+    plan.warnings.push(
+      `Gear fills ${original ? formatLiters(original.volumeLiters) : "a bag"} of a bag on its own — there's no room left for clothes in it.`,
+    );
+  }
 
   await prisma.packingTrip.update({
     where: { id: tripId },
@@ -474,6 +878,32 @@ export async function setItemPacking(input: {
   if (Object.keys(data).length === 0) return { ok: true };
 
   await prisma.wardrobeItem.update({ where: { id: input.itemId }, data });
+  return { ok: true };
+}
+
+/**
+ * Override whether a garment belongs in the day-to-day rotation.
+ *
+ * `null` hands the decision back to the guess in lib/packing/occasion.ts, which
+ * is the default for everything — this only exists for the cases it gets wrong,
+ * in either direction: board shorts you genuinely wear as shorts, or a shirt
+ * you're only bringing for one dinner.
+ */
+export async function setItemDailyWear(input: {
+  itemId: string;
+  dailyWear: boolean | null;
+}): Promise<Result> {
+  const user = await requireUser();
+  const item = await prisma.wardrobeItem.findFirst({
+    where: { id: input.itemId, userId: user.id },
+    select: { id: true },
+  });
+  if (!item) return { ok: false, error: "Item not found" };
+
+  await prisma.wardrobeItem.update({
+    where: { id: input.itemId },
+    data: { dailyWear: typeof input.dailyWear === "boolean" ? input.dailyWear : null },
+  });
   return { ok: true };
 }
 

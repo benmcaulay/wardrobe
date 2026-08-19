@@ -40,6 +40,24 @@ export function Bag({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** battery — battery, power bank, charge, portable */
+export function Battery({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="2.6" y="7" width="16" height="10" rx="3"/><path d="M21.4 10.8v2.4"/><path d="M6.4 10.6v2.8M9.8 10.6v2.8M13.2 10.6v2.8"/>
+    </svg>
+  );
+}
+
+/** book — book, reading, novel, guidebook */
+export function Book({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M5 4.8A2.2 2.2 0 0 1 7.2 2.6H19v13.6H7.2A2.2 2.2 0 0 0 5 18.4Z"/><path d="M5 18.4a2.2 2.2 0 0 0 2.2 2.2H19v-4.4"/>
+    </svg>
+  );
+}
+
 /** brand-facebook — facebook, meta, fb */
 export function BrandFacebook({ size = 20, ...props }: IconProps) {
   return (
@@ -283,11 +301,38 @@ export function Hat({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** headphones — headphones, earphones, audio, music */
+export function Headphones({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M4.6 14.6v-2.4a7.4 7.4 0 0 1 14.8 0v2.4"/><rect x="2.6" y="13.4" width="4.6" height="6.8" rx="2.3"/><rect x="16.8" y="13.4" width="4.6" height="6.8" rx="2.3"/>
+    </svg>
+  );
+}
+
 /** heart — heart */
 export function Heart({ size = 20, ...props }: IconProps) {
   return (
     <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
       <path d="M18.6 13.6c1.6-1.5 2.4-3 2.4-4.9A4.9 4.9 0 0 0 16.2 3.8c-1.7 0-3.2.8-4.2 2.1-1-1.3-2.5-2.1-4.2-2.1A4.9 4.9 0 0 0 3 8.7c0 1.9.8 3.4 2.4 4.9l6.6 6.6Z"/>
+    </svg>
+  );
+}
+
+/** keys — keys, key, keyring, house */
+export function Keys({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <circle cx="8" cy="8" r="4.4"/><path d="M11.1 11.1 19.6 19.6"/><path d="M14.6 14.6 16.8 12.4"/><path d="M17.2 17.2 19.4 15"/>
+    </svg>
+  );
+}
+
+/** laptop — laptop, computer, macbook, work */
+export function Laptop({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="4" y="4.4" width="16" height="11" rx="2.4"/><path d="M2.2 18.8h19.6"/>
     </svg>
   );
 }
@@ -346,6 +391,15 @@ export function Outerwear({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** packing-cube — packing cube, cube, organiser, compression */
+export function PackingCube({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="2.8" y="6.6" width="18.4" height="12.6" rx="3"/><path d="M3.2 12.4h17.6"/><path d="M9.4 6.6V5a1.8 1.8 0 0 1 1.8-1.8h1.6A1.8 1.8 0 0 1 14.6 5v1.6"/>
+    </svg>
+  );
+}
+
 /** palette — palette */
 export function Palette({ size = 20, ...props }: IconProps) {
   return (
@@ -364,6 +418,24 @@ export function Pants({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** passport — passport, id, travel document, visa */
+export function Passport({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="4.6" y="2.8" width="14.8" height="18.4" rx="3"/><circle cx="12" cy="9.6" r="3.3"/><path d="M9.2 8.1h5.6M9.2 11.1h5.6"/><path d="M9 16.2h6M10.4 18.6h3.2"/>
+    </svg>
+  );
+}
+
+/** phone — phone, mobile, smartphone, cell */
+export function Phone({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="6.2" y="2.4" width="11.6" height="19.2" rx="3.2"/><path d="M10.4 5.6h3.2"/><path d="M10.6 18.6h2.8"/>
+    </svg>
+  );
+}
+
 /** piggy-bank — savings, piggy, bank, save, money */
 export function PiggyBank({ size = 20, ...props }: IconProps) {
   return (
@@ -373,11 +445,38 @@ export function PiggyBank({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** pills — pills, medication, medicine, tablets, prescription */
+export function Pills({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="2.4" y="12.2" width="11" height="6.2" rx="3.1"/><path d="M7.9 12.2v6.2"/><circle cx="17.2" cy="7.8" r="4.6"/><path d="M14.6 5.2 19.8 10.4"/>
+    </svg>
+  );
+}
+
+/** plug — plug, charger, adapter, power, socket */
+export function Plug({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M9.2 2.8v3.6M14.8 2.8v3.6"/><path d="M6.2 6.4h11.6v3.4a5.8 5.8 0 0 1-11.6 0Z"/><path d="M12 15.6v5.6"/>
+    </svg>
+  );
+}
+
 /** plus — add, new, create, plus */
 export function Plus({ size = 20, ...props }: IconProps) {
   return (
     <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
       <path d="M12 5.5v13"/><path d="M5.5 12h13"/>
+    </svg>
+  );
+}
+
+/** pouch — pouch, dopp kit, washbag, case */
+export function Pouch({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M4.4 8.6h15.2a1.6 1.6 0 0 1 1.6 1.7l-.6 8a2 2 0 0 1-2 1.9H5.4a2 2 0 0 1-2-1.9l-.6-8a1.6 1.6 0 0 1 1.6-1.7Z"/><path d="M3.2 12.4h17.6"/><path d="M12 12.4v2.4"/>
     </svg>
   );
 }
@@ -571,6 +670,24 @@ export function Thermometer({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** toiletries — toiletries, shampoo, soap, lotion, dispenser */
+export function Toiletries({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="6.6" y="9.6" width="10.8" height="11.6" rx="2.8"/><path d="M10.2 9.6V7.4h3.6v2.2"/><path d="M12 7.4V4.4h3.8a1.5 1.5 0 0 1 1.5 1.5v1.5"/>
+    </svg>
+  );
+}
+
+/** toothbrush — toothbrush, teeth, dental, brush */
+export function Toothbrush({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <rect x="10.8" y="11" width="2.4" height="10.2" rx="1.2"/><rect x="9.2" y="4.8" width="5.6" height="6.6" rx="1.9"/><path d="M10.4 4.8V2.4M12 4.8V2M13.6 4.8V2.4"/>
+    </svg>
+  );
+}
+
 /** top — top, shirt, tee, t-shirt, tshirt */
 export function Top({ size = 20, ...props }: IconProps) {
   return (
@@ -585,6 +702,15 @@ export function Trash({ size = 20, ...props }: IconProps) {
   return (
     <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
       <path d="M4.4 6.7h15.2"/><path d="M9 6.7V5.65a1.7 1.7 0 0 1 1.7-1.7h2.6a1.7 1.7 0 0 1 1.7 1.7V6.7"/><path d="m6.5 6.7.78 11.2a2.2 2.2 0 0 0 2.2 2.05h5.04a2.2 2.2 0 0 0 2.2-2.05L17.5 6.7"/>
+    </svg>
+  );
+}
+
+/** umbrella — umbrella, rain, brolly */
+export function Umbrella({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M2.6 12.2a9.4 9.4 0 0 1 18.8 0Z"/><path d="M12 12.2v6.2a2.6 2.6 0 0 1-5.2 0"/>
     </svg>
   );
 }
@@ -625,6 +751,15 @@ export function Watch({ size = 20, ...props }: IconProps) {
   );
 }
 
+/** water-bottle — water bottle, flask, hydration, drink */
+export function WaterBottle({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...BASE} width={size} height={size} aria-hidden focusable="false" {...props}>
+      <path d="M8.8 21.2h6.4a2.2 2.2 0 0 0 2.2-2.2V10a3.4 3.4 0 0 0-1-2.4l-.8-.8h-7.2l-.8.8A3.4 3.4 0 0 0 6.6 10v9a2.2 2.2 0 0 0 2.2 2.2Z"/><path d="M9.6 6.8V4.2a1.4 1.4 0 0 1 1.4-1.4h2a1.4 1.4 0 0 1 1.4 1.4v2.6"/><path d="M6.6 12.6h10.8"/>
+    </svg>
+  );
+}
+
 /** wind — wind */
 export function Wind({ size = 20, ...props }: IconProps) {
   return (
@@ -650,6 +785,8 @@ export const ICON_REGISTRY: readonly {
   Component: (props: IconProps) => JSX.Element;
 }[] = [
   { name: "bag", keywords: ["bag", "handbag", "tote", "purse"], Component: Bag },
+  { name: "battery", keywords: ["battery", "power bank", "charge", "portable"], Component: Battery },
+  { name: "book", keywords: ["book", "reading", "novel", "guidebook"], Component: Book },
   { name: "brand-facebook", keywords: ["facebook", "meta", "fb"], Component: BrandFacebook },
   { name: "brand-pinterest", keywords: ["pinterest", "pin"], Component: BrandPinterest },
   { name: "brand-reddit", keywords: ["reddit", "snoo", "forum"], Component: BrandReddit },
@@ -677,16 +814,25 @@ export const ICON_REGISTRY: readonly {
   { name: "grid", keywords: ["grid"], Component: Grid },
   { name: "hanger", keywords: ["hanger"], Component: Hanger },
   { name: "hat", keywords: ["hat", "cap", "headwear"], Component: Hat },
+  { name: "headphones", keywords: ["headphones", "earphones", "audio", "music"], Component: Headphones },
   { name: "heart", keywords: ["heart"], Component: Heart },
+  { name: "keys", keywords: ["keys", "key", "keyring", "house"], Component: Keys },
+  { name: "laptop", keywords: ["laptop", "computer", "macbook", "work"], Component: Laptop },
   { name: "link", keywords: ["url", "chain", "copy link"], Component: Link },
   { name: "list", keywords: ["list"], Component: List },
   { name: "mail", keywords: ["email", "envelope", "message"], Component: Mail },
   { name: "mirror", keywords: ["mirror", "flip", "reflect", "reverse"], Component: Mirror },
   { name: "outerwear", keywords: ["outerwear", "coat", "jacket", "overcoat"], Component: Outerwear },
+  { name: "packing-cube", keywords: ["packing cube", "cube", "organiser", "compression"], Component: PackingCube },
   { name: "palette", keywords: ["palette"], Component: Palette },
   { name: "pants", keywords: ["pants", "trousers", "jeans", "bottoms"], Component: Pants },
+  { name: "passport", keywords: ["passport", "id", "travel document", "visa"], Component: Passport },
+  { name: "phone", keywords: ["phone", "mobile", "smartphone", "cell"], Component: Phone },
   { name: "piggy-bank", keywords: ["savings", "piggy", "bank", "save", "money"], Component: PiggyBank },
+  { name: "pills", keywords: ["pills", "medication", "medicine", "tablets", "prescription"], Component: Pills },
+  { name: "plug", keywords: ["plug", "charger", "adapter", "power", "socket"], Component: Plug },
   { name: "plus", keywords: ["add", "new", "create", "plus"], Component: Plus },
+  { name: "pouch", keywords: ["pouch", "dopp kit", "washbag", "case"], Component: Pouch },
   { name: "price-drop", keywords: ["sale", "discount", "price", "markdown", "tag"], Component: PriceDrop },
   { name: "rain", keywords: ["rain"], Component: Rain },
   { name: "receipt", keywords: ["receipt", "purchase", "invoice", "bill", "order"], Component: Receipt },
@@ -708,12 +854,16 @@ export const ICON_REGISTRY: readonly {
   { name: "sweater", keywords: ["sweater", "jumper", "hoodie", "knit", "pullover"], Component: Sweater },
   { name: "tag", keywords: ["tag"], Component: Tag },
   { name: "thermometer", keywords: ["thermometer"], Component: Thermometer },
+  { name: "toiletries", keywords: ["toiletries", "shampoo", "soap", "lotion", "dispenser"], Component: Toiletries },
+  { name: "toothbrush", keywords: ["toothbrush", "teeth", "dental", "brush"], Component: Toothbrush },
   { name: "top", keywords: ["top", "shirt", "tee", "t-shirt", "tshirt"], Component: Top },
   { name: "trash", keywords: ["delete", "remove", "bin", "discard"], Component: Trash },
+  { name: "umbrella", keywords: ["umbrella", "rain", "brolly"], Component: Umbrella },
   { name: "upload", keywords: ["import", "add", "send", "attach"], Component: Upload },
   { name: "user", keywords: ["user"], Component: User },
   { name: "wallet", keywords: ["wallet", "money", "spend", "cash", "payment"], Component: Wallet },
   { name: "watch", keywords: ["watch", "wristwatch", "time", "accessory"], Component: Watch },
+  { name: "water-bottle", keywords: ["water bottle", "flask", "hydration", "drink"], Component: WaterBottle },
   { name: "wind", keywords: ["wind"], Component: Wind },
   { name: "winter", keywords: ["winter"], Component: Winter },
 ];

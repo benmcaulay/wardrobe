@@ -280,10 +280,7 @@ export function ClosetFilters({
             label. Grouped so the rule, the label and the control wrap together
             rather than the divider stranding at the start of a new line. */}
         <div className="ml-1 flex items-center gap-2">
-          {/* gray-200, not ink/15: the theme colours are `var(--ink)` holding a
-              hex, so Tailwind's /opacity modifiers resolve to transparent on
-              them. This is the same value the chip borders actually render. */}
-          <span aria-hidden className="h-5 w-px shrink-0 bg-gray-200" />
+          <span aria-hidden className="h-5 w-px shrink-0 bg-ink/15" />
           <span className="shrink-0 text-xs text-ink-muted">Sort by:</span>
           <SortControl sort={filters.sort} onChange={(sort) => patch({ sort })} />
         </div>
