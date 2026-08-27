@@ -1,5 +1,6 @@
 "use client";
 
+import { APP_WORDMARK } from "@/lib/brand";
 import { useEffect, useRef } from "react";
 
 type Point = {
@@ -287,7 +288,7 @@ export function FabricWarp({ className, theme = "light", origin }: Props) {
       t.textBaseline = "middle";
       t.font = `500 ${titleSize}px ${sans}`;
       setLS(trackRatio * titleSize);
-      const measured = t.measureText("WARDROBE").width;
+      const measured = t.measureText(APP_WORDMARK).width;
       if (measured > maxWidth) {
         titleSize *= maxWidth / measured;
         t.font = `500 ${titleSize}px ${sans}`;
@@ -306,7 +307,7 @@ export function FabricWarp({ className, theme = "light", origin }: Props) {
       t.fillStyle = sheen;
       // Canvas letterSpacing adds trailing space after the last glyph, which
       // nudges a centered string left by half a slot — offset to recenter.
-      t.fillText("WARDROBE", cx + letterSpacing * 0.5, cy);
+      t.fillText(APP_WORDMARK, cx + letterSpacing * 0.5, cy);
       t.restore();
       setLS(0);
 

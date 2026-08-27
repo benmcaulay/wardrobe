@@ -1,5 +1,6 @@
 "use client";
 
+import { APP_NAME } from "@/lib/brand";
 import { useCallback, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { FabricWarp, type FabricTheme } from "@/components/fabric-warp";
@@ -56,7 +57,7 @@ export function LandingHero({ demo, googleConfigured }: Props) {
       <FabricWarp className="absolute inset-0 h-full w-full" theme={fabricTheme} origin={origin} />
 
       <div className="relative z-10 flex min-h-dvh flex-col items-center justify-center px-6 pointer-events-none">
-        <h1 className="sr-only">Wardrobe</h1>
+        <h1 className="sr-only">{APP_NAME}</h1>
 
         {/* Spacer matches the canvas wordmark resting near ~40% height */}
         <div className="h-[min(38vh,20rem)] w-full shrink-0" aria-hidden />

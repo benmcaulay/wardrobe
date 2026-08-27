@@ -1,5 +1,6 @@
 "use client";
 
+import { APP_WORDMARK } from "@/lib/brand";
 import { useMemo, useState } from "react";
 import { LAB_ITEMS, type LabItem } from "../mock-items";
 
@@ -74,7 +75,7 @@ export function OrbitCloset() {
         <div className="orbit-main">
           <div className="orbit-top">
             <div>
-              <div className="orbit-wordmark lab-shift-near">WARDROBE</div>
+              <div className="orbit-wordmark lab-shift-near">{APP_WORDMARK}</div>
               <p className="orbit-sub">Orbit · spatial closet · {items.length} in field</p>
             </div>
             <div className="orbit-tools">

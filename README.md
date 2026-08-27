@@ -1,4 +1,4 @@
-# Wardrobe
+# MAKING SPACE
 
 Your personal digital closet with **AI-powered ghost-mannequin photos**
 and **virtual try-on**. Upload clothing pictures and get back clean,
@@ -29,6 +29,12 @@ gemini measurably cannot do the job:
 
 Virtual try-on, garment classification, trip parsing, and style-note parsing all
 run on gemini.
+
+The product is **MAKING SPACE**; the codebase is still `wardrobe`. The package
+name, the repo, the `WardrobeItem` model, the local database and the
+`WARDROBE_USER_EMAIL` env var all keep their old names on purpose — renaming
+them means a migration and a broken import script for no user-visible gain. The
+display name lives in [lib/brand.ts](lib/brand.ts).
 
 ## Quick start (stub mode — no keys)
 

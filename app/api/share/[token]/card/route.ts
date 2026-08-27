@@ -1,3 +1,4 @@
+import { APP_WORDMARK } from "@/lib/brand";
 import { NextResponse, type NextRequest } from "next/server";
 import sharp from "sharp";
 import { getObject } from "@/lib/storage";
@@ -103,7 +104,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     <text x="${margin}" y="120" font-family="Georgia,'Times New Roman',serif" font-size="30" letter-spacing="6" fill="${MUTED}">${esc(kicker)}</text>
     <text x="${margin}" y="196" font-family="Georgia,'Times New Roman',serif" font-size="66" fill="${INK}">${esc(clamp(share.title, 30))}</text>
     <text x="${margin}" y="${Math.min(gridBottom + 66, H - 132)}" font-family="Helvetica,Arial,sans-serif" font-size="32" fill="${MUTED}">${esc(clamp(sub, 46))}</text>
-    <text x="${margin}" y="${H - 56}" font-family="Helvetica,Arial,sans-serif" font-size="26" letter-spacing="3" fill="${MUTED}">WARDROBE</text>
+    <text x="${margin}" y="${H - 56}" font-family="Helvetica,Arial,sans-serif" font-size="26" letter-spacing="3" fill="${MUTED}">${APP_WORDMARK}</text>
   </svg>`;
 
   layers.push({ input: Buffer.from(text), left: 0, top: 0 });

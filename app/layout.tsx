@@ -1,3 +1,4 @@
+import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
 import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import "./globals.css";
@@ -16,8 +17,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Wardrobe",
-  description: "Your personal digital closet.",
+  title: APP_NAME,
+  description: APP_TAGLINE,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
