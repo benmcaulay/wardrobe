@@ -70,7 +70,7 @@ export type GhostMannequinResult = {
 const BASE_WIDTH = 1024;
 const BASE_HEIGHT = 1366; // 3:4 portrait
 /** Bump when prompt/post-process changes so new runs don't reuse stale cache keys. */
-const PROMPT_VERSION = "2026-08-footwear-positive";
+const PROMPT_VERSION = "2026-08-footwear-flat-left";
 /**
  * Catalog post-process after fal returns.
  * Bakeoff winner was `none` (prod-raw): resize only for the JPEG; cutout still
@@ -350,10 +350,10 @@ const FOOTWEAR_ANGLE = strEnv(
 );
 
 const TYPE_FOOTWEAR = `TYPE — footwear:
-- Two shoes of the same pair, ${FOOTWEAR_ANGLE}.
+- Two shoes of the same pair, ${FOOTWEAR_ANGLE}, facing left flat on the ground.
 - Both shoes point the same way, as a shop displays them on a shelf.
 - Each shoe is seen from its outer side.
-- Both stand upright and level on their soles, at the same height.
+- Both stand upright and level on their soles, at the same height, flat on the ground.
 - They sit side by side and close together, the near one slightly forward.
 - The frame contains the shoes alone.`;
 
