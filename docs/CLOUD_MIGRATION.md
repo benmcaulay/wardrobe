@@ -31,19 +31,28 @@ picked; both are needed below.
 ## Step 2 — Database
 
 Supabase gives you two connection strings, and this app needs **both**. That is
-not redundancy: the pooler (Supavisor, port 6543, transaction mode) does not
-support prepared statements or DDL, so runtime queries go through the pooler
-while migrations must go direct.
+not redundancy: the transaction pooler (Supavisor, port 6543) does not support
+prepared statements or DDL, so runtime queries go there while migrations need a
+session-mode connection on 5432.
 
 From Project Settings → Database → Connection string:
 
 ```
-# Pooled — normal app queries. Note the ?pgbouncer=true.
+# Transaction pooler (6543) — normal app queries. Note the ?pgbouncer=true.
 DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true"
 
-# Direct — migrations only.
+# Session pooler (5432) — migrations only.
 DIRECT_DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
 ```
+
+Use the **session pooler** on 5432 for `DIRECT_DATABASE_URL`, not the
+`db.<ref>.supabase.co` host the dashboard also offers. That direct host is
+**IPv6-only** on current projects — verified for this project: it has an AAAA
+record and no A record. It resolves fine from a machine with IPv6 egress and
+fails everywhere without one, which includes GitHub Actions, so migrations run
+from CI would break in a way that looks like a credentials problem. The session
+pooler is IPv4 and supports DDL and prepared statements, so it satisfies
+everything `directUrl` needs.
 
 Both are already wired: [prisma/schema.prisma](../prisma/schema.prisma) declares
 `url` and `directUrl`, so `prisma migrate` picks the direct one automatically.
@@ -67,7 +76,8 @@ history lines up:
   --no-owner --no-acl -d "<your DIRECT_DATABASE_URL>" /tmp/wardrobe.dump
 ```
 
-Restore through the **direct** URL, not the pooler — `pg_restore` issues DDL.
+Restore through `DIRECT_DATABASE_URL` (the session pooler on 5432), not the
+transaction pooler on 6543 — `pg_restore` issues DDL, which 6543 refuses.
 
 ## Step 3 — Images
 
