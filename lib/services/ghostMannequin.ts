@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
 import { log } from "../log";
+import { boolEnv, numEnv, strEnv } from "../env";
+import { costTenthCentsForModel } from "../ai-costs";
 import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
 import { whitenBackground } from "./whiten-background";
 import { centerCatalogImage } from "./center-catalog-image";
@@ -11,12 +13,6 @@ import { removeNeckPost } from "./remove-neck-post";
 import { normalizeCatalogExposure } from "./normalize-exposure";
 import { DEFAULT_GEMINI_IMAGE_MODEL, geminiEditImage } from "./ghost-provider-gemini";
 import { fetchFalResultBuffer } from "./fal-result-fetch";
-import {
-  capEditImageUrls,
-  loraInput,
-  LORA_EDIT_ENDPOINT,
-  MAX_EDIT_IMAGE_URLS,
-} from "./ghost-lora";
 
 // Two real providers, same contract: a primary garment image plus optional
 // context references in, one composite out.
@@ -63,6 +59,10 @@ export type GhostMannequinResult = {
   resultImagePath: string;
   /** Credits spent (1 = ~$0.04 with the real provider). 0 when served from cache. */
   credits: number;
+  /** Model that produced the image, for cost reporting. Null in stub mode. */
+  model: string | null;
+  /** List-price cost in tenths of a cent. 0 for a cache hit or a stub. */
+  costTenthCents: number;
   /** True when an identical request already had artifacts on disk. */
   cached: boolean;
 };
@@ -70,7 +70,7 @@ export type GhostMannequinResult = {
 const BASE_WIDTH = 1024;
 const BASE_HEIGHT = 1366; // 3:4 portrait
 /** Bump when prompt/post-process changes so new runs don't reuse stale cache keys. */
-const PROMPT_VERSION = "2026-08-smooth-exposure";
+const PROMPT_VERSION = "2026-08-footwear-same-direction";
 /**
  * Catalog post-process after fal returns.
  * Bakeoff winner was `none` (prod-raw): resize only for the JPEG; cutout still
@@ -110,63 +110,49 @@ const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
 // Default to Seedream v4 edit: top-tier prompt adherence (it actually obeys the
 // camera-angle requirements below, where the gemini editor tended to ignore
 // them) at the same ~$0.04/call. Override with FAL_GHOST_MODEL to switch.
-const FAL_GHOST_MODEL = process.env.FAL_GHOST_MODEL ?? "fal-ai/bytedance/seedream/v4/edit";
-const REAL_MODE = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
+const FAL_GHOST_MODEL = strEnv("FAL_GHOST_MODEL", "fal-ai/bytedance/seedream/v4/edit");
+const REAL_MODE = boolEnv("USE_REAL_GHOST_MANNEQUIN");
 
 /**
- * A trained edit LoRA (see scripts/ghost-lora-train.ts). When set, generation
- * routes to the FLUX.2 LoRA edit endpoint instead of FAL_GHOST_MODEL, because
- * the LoRA only applies on that endpoint.
- */
-const FAL_GHOST_LORA_URL = process.env.FAL_GHOST_LORA_URL?.trim() ?? "";
-const FAL_GHOST_LORA_SCALE = Number(process.env.FAL_GHOST_LORA_SCALE ?? 1);
-const USING_LORA = FAL_GHOST_LORA_URL.length > 0;
-/** Endpoint actually called, once the LoRA override is taken into account. */
-const ACTIVE_GHOST_MODEL = USING_LORA ? LORA_EDIT_ENDPOINT : FAL_GHOST_MODEL;
-
-/**
- * Which vendor runs the edit. Both satisfy the same buffers-in / buffer-out
- * contract, so nothing above this cares which one ran.
+ * Which vendor runs the edit, decided per category.
  *
- * Default is `gemini`. Two things override it:
+ * Everything is gemini except footwear, which stays on fal Seedream v4 edit.
+ * That split is measured, not stylistic: asked for a pair of shoes upright at
+ * 45° side by side, gemini-3.1-flash-image renders them mirrored sole-to-sole
+ * and gemini-3-pro-image floats them tilted, both ignoring the instruction even
+ * when it is the first rule in the prompt. Seedream obeys it. Shoes are also
+ * the category where pose is least forgiving — a mirrored pair reads as broken
+ * where a slightly off t-shirt does not.
  *
- * 1. An explicit GHOST_PROVIDER is always honoured, including "fal".
- * 2. A trained LoRA only applies on fal-ai/flux-2/lora/edit, so setting
- *    FAL_GHOST_LORA_URL pins the provider to fal rather than silently
- *    discarding the LoRA that was paid for.
- *
- * When no provider is set *and* there is no GEMINI_API_KEY, this falls back to
- * fal — a default should not hard-break an environment (CI, another machine)
- * that only ever had a fal key. An explicit "gemini" still fails loudly.
+ * GHOST_PROVIDER still forces one vendor for every category when set.
  */
 type GhostProvider = "fal" | "gemini";
-function resolveGhostProvider(): GhostProvider {
-  const raw = (process.env.GHOST_PROVIDER ?? "").trim().toLowerCase();
-  const explicit = raw === "fal" || raw === "gemini" ? (raw as GhostProvider) : null;
 
-  if (USING_LORA) {
-    if (explicit === "gemini") {
-      log.info("ghost.provider.override", {
-        reason: "FAL_GHOST_LORA_URL is set; the LoRA only runs on fal",
-      });
-    }
-    return "fal";
+const FAL_AVAILABLE = Boolean(strEnv("FAL_KEY"));
+
+function providerForCategory(category: GhostMannequinCategory): GhostProvider {
+  const forced = strEnv("GHOST_PROVIDER")?.toLowerCase();
+  if (forced === "fal" || forced === "gemini") return forced;
+
+  if (category === "footwear") {
+    if (FAL_AVAILABLE) return "fal";
+    // Falling back is better than failing: a gemini pair is imperfectly posed,
+    // an error is no image at all. Logged so the cause is never a mystery.
+    log.info("ghost.provider.fallback", {
+      reason: "footwear prefers fal but FAL_KEY is unset; using gemini",
+      category,
+    });
+    return "gemini";
   }
-
-  if (explicit) return explicit;
-
-  if (process.env.GEMINI_API_KEY?.trim()) return "gemini";
-  log.info("ghost.provider.fallback", {
-    reason: "default is gemini but GEMINI_API_KEY is unset; using fal",
-  });
-  return "fal";
+  return "gemini";
 }
-const GHOST_PROVIDER = resolveGhostProvider();
-const GEMINI_IMAGE_MODEL =
-  process.env.GEMINI_IMAGE_MODEL?.trim() || DEFAULT_GEMINI_IMAGE_MODEL;
-/** Model string used for logs and cache keys, whichever provider is active. */
-const ACTIVE_MODEL_LABEL =
-  GHOST_PROVIDER === "gemini" ? GEMINI_IMAGE_MODEL : ACTIVE_GHOST_MODEL;
+
+const GEMINI_IMAGE_MODEL = strEnv("GEMINI_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL);
+
+/** Model string for logs and cache keys, for whichever provider ran. */
+function modelLabelFor(provider: GhostProvider): string {
+  return provider === "gemini" ? GEMINI_IMAGE_MODEL : FAL_GHOST_MODEL;
+}
 
 let falConfigured = false;
 function ensureFalConfigured() {
@@ -195,10 +181,10 @@ function deterministicHash(input: GhostMannequinInput): string {
         POST_PROCESS_MODE,
         ...sortedExtras,
         REAL_MODE ? "real" : "stub",
-        // Endpoint and LoRA are part of the identity of a render: without them
-        // a model swap or a retrained LoRA would silently reuse the old image.
-        ACTIVE_MODEL_LABEL,
-        USING_LORA ? `lora:${FAL_GHOST_LORA_URL}@${FAL_GHOST_LORA_SCALE}` : "no-lora",
+        // The endpoint is part of a render's identity: without it a model swap
+        // would silently reuse the old image. Resolved per category, since
+        // footwear and apparel go to different vendors.
+        modelLabelFor(providerForCategory(input.category)),
         EXPOSURE_NORMALIZE ? "exposure" : "no-exposure",
       ].join("|"),
     )
@@ -229,7 +215,15 @@ export async function createGhostMannequin(
   const present = await Promise.all(required.map((k) => objectExists(k)));
   if (present.every(Boolean)) {
     log.info("ghost.cache.hit", { key: keys.key, mode: REAL_MODE ? "real" : "stub" });
-    return { resultImagePath: keys.key, credits: 0, cached: true };
+    return {
+      resultImagePath: keys.key,
+      credits: 0,
+      cached: true,
+      // Nothing was generated, so nothing is charged — but report which model's
+      // artifact is being served so the breakdown attributes it correctly.
+      model: REAL_MODE ? modelLabelFor(providerForCategory(input.category)) : null,
+      costTenthCents: 0,
+    };
   }
 
   if (REAL_MODE) return realGhostMannequin(input);
@@ -289,9 +283,28 @@ const TYPE_DRESS = `TYPE — dress:
 - If sleeved: sleeves hang straight down at the sides (same arm rules as tops).
 - Neck/collar opening shows back lining only (see openings rule).`;
 
+/**
+ * Footwear pose. Overridable with GHOST_FOOTWEAR_ANGLE, which .env.example has
+ * documented since the angle work but nothing ever read.
+ */
+const FOOTWEAR_ANGLE = strEnv(
+  "GHOST_FOOTWEAR_ANGLE",
+  "angled ~45° to the viewer's left",
+);
+
 const TYPE_FOOTWEAR = `TYPE — footwear:
-- Both shoes as a matched pair, angled ~45° to the viewer's left, same height and orientation.
-- Not toe-on, not heel-to-heel V, not splayed apart.
+- BOTH SHOES FACE THE SAME DIRECTION. This is the single most important rule of
+  this shot. Both toes point to the viewer's left. The pair is NOT mirrored, NOT
+  symmetric, NOT reflected: do not point one shoe left and the other right, do
+  not put the two outsoles together, do not make the pair a butterfly or a V.
+  Photograph both shoes from their outer side, as a shop shelf would show them.
+- Both shoes as a matched pair, ${FOOTWEAR_ANGLE}, same height and orientation.
+- Upright and level, standing squarely on their soles as they would on a shelf —
+  never lying on their side, never tipped, tilted, or leaning, never floating at
+  an angle, never sole-toward-the-camera, never soles visible.
+- Side by side and close together, inner edges nearly touching, the near shoe
+  slightly in front of the far one, both pointing the same way.
+- Not toe-on, not heel-to-heel V, not splayed apart, not overlapping or stacked.
 - No legs, ankles, or feet.`;
 
 const TYPE_ACCESSORY = `TYPE — accessory (hat, bag, scarf, belt, or similar):
@@ -432,7 +445,7 @@ ${extra}`;
  * Longest edge for images sent to the model. Output is 1024x1366, so anything
  * larger is wasted bytes — and with inline data URIs, bytes are request size.
  */
-const FAL_INPUT_MAX_EDGE = Number(process.env.FAL_INPUT_MAX_EDGE ?? 1536);
+const FAL_INPUT_MAX_EDGE = numEnv("FAL_INPUT_MAX_EDGE", 1536);
 
 /**
  * Inline images as data URIs instead of uploading them to fal storage.
@@ -469,26 +482,12 @@ async function uploadBufferToFal(buf: Buffer, name: string, mime: string): Promi
 }
 
 async function fetchFalImageUrl(model: string, prompt: string, imageUrls: string[]): Promise<string> {
-  // The LoRA edit endpoint takes a different input shape: it caps image_urls at
-  // 4 (extras beyond that are a hard 400, not a silent truncation) and exposes
-  // prompt expansion as an off-by-default boolean rather than a mode string.
-  // Expansion stays off — it rewrites the prompt, which dilutes the negative
-  // constraints the tenets are built from.
-  const input = USING_LORA
-    ? {
-        prompt,
-        image_urls: capEditImageUrls(imageUrls, MAX_EDIT_IMAGE_URLS),
-        num_images: 1,
-        loras: loraInput(FAL_GHOST_LORA_URL, FAL_GHOST_LORA_SCALE),
-        enable_prompt_expansion: false,
-        output_format: "jpeg" as const,
-      }
-    : {
-        prompt,
-        image_urls: imageUrls,
-        num_images: 1,
-        enhance_prompt_mode: "fast" as const,
-      };
+  const input = {
+    prompt,
+    image_urls: imageUrls,
+    num_images: 1,
+    enhance_prompt_mode: "fast" as const,
+  };
 
   const response = await fal.subscribe(model, { input, logs: false });
   const data = response?.data as
@@ -505,16 +504,17 @@ async function fetchFalImageUrl(model: string, prompt: string, imageUrls: string
  * than a stored key.
  */
 async function editBufferWithProvider(
+  provider: GhostProvider,
   prompt: string,
   buffer: Buffer,
   mime: string,
 ): Promise<Buffer> {
-  if (GHOST_PROVIDER === "gemini") {
+  if (provider === "gemini") {
     return geminiEditImage(prompt, [{ buffer, mime }], { model: GEMINI_IMAGE_MODEL });
   }
   ensureFalConfigured();
   const url = await uploadBufferToFal(buffer, "ghost-repair.jpg", mime);
-  const resultUrl = await fetchFalImageUrl(ACTIVE_GHOST_MODEL, prompt, [url]);
+  const resultUrl = await fetchFalImageUrl(FAL_GHOST_MODEL, prompt, [url]);
   return fetchFalResultBuffer(resultUrl);
 }
 
@@ -534,12 +534,38 @@ async function resizeToCatalogCanvas(source: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
+/**
+ * Fraction of the frame the subject occupies, measured on the transparent
+ * cutout. A real garment covers a large share of a catalog frame; anything at
+ * or below this is a failed render, not a small item.
+ */
+const MIN_SUBJECT_COVERAGE = 0.01;
+
+/** Attempts allowed when the provider hands back a blank frame. Each is billed. */
+const BLANK_RETRY_ATTEMPTS = 3;
+
+async function opaqueCoverage(cutout: Buffer): Promise<number> {
+  const { data, info } = await sharp(cutout).ensureAlpha().raw().toBuffer({
+    resolveWithObject: true,
+  });
+  let opaque = 0;
+  for (let i = 3; i < data.length; i += info.channels) {
+    if (data[i] > 10) opaque++;
+  }
+  return opaque / (info.width * info.height);
+}
+
 async function postProcessGhostRaw(
   rawBuffer: Buffer,
   category: GhostMannequinCategory,
+  provider: GhostProvider,
 ): Promise<PostProcessedGhost> {
   const skipNeck = category === "footwear";
-  const mode = POST_PROCESS_MODE;
+  // Footwear is always flattened to a true #ffffff backdrop. The prompt asks for
+  // white, but asking is not guaranteeing: shoes are small, dark, and high
+  // contrast, so any residual studio gray reads as a dirty tile in the grid.
+  // Other categories keep the bakeoff-tuned default (prod-raw won there).
+  const mode = category === "footwear" && POST_PROCESS_MODE === "none" ? "whiten" : POST_PROCESS_MODE;
 
   // Exposure is corrected before the mode branches so every mode benefits, and
   // before whitening so the gamma curve sees the model's original tones. Gamma
@@ -633,17 +659,18 @@ async function postProcessGhostRaw(
       // Route through the active provider: on gemini there is no fal credit to
       // spend, so calling fal here would fail the repair for the wrong reason.
       const repairedBuffer = await editBufferWithProvider(
+        provider,
         NECK_REPAIR_PROMPT,
         processed.evenLight,
         "image/jpeg",
       );
       processed = await runPipeline(repairedBuffer);
       neckRepairUsed = true;
-      log.info("ghost.neck.repair", { provider: GHOST_PROVIDER, model: ACTIVE_MODEL_LABEL });
+      log.info("ghost.neck.repair", { provider, model: modelLabelFor(provider) });
     } catch (err) {
       log.error("ghost.neck.repair.failed", err, {
-        provider: GHOST_PROVIDER,
-        model: ACTIVE_MODEL_LABEL,
+        provider,
+        model: modelLabelFor(provider),
       });
     }
   }
@@ -688,7 +715,7 @@ async function generateViaFal(
     uploadKeyToFal(garmentKey, "garment.jpg"),
     ...extraKeys.map((k) => uploadKeyToFal(k, "context.jpg")),
   ]);
-  const resultUrl = await fetchFalImageUrl(ACTIVE_GHOST_MODEL, prompt, [
+  const resultUrl = await fetchFalImageUrl(FAL_GHOST_MODEL, prompt, [
     garmentUrl,
     ...extraUrls,
   ]);
@@ -741,30 +768,68 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   );
 
   const startedAt = Date.now();
-  let rawBuffer: Buffer;
-  try {
-    rawBuffer =
-      GHOST_PROVIDER === "gemini"
-        ? await generateViaGemini(prompt, input.garmentImagePath, extraKeys)
-        : await generateViaFal(prompt, input.garmentImagePath, extraKeys);
-  } catch (err) {
-    log.error("ghost.generate.failed", err, {
-      provider: GHOST_PROVIDER,
-      model: ACTIVE_MODEL_LABEL,
-      ms: Date.now() - startedAt,
+  const provider = providerForCategory(input.category);
+  const modelLabel = modelLabelFor(provider);
+
+  // The image models intermittently return a blank frame — observed roughly one
+  // call in three on footwear. A blank is not a permanent failure, so retry it
+  // here rather than surfacing it: the user clicking again would cost the same
+  // and they cannot tell a blank from a slow render. Each attempt is billed, so
+  // the ceiling is low and every one is logged.
+  let processed: PostProcessedGhost | null = null;
+  let coverage = 0;
+  for (let attempt = 1; attempt <= BLANK_RETRY_ATTEMPTS; attempt++) {
+    let rawBuffer: Buffer;
+    const attemptStarted = Date.now();
+    try {
+      rawBuffer =
+        provider === "gemini"
+          ? await generateViaGemini(prompt, input.garmentImagePath, extraKeys)
+          : await generateViaFal(prompt, input.garmentImagePath, extraKeys);
+    } catch (err) {
+      log.error("ghost.generate.failed", err, {
+        provider,
+        model: modelLabel,
+        attempt,
+        ms: Date.now() - attemptStarted,
+      });
+      throw new Error(`Ghost-mannequin generation failed: ${(err as Error).message}`);
+    }
+    log.info("ghost.generate.ok", {
+      provider,
+      model: modelLabel,
+      refs: 1 + extraKeys.length,
+      attempt,
+      ms: Date.now() - attemptStarted,
     });
-    throw new Error(`Ghost-mannequin generation failed: ${(err as Error).message}`);
+
+    const candidate = await postProcessGhostRaw(rawBuffer, input.category, provider);
+    coverage = await opaqueCoverage(candidate.cutout);
+    if (coverage >= MIN_SUBJECT_COVERAGE) {
+      processed = candidate;
+      break;
+    }
+    // Never cache an empty render: writing it to the cache keys would make every
+    // later attempt a free cache hit serving the same white square, with no way
+    // to regenerate.
+    log.warn("ghost.generate.blank", {
+      provider,
+      model: modelLabel,
+      attempt,
+      coverage: Number(coverage.toFixed(4)),
+      minimum: MIN_SUBJECT_COVERAGE,
+      willRetry: attempt < BLANK_RETRY_ATTEMPTS,
+    });
   }
-  log.info("ghost.generate.ok", {
-    provider: GHOST_PROVIDER,
-    model: ACTIVE_MODEL_LABEL,
-    refs: 1 + extraKeys.length,
-    ms: Date.now() - startedAt,
-  });
+
+  if (!processed) {
+    throw new Error(
+      `The generator returned an empty image ${BLANK_RETRY_ATTEMPTS} times in a row. ` +
+        "No image was saved — please try again.",
+    );
+  }
 
   const { key, thumbKey, cutoutKey } = artifactKeys(input);
-
-  const processed = await postProcessGhostRaw(rawBuffer, input.category);
 
   await Promise.all([
     putObject(key, processed.outJpeg, "image/jpeg"),
@@ -772,7 +837,16 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
     putObject(cutoutKey, processed.cutout, "image/png"),
   ]);
 
-  return { resultImagePath: key, credits: processed.neckRepairUsed ? 2 : 1, cached: false };
+  // A neck repair is a second billed generation, so it doubles both the credit
+  // charge and the money cost.
+  const billedCalls = processed.neckRepairUsed ? 2 : 1;
+  return {
+    resultImagePath: key,
+    credits: billedCalls,
+    cached: false,
+    model: modelLabel,
+    costTenthCents: costTenthCentsForModel(modelLabel) * billedCalls,
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -829,5 +903,5 @@ async function stubGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
     putObject(thumbKey, thumbBuffer, "image/jpeg"),
   ]);
 
-  return { resultImagePath: key, credits: 1, cached: false };
+  return { resultImagePath: key, credits: 1, cached: false, model: null, costTenthCents: 0 };
 }

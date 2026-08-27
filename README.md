@@ -8,11 +8,16 @@ without a photographer.
 
 Background removal runs for real, free, client-side via
 `@imgly/background-removal`. Ghost mannequin generation runs for real on
-[fal.ai](https://fal.ai) (SeedDream v4 Edit by default) when you set
-`FAL_KEY` and `USE_REAL_GHOST_MANNEQUIN="true"`; otherwise it falls back to
-a stub composite. Virtual try-on runs on Fashn (`FASHN_API_KEY`) or fal.ai
-(`fal-ai/idm-vton` by default). Vision, reverse-image search, and product scraping are
-still stubbed.
+Google Gemini when you set `GEMINI_API_KEY` and
+`USE_REAL_GHOST_MANNEQUIN="true"`; otherwise it falls back to a stub composite.
+
+**Gemini is the only AI vendor**, with one deliberate exception: **footwear**
+still renders on fal Seedream v4 edit, because gemini will not obey the
+shoes-upright-at-45°-side-by-side pose — flash mirrors the pair sole-to-sole and
+pro floats them tilted, measured against the same prompt. Set `FAL_KEY` to get
+that path; without it footwear falls back to gemini and is posed worse. Virtual
+try-on, garment classification, product identification, trip parsing, and
+style-note parsing all run on gemini.
 
 ## Quick start (stub mode — no keys)
 
@@ -29,15 +34,19 @@ No API keys needed — AI features run as stubs until you add keys.
 
 ## Production setup (real ghost mannequin)
 
-Get a fal.ai key from <https://fal.ai/dashboard/keys>, load it with credit,
-then put it in a local `.env` (gitignored — never commit):
+Get a Gemini key from <https://aistudio.google.com/apikey>. **Billing must be
+enabled on the Google project** — Google lists Free Tier "Not available" for
+every image model, and the API returns `limit: 0` otherwise. Then put it in a
+local `.env` (gitignored — never commit):
 
 ```
 DATABASE_URL="postgresql://user:password@host:5432/wardrobe"
 USE_REAL_GHOST_MANNEQUIN="true"
-FAL_KEY="<your-fal-key>"
-# optional override (default: fal-ai/seedream/v4/edit)
-# FAL_GHOST_MODEL="fal-ai/flux-pro/kontext"
+GEMINI_API_KEY="<your-gemini-key>"
+# optional: cheapest image model (default: gemini-3.1-flash-image)
+# GEMINI_IMAGE_MODEL="gemini-2.5-flash-image"
+# optional: footwear renders on fal instead, which poses shoes correctly
+# FAL_KEY="<your-fal-key>"
 ```
 
 Build and run:
@@ -60,17 +69,20 @@ pnpm test:fal
 
 (Picks the first seeded item and generates a ghost mannequin against it.)
 
-### Cost reference (fal.ai)
+### Cost reference
 
-| Model                                      | ~Cost / image | Notes                                |
-| ------------------------------------------ | ------------- | ------------------------------------ |
-| `fal-ai/seedream/v4/edit` *(default)*      | ~$0.03        | ByteDance SeedDream, strong prompt adherence |
-| `fal-ai/gemini-25-flash-image/edit`        | ~$0.04        | Multi-image refs, 3–5s               |
-| `fal-ai/flux-pro/kontext`                  | ~$0.04        | Strong prompt fidelity               |
-| `fal-ai/flux-pro/kontext/max/multi`        | ~$0.08        | Up to 4 refs, max quality            |
+Per generated image, at list price. The app shows the exact figure on every
+generate button and totals your spend in Settings.
 
-Switch by setting `FAL_GHOST_MODEL`. The seed gives the demo user **250
-credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
+| Model                                      | ~Cost / image | Notes                                        |
+| ------------------------------------------ | ------------- | -------------------------------------------- |
+| `gemini-3.1-flash-image` *(default)*       | ~$0.067       | Nano Banana 2, best flash-tier adherence     |
+| `gemini-2.5-flash-image`                   | ~$0.039       | Cheapest                                     |
+| `gemini-3-pro-image`                       | ~$0.134       | Highest quality                              |
+| `fal-ai/bytedance/seedream/v4/edit`        | ~$0.03        | Footwear only — obeys the shoe pose          |
+
+Switch the gemini model with `GEMINI_IMAGE_MODEL`. The seed gives the demo user
+**1,000,000 credits** so a local demo never stalls; adjust in `prisma/seed.ts` or
 `lib/auth.ts` (the user-default).
 
 ### Scripts
@@ -83,7 +95,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | `pnpm test`        | Vitest suite (uses stubs)                      |
 | `pnpm test:watch`  | Vitest in watch mode                           |
 | `pnpm worker`      | Background generation worker (try-on jobs)     |
-| `pnpm test:fal`    | Real fal.ai round-trip smoke (needs `.env`)    |
+| `pnpm test:fal`    | Real ghost round-trip smoke (needs `.env`)     |
 | `pnpm test:s3`     | S3/R2 storage-driver integration check         |
 | `pnpm test:jobs`   | Job-queue integration check (needs DB)         |
 | `pnpm test:stripe` | Credit-purchase fulfillment check (needs DB)   |
@@ -99,7 +111,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
    - Server: `saveUpload` → vision tagging → reverse-image search → product scrape.
    - Client: `@imgly/background-removal` strips the background to a transparent PNG, then `saveCutoutFromClient` saves it server-side.
 4. The confirmation form shows the original + cutout side-by-side, metadata pre-filled.
-5. Optional **Generate ghost mannequin** button (1 credit). Sends the cutout (preferred) or original — plus any **Context images** the user attaches — to fal.ai. The result drops into the third preview slot.
+5. Optional **Generate ghost mannequin** button (1 credit, with the exact dollar cost shown). Sends the cutout (preferred) or original — plus any **Context images** the user attaches — to gemini (or fal for footwear). The result drops into the third preview slot.
 6. Save persists the WardrobeItem with all paths and logs a `TryOnGeneration` row. Credits already debited at preview-time in real mode.
 7. The closet grid prefers ghost > cutout > original; ghost tiles get a small ✨ badge. The item detail page has a 3-button carousel and a "Generate ghost mannequin" button for items added without one.
 
@@ -111,7 +123,7 @@ credits** (~$10 budget at $0.04/call). Adjust in `prisma/seed.ts` or
 | Cost per ghost mannequin  | **1 credit ≈ $0.03** with `seedream/v4/edit` (default) |
 | Behavior in stub mode     | Generations log to `TryOnGeneration` but `User.credits` is **not** decremented |
 | Behavior in real mode     | API call first; on success, `User.credits` decremented atomically with the row insert (no double-charge if the call fails) |
-| Mode switch               | `USE_REAL_GHOST_MANNEQUIN="true"` + `FAL_KEY="…"` in `.env` |
+| Mode switch               | `USE_REAL_GHOST_MANNEQUIN="true"` + `GEMINI_API_KEY="…"` in `.env` |
 
 The credit balance shows in the closet header (`✨ N`, amber when < 10) and
 in Settings. Credits are purchasable as **Stripe Checkout packs** (Starter
@@ -146,7 +158,7 @@ signature. Swapping in a real API only edits one file.
 | `lib/services/ghostMannequin.ts` ✅     | Composite a garment as a ghost mannequin      | Gemini Interactions API *(default)* or fal.ai (SeedDream / Flux Kontext) | `USE_REAL_GHOST_MANNEQUIN`, `GHOST_PROVIDER`, `GEMINI_API_KEY`, `FAL_KEY`, `FAL_GHOST_MODEL` |
 | `lib/client/background-removal.ts` ✅   | Transparent-background cutouts (live, client) | `@imgly/background-removal` (already wired)                          | none — runs free in-browser via WASM                         |
 | `lib/services/vision.ts`               | Garment category / color / style tagging      | Anthropic Claude Vision, OpenAI Vision, Google Vision AI             | `USE_REAL_VISION`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`     |
-| `lib/services/reverseImageSearch.ts`   | Find matching products online                 | SerpAPI (Google Lens), Bing Visual Search, TinEye                    | `USE_REAL_REVERSE_IMAGE_SEARCH`, `SERPAPI_KEY`               |
+| `lib/services/reverseImageSearch.ts`   | Identify the product in a photo               | Gemini vision. No web lookup, so no prices or URLs — see the module docstring | `GEMINI_API_KEY`                     |
 | `lib/services/productScraper.ts`       | Pull price / brand / material from a URL      | ScrapingBee, Bright Data, Apify, custom fetcher                      | `USE_REAL_PRODUCT_SCRAPER`, `SCRAPINGBEE_API_KEY`            |
 | `lib/services/backgroundRemoval.ts`    | Server-side bg-removal fallback               | remove.bg, Photoroom, Replicate rembg                                | `USE_REAL_BACKGROUND_REMOVAL`, `REMOVE_BG_API_KEY`           |
 
@@ -173,7 +185,7 @@ prisma/
   schema.prisma       Data model (User, WardrobeItem, TryOnGeneration)
   seed.ts             Demo user (250 credits) + 8 placeholder items
 scripts/
-  test-fal.ts         Real fal.ai round-trip smoke; `pnpm test:fal`
+  test-fal.ts         Real ghost round-trip smoke; `pnpm test:fal`
 uploads/              User-uploaded files (gitignored). Served via /api/images.
 __tests__/            Vitest suites
 ```
@@ -202,10 +214,13 @@ Image files go through a key-based seam (`lib/storage.ts`) with two drivers:
 
 - **local** (default): files under `uploads/`, served by the authenticated
   image routes. Zero config — great for dev and self-hosting.
-- **s3**: any S3-compatible store, built for **Cloudflare R2**. Set
-  `STORAGE_DRIVER="s3"` (auto when `R2_BUCKET` is set) plus the `R2_*`
-  credentials in `.env`. The image routes then 302-redirect to short-lived
-  signed URLs so object bytes bypass the app server.
+- **s3**: any S3-compatible store — **Supabase Storage**, Cloudflare R2, AWS S3,
+  or MinIO. Set `STORAGE_DRIVER="s3"` (auto when `S3_BUCKET` is set) plus the
+  `S3_*` credentials in `.env`; the older `R2_*` names still work as fallbacks.
+  Providers without virtual-host addressing (Supabase, MinIO) also need
+  `S3_FORCE_PATH_STYLE="true"`. The image routes then 302-redirect to short-lived
+  signed URLs so object bytes bypass the app server. Step-by-step setup:
+  [docs/CLOUD_MIGRATION.md](docs/CLOUD_MIGRATION.md).
 
 The DB-relative paths stored on rows are the object keys, so switching drivers
 needs no data migration. Verify the s3 path with `pnpm test:s3` (runs against an
@@ -215,7 +230,9 @@ in-process S3 server; `docker compose --profile s3 up -d` also provides MinIO).
 
 With the local driver, every uploaded image stays on the host (`uploads/`,
 served by an authenticated route); with the s3 driver they live in your bucket.
-The background-removal WASM runs in-browser. The only payload that leaves your
-infrastructure is the garment (and any context shots) sent to fal.ai/Fashn on
-**Generate**, plus the result image downloaded back. Check the provider privacy
-policies before uploading sensitive images.
+The background-removal WASM runs in-browser. The payloads that leave your
+infrastructure are the garment (plus any context shots) sent to Gemini — or to
+fal for footwear — on **Generate**, the result image downloaded back, and the
+photos sent to Gemini for classification, product identification, and try-on.
+Images go inline in the request body rather than being uploaded to provider
+storage. Check the provider privacy policies before uploading sensitive images.

@@ -29,19 +29,19 @@ async function writeTestImage(name: string, color: string): Promise<string> {
 }
 
 describe("reverseImageSearch", () => {
-  it("returns 2..4 matches sorted by confidence (desc)", async () => {
+  /**
+   * Keyless (stub) behaviour. The engine is now gemini identification rather
+   * than a Google Lens search, so this returns the one best guess instead of a
+   * ranked list of listings, and never a fabricated product URL.
+   */
+  it("returns a single stub match with a sane confidence and no invented URL", async () => {
     const matches = await reverseImageSearch("user/foo.jpg");
-    expect(matches.length).toBeGreaterThanOrEqual(2);
-    expect(matches.length).toBeLessThanOrEqual(4);
-    for (let i = 1; i < matches.length; i++) {
-      expect(matches[i - 1].confidence).toBeGreaterThanOrEqual(matches[i].confidence);
-    }
-    for (const m of matches) {
-      expect(m.priceCents).toBeGreaterThan(0);
-      expect(m.confidence).toBeGreaterThan(0);
-      expect(m.confidence).toBeLessThanOrEqual(1);
-      expect(m.url).toMatch(/^https?:\/\//);
-    }
+    expect(matches).toHaveLength(1);
+    const [m] = matches;
+    expect(m.name.length).toBeGreaterThan(0);
+    expect(m.confidence).toBeGreaterThan(0);
+    expect(m.confidence).toBeLessThanOrEqual(1);
+    expect(m.url).toBe("");
   });
 
   it("is deterministic for the same input", async () => {

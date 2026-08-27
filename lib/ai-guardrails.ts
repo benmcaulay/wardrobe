@@ -12,6 +12,7 @@
  * stub-mode dev never notices; tighten them in production .env.
  */
 import { prisma } from "./db";
+import { intEnv, boolEnv } from "./env";
 
 export type QuotaDecision = { ok: true } | { ok: false; error: string };
 
@@ -21,14 +22,9 @@ export type QuotaLimits = {
   globalDaily: number;
 };
 
-function intEnv(name: string, fallback: number): number {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
-}
-
 export function quotaLimits(): QuotaLimits {
   return {
-    disabled: process.env.AI_GENERATIONS_DISABLED === "true",
+    disabled: boolEnv("AI_GENERATIONS_DISABLED"),
     perUserDaily: intEnv("AI_DAILY_LIMIT_PER_USER", 200),
     globalDaily: intEnv("AI_DAILY_LIMIT_GLOBAL", 1000),
   };

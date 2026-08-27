@@ -2,25 +2,39 @@
  * Storage seam for user image files. Two drivers behind one key-based API:
  *
  *  - "local" (default): files under <cwd>/uploads/, served by the image routes.
- *  - "s3":  any S3-compatible object store. Built for Cloudflare R2 (no egress
- *           fees, generous free tier) but works against AWS S3 or a local MinIO
- *           for testing — set S3_FORCE_PATH_STYLE=true for MinIO.
+ *  - "s3":  any S3-compatible object store — Supabase Storage, Cloudflare R2,
+ *           AWS S3, or a local MinIO/s3rver for testing. Providers that do not
+ *           do virtual-host-style addressing (Supabase, MinIO) need
+ *           S3_FORCE_PATH_STYLE=true.
  *
  * Keys are the DB-relative paths already stored on rows (e.g. "userId/uuid.jpg").
  * Nothing above this module needs to know which driver is active; pick one with
- * STORAGE_DRIVER ("local" | "s3"), or it auto-selects "s3" when R2_BUCKET is set.
+ * STORAGE_DRIVER ("local" | "s3"), or it auto-selects "s3" when a bucket is set.
+ *
+ * ── Env naming ──────────────────────────────────────────────────────────────
+ *
+ * The canonical names are `S3_*`. The older `R2_*` names still work as
+ * fallbacks: they were the only spelling when R2 was the only target, and
+ * silently ignoring an existing `.env` would be a nasty way to find out the
+ * driver had quietly fallen back to local disk.
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { boolEnv, strEnv } from "./env";
 
 export const UPLOADS_ROOT = path.join(process.cwd(), "uploads");
 
 type Driver = "local" | "s3";
 
+/** First set value among `S3_<name>` then `R2_<name>`. */
+function s3Env(name: string): string | undefined {
+  return strEnv(`S3_${name}`) ?? strEnv(`R2_${name}`);
+}
+
 function selectedDriver(): Driver {
-  const explicit = process.env.STORAGE_DRIVER?.trim().toLowerCase();
+  const explicit = strEnv("STORAGE_DRIVER")?.toLowerCase();
   if (explicit === "s3" || explicit === "local") return explicit;
-  return process.env.R2_BUCKET?.trim() ? "s3" : "local";
+  return s3Env("BUCKET") ? "s3" : "local";
 }
 
 /**
@@ -61,26 +75,27 @@ let s3Singleton: import("@aws-sdk/client-s3").S3Client | null = null;
 async function s3() {
   const { S3Client } = await import("@aws-sdk/client-s3");
   if (s3Singleton) return s3Singleton;
+  const accountId = s3Env("ACCOUNT_ID");
   const endpoint =
-    process.env.R2_ENDPOINT?.trim() ||
-    (process.env.R2_ACCOUNT_ID?.trim()
-      ? `https://${process.env.R2_ACCOUNT_ID.trim()}.r2.cloudflarestorage.com`
-      : undefined);
+    s3Env("ENDPOINT") ??
+    // R2 derives its endpoint from the account id; other providers give one.
+    (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
   s3Singleton = new S3Client({
-    region: process.env.R2_REGION?.trim() || "auto",
+    // R2 ignores region and accepts "auto"; Supabase and AWS want a real one.
+    region: s3Env("REGION") ?? "auto",
     endpoint,
-    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
+    forcePathStyle: boolEnv("S3_FORCE_PATH_STYLE"),
     credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+      accessKeyId: s3Env("ACCESS_KEY_ID") ?? "",
+      secretAccessKey: s3Env("SECRET_ACCESS_KEY") ?? "",
     },
   });
   return s3Singleton;
 }
 
 function bucket(): string {
-  const b = process.env.R2_BUCKET?.trim();
-  if (!b) throw new Error("STORAGE_DRIVER is s3 but R2_BUCKET is not set");
+  const b = s3Env("BUCKET");
+  if (!b) throw new Error("STORAGE_DRIVER is s3 but S3_BUCKET is not set");
   return b;
 }
 
@@ -224,7 +239,7 @@ export async function getSignedReadUrl(key: string, ttlSeconds = 300): Promise<s
   if (!safe) return null;
 
   // A CDN/public bucket base URL skips signing entirely.
-  const publicBase = process.env.R2_PUBLIC_BASE_URL?.trim();
+  const publicBase = s3Env("PUBLIC_BASE_URL");
   if (publicBase) return `${publicBase.replace(/\/+$/, "")}/${safe}`;
 
   const { GetObjectCommand } = await import("@aws-sdk/client-s3");

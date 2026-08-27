@@ -8,6 +8,7 @@ import { getStyleTagsListFromPrefs } from "@/lib/preferences";
 import { getOwnersFromPrefs } from "@/lib/owners";
 import { stripeEnabled } from "@/lib/stripe";
 import { SettingsClient } from "./settings-client";
+import { formatTenthCents, groupSpendByModel, sumTenthCents } from "@/lib/ai-costs";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -21,6 +22,32 @@ export default async function SettingsPage() {
   const styleTagsList = getStyleTagsListFromPrefs(initialPrefs);
   const ownersList = getOwnersFromPrefs(initialPrefs);
   const colorList = getColorsListFromPrefs(initialPrefs);
+
+  // Money spent on generation, read from the two ledger tables. Rows written
+  // before cost tracking existed carry 0, so this is spend-since-tracking
+  // rather than all-time — worth knowing before treating it as a lifetime bill.
+  const [ghostRows, tryOnRows] = await Promise.all([
+    prisma.tryOnGeneration.findMany({
+      where: { userId: user.id },
+      select: { model: true, costTenthCents: true },
+    }),
+    prisma.virtualTryOn.findMany({
+      where: { userId: user.id },
+      select: { model: true, costTenthCents: true },
+    }),
+  ]);
+  const allRows = [...ghostRows, ...tryOnRows];
+  const billed = allRows.filter((r) => (r.costTenthCents ?? 0) > 0);
+  const spend = {
+    total: formatTenthCents(sumTenthCents(allRows)),
+    generations: allRows.length,
+    billedGenerations: billed.length,
+    byModel: groupSpendByModel(billed).map((m) => ({
+      model: m.model,
+      generations: m.generations,
+      cost: formatTenthCents(m.tenthCents),
+    })),
+  };
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-12">
@@ -58,6 +85,7 @@ export default async function SettingsPage() {
           ownersList={ownersList}
           colorList={colorList}
           credits={dbUser?.credits ?? 0}
+          spend={spend}
           autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
           purchasesEnabled={stripeEnabled()}
         />

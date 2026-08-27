@@ -1,143 +1,91 @@
+/**
+ * Resolve a text query ("cos wide leg trouser") to a product, for the wishlist
+ * and the add-item search box.
+ *
+ * Was SerpAPI Google Shopping — a real search with live prices and links. It is
+ * now gemini, which has no web access, so the same caveats as its sibling in
+ * `reverseImageSearch.ts` apply and for the same reasons: it names the product,
+ * it does not price or link it. `priceCents` stays 0 and `url` stays empty
+ * rather than being invented, because the wishlist budget sums those prices and
+ * a plausible-looking guess would quietly corrupt it.
+ *
+ * A real price still arrives the moment a URL is pasted: the product scraper
+ * reads schema.org/Product JSON-LD off the page and needs no API key.
+ */
 import { log } from "../log";
-import { parseBrandFromTitle } from "../shopping-parse";
-import { serpApiEnabled, serpApiGet } from "./serpapi-client";
-import type { ProductMatch } from "./reverseImageSearch";
+import { geminiJson, geminiTextConfigured } from "./gemini-text";
 import { pick, range, seededRng } from "./_rng";
+import type { ProductMatch } from "./reverseImageSearch";
 
-const BRAND_RETAILERS: readonly { brand: string; retailer: string; host: string }[] = [
-  { brand: "Everlane", retailer: "Everlane", host: "everlane.com" },
-  { brand: "COS", retailer: "COS", host: "cos.com" },
-  { brand: "Nike", retailer: "Nike", host: "nike.com" },
-  { brand: "Madewell", retailer: "Madewell", host: "madewell.com" },
-  { brand: "Amazon", retailer: "Amazon", host: "amazon.com" },
-];
+const SEARCH_PROMPT = `A user typed this into a clothing wishlist search box. Identify the most likely retail products they mean.
 
-type ShoppingResult = {
-  title?: string;
-  source?: string;
-  link?: string;
-  /** Current Google Shopping API shape (replaces `link` on many responses). */
-  product_link?: string;
-  thumbnail?: string;
-  serpapi_thumbnail?: string;
-  extracted_price?: number;
-  price?: string;
-  immersive_product_page_token?: string;
+Query: %QUERY%
+
+Rules:
+- Return up to 3 candidates, most likely first.
+- "name": short product title as a shop would list it. Required.
+- "brand": only when the query or your knowledge makes it certain, else "".
+- "confidence": 0.0-1.0.
+- Do NOT guess a price. Do NOT invent a URL.
+
+Reply with ONLY valid JSON: {"products":[{"name":"...","brand":"...","confidence":0.0}]}`;
+
+type SearchJson = {
+  products?: Array<{ name?: string; brand?: string; confidence?: number }>;
 };
 
-type ShoppingResponse = {
-  shopping_results?: ShoppingResult[];
-};
-
-function parsePriceCents(item: ShoppingResult): number {
-  if (typeof item.extracted_price === "number" && item.extracted_price > 0) {
-    return Math.round(item.extracted_price * 100);
-  }
-  const raw = item.price ?? "";
-  const num = parseFloat(raw.replace(/[^0-9.]/g, ""));
-  if (!Number.isFinite(num) || num <= 0) return 0;
-  return Math.round(num * 100);
-}
-
-function hostFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function mapShoppingResult(item: ShoppingResult, confidence: number): ProductMatch | null {
-  const url = (item.link ?? item.product_link)?.trim();
-  const name = item.title?.trim();
-  if (!url || !name) return null;
-
-  const host = hostFromUrl(url);
-  const retailer = item.source?.trim() || host.split(".")[0] || "Shop";
-  const priceCents = parsePriceCents(item);
-  const brand = parseBrandFromTitle(name) || retailer;
-
-  return {
-    name,
-    brand,
-    priceCents: priceCents > 0 ? priceCents : 0,
-    currency: "USD",
-    retailer,
-    url,
-    thumbnailUrl: item.thumbnail ?? item.serpapi_thumbnail ?? null,
-    immersiveProductPageToken: item.immersive_product_page_token,
-    confidence,
-  };
-}
-
-async function searchProductsSerp(query: string): Promise<ProductMatch[]> {
-  const q = query.trim();
-  if (!q) return [];
-
-  const data = await serpApiGet<ShoppingResponse>({
-    engine: "google_shopping",
-    q,
-    hl: "en",
-    gl: "us",
-    google_domain: "google.com",
-  });
-
-  const rows = data.shopping_results ?? [];
-  const matches: ProductMatch[] = [];
-  let confidence = 0.95;
-
-  for (const row of rows.slice(0, 12)) {
-    const m = mapShoppingResult(row, confidence);
-    if (!m) continue;
-    matches.push(m);
-    confidence = Math.max(0.35, confidence - 0.06);
-  }
-
-  return matches;
-}
-
-function searchProductsStub(query: string): ProductMatch[] {
-  const rng = seededRng(`webProductSearch:${query.trim().toLowerCase()}`);
-  const seller = pick(rng, BRAND_RETAILERS);
-  const slug = query.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 48) || "item";
-
+function searchWebProductsStub(query: string): ProductMatch[] {
+  const rng = seededRng(query);
+  const brand = pick(rng, ["Everlane", "COS", "Uniqlo", "Arket", "Madewell"]);
   return [
     {
-      name: query.trim() || "Product",
-      brand: seller.brand,
-      priceCents: range(rng, 2900, 19900),
+      name: query.trim() || "Unknown piece",
+      brand,
+      priceCents: range(rng, 2900, 29900),
       currency: "USD",
-      retailer: seller.retailer,
-      url: `https://${seller.host}/products/${slug}`,
+      retailer: brand,
+      url: "",
       thumbnailUrl: null,
-      confidence: 0.88,
-    },
-    {
-      name: `${query.trim()} — alternate listing`,
-      brand: seller.brand,
-      priceCents: range(rng, 3900, 24900),
-      currency: "USD",
-      retailer: seller.retailer,
-      url: `https://${seller.host}/search?q=${encodeURIComponent(query.trim())}`,
-      thumbnailUrl: null,
-      confidence: 0.72,
+      confidence: 0.5,
     },
   ];
 }
 
-/** Text search for products to add (Google Shopping via SerpAPI when configured). */
 export async function searchWebProducts(query: string): Promise<ProductMatch[]> {
-  const q = query.trim();
-  if (!q) return [];
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  if (!geminiTextConfigured()) return searchWebProductsStub(trimmed);
 
-  if (serpApiEnabled()) {
-    try {
-      return await searchProductsSerp(q);
-    } catch (err) {
-      log.error("web-product-search.serpapi.failed", err);
-      throw err;
-    }
+  const startedAt = Date.now();
+  let raw: SearchJson;
+  try {
+    raw = await geminiJson<SearchJson>(SEARCH_PROMPT.replace("%QUERY%", trimmed));
+  } catch (err) {
+    log.error("web-product-search.failed", err, { ms: Date.now() - startedAt });
+    return [];
   }
+  const products = (raw.products ?? [])
+    .map((p) => {
+      const name = p.name?.trim();
+      if (!name) return null;
+      const brand = p.brand?.trim() ?? "";
+      const match: ProductMatch = {
+        name,
+        brand,
+        // Deliberately unpriced and unlinked — see the module docstring.
+        priceCents: 0,
+        currency: "USD",
+        retailer: brand,
+        url: "",
+        thumbnailUrl: null,
+        confidence: Math.min(Math.max(p.confidence ?? 0.5, 0), 1),
+      };
+      return match;
+    })
+    .filter((p): p is ProductMatch => p !== null)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 3);
 
-  return searchProductsStub(q);
+  log.info("web-product-search.ok", { ms: Date.now() - startedAt, results: products.length });
+  return products;
 }

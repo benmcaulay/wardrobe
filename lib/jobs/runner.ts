@@ -120,6 +120,8 @@ async function runVirtualTryOn(
         prompt: payload.prompt?.trim() || null,
         resultImagePath: result.resultImagePath,
         creditsUsed: result.credits,
+        model: result.model,
+        costTenthCents: result.costTenthCents,
       },
     });
     let remaining = dbUser?.credits ?? 0;
@@ -184,6 +186,8 @@ async function runGhostPreview(
     ghostImagePath: out.ghostImagePath,
     creditsRemaining: out.creditsRemaining,
     creditsUsed: out.creditsUsed,
+    model: out.model,
+    costTenthCents: out.costTenthCents,
   };
 }
 

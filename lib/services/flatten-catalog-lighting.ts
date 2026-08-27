@@ -1,9 +1,5 @@
 import sharp from "sharp";
-
-function numEnv(name: string, fallback: number): number {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) ? n : fallback;
-}
+import { numEnv } from "../env";
 
 /** Lift deep fabric shadows without washing out true blacks (0–255 luminance). */
 const SHADOW_LIFT = numEnv("GHOST_SHADOW_LIFT", 18);

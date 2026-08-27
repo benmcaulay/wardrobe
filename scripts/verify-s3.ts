@@ -4,8 +4,13 @@
  *
  * Exercises the SAME lib/storage.ts code path the app uses, so it validates the
  * real AWS SDK calls (put/get/head/list/delete + presigned URL) rather than a
- * mock of our own. Stands in for Cloudflare R2 / MinIO when neither can be
- * pulled in this environment.
+ * mock of our own. Stands in for Supabase Storage / R2 / MinIO when none can be
+ * pulled in this environment — and since s3rver needs path-style addressing, it
+ * covers the same mode Supabase and MinIO require.
+ *
+ * Uses the canonical `S3_*` names, then re-checks that the legacy `R2_*` names
+ * still resolve, because an existing .env silently falling through to local disk
+ * would be an unpleasant way to discover the rename.
  */
 import S3rver from "s3rver";
 import { promises as fs } from "node:fs";
@@ -28,11 +33,23 @@ async function main() {
   await server.run();
 
   // Point lib/storage at the local s3rver BEFORE importing it (module reads env).
+  // Clear any real credentials the developer's .env may hold, so this never
+  // reaches out to an actual bucket.
+  for (const stale of ["BUCKET", "ENDPOINT", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ACCOUNT_ID", "REGION", "PUBLIC_BASE_URL"]) {
+    delete process.env[`S3_${stale}`];
+    delete process.env[`R2_${stale}`];
+  }
+  // Which spelling to exercise. The canonical S3_* names by default; the run is
+  // repeated in a child process with the legacy R2_* names, because the S3
+  // client is a module singleton and credential resolution cannot be re-tested
+  // in-process once it has been built.
+  const legacyNames = process.argv.includes("--legacy-names");
+  const P = legacyNames ? "R2_" : "S3_";
   process.env.STORAGE_DRIVER = "s3";
-  process.env.R2_BUCKET = BUCKET;
-  process.env.R2_ENDPOINT = `http://127.0.0.1:${PORT}`;
-  process.env.R2_ACCESS_KEY_ID = "S3RVER";
-  process.env.R2_SECRET_ACCESS_KEY = "S3RVER";
+  process.env[`${P}BUCKET`] = BUCKET;
+  process.env[`${P}ENDPOINT`] = `http://127.0.0.1:${PORT}`;
+  process.env[`${P}ACCESS_KEY_ID`] = "S3RVER";
+  process.env[`${P}SECRET_ACCESS_KEY`] = "S3RVER";
   process.env.S3_FORCE_PATH_STYLE = "true";
 
   const storage = await import("../lib/storage");
@@ -44,7 +61,7 @@ async function main() {
   const key = "user123/photo.jpg";
   const body = Buffer.from("hello-wardrobe-bytes");
 
-  assert(storage.storageDriver() === "s3", "driver selected is s3");
+  assert(storage.storageDriver() === "s3", `driver selected is s3 (${P}* names)`);
 
   await storage.putObject(key, body, "image/jpeg");
   assert(await storage.objectExists(key), "objectExists true after put");
@@ -70,11 +87,26 @@ async function main() {
   // traversal rejection still holds on the s3 driver
   assert((await storage.getObject("../escape")) === null, "traversal key rejected");
 
+  console.log(
+    legacyNames
+      ? "\nAll S3-driver checks passed with the legacy R2_* names."
+      : "\nAll S3-driver checks passed.",
+  );
+
   await server.close();
-  console.log("\nAll S3-driver checks passed.");
+  await fs.rm(dir, { recursive: true, force: true });
+
+  // Same suite again against the legacy spelling, in a fresh process.
+  if (!legacyNames) {
+    const { execFileSync } = await import("node:child_process");
+    console.log("\nRe-running with the legacy R2_* names...");
+    execFileSync(process.execPath, [...process.execArgv, process.argv[1]!, "--legacy-names"], {
+      stdio: "inherit",
+    });
+  }
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

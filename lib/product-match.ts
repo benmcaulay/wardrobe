@@ -4,7 +4,6 @@ import type { PrefillResult } from "./prefill";
 import type { ProductMatch } from "./services/reverseImageSearch";
 import type { ProductMetadata } from "./services/productScraper";
 import { scrapeProduct } from "./services/productScraper";
-import { tryImmersiveProductMetadata } from "./services/immersiveProduct";
 import type { ItemFormValue } from "./types";
 
 const COLOR_NAME_TO_HEX: Record<string, string> = {
@@ -56,12 +55,13 @@ function trustedScrape(scraped: ProductMetadata | null | undefined): ProductMeta
 }
 
 /**
- * Resolve listing metadata: Immersive Product (SerpAPI) when available, else
- * direct URL scrape for real merchant PDPs. Never returns aggregator junk.
+ * Resolve listing metadata by scraping the merchant PDP. The SerpAPI Immersive
+ * Product lane that used to run first is gone with the rest of the SerpAPI
+ * wiring, so a match with no URL now resolves to null rather than to
+ * search-derived metadata.
  */
 export async function resolveProductMetadata(match: ProductMatch): Promise<ProductMetadata | null> {
-  const immersive = await tryImmersiveProductMetadata(match.immersiveProductPageToken);
-  if (immersive?.name) return immersive;
+  if (!match.url) return null;
 
   if (!isAggregatorProductUrl(match.url)) {
     try {

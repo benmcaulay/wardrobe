@@ -29,8 +29,6 @@
     "benchmark:style-text": "tsx --env-file=.env scripts/benchmark-style-text.ts",
     "eval:ranker": "tsx --env-file=.env scripts/eval-ranker.ts",
     "eval:catalog": "tsx --env-file=.env scripts/eval-catalog.ts",
-    "ghost:lora:build": "tsx --env-file=.env scripts/ghost-lora-build.ts",
-    "ghost:lora:train": "tsx --env-file=.env scripts/ghost-lora-train.ts",
     "audit:layout": "tsx --env-file=.env scripts/audit-layout.ts",
     "map:build": "tsx scripts/build-world-map.ts"
   },
@@ -50,7 +48,6 @@
     }
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.116.0",
     "@auth/prisma-adapter": "2.11.2",
     "@aws-sdk/client-s3": "^3.1066.0",
     "@aws-sdk/s3-request-presigner": "^3.1066.0",

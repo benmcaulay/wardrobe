@@ -1,11 +1,12 @@
 import path from "node:path";
-import { fal } from "@fal-ai/client";
 import { log } from "../log";
+import { boolEnv } from "../env";
 import { NONE_CATEGORY } from "../categories";
 import { normalizeColorName } from "../colors";
 import type { Color } from "../json";
 import { FAVORITE_COLOR_OPTIONS } from "../preferences";
-import { getObject, objectExists } from "../storage";
+import { contentTypeFor, getObject, objectExists } from "../storage";
+import { geminiJson, geminiText, geminiTextConfigured } from "./gemini-text";
 
 export type GarmentClassification = {
   isGarment: boolean;
@@ -88,17 +89,7 @@ type RawDetectObject = {
   y_max?: number;
 };
 
-const FAL_DETECT_MODEL =
-  process.env.FAL_GARMENT_DETECT_MODEL ?? "fal-ai/moondream2/object-detection";
-
-const REAL_MODE = process.env.USE_REAL_GARMENT_CLASSIFIER !== "false";
-// moondream2 only captions — it ignores the JSON instruction. The any-llm/vision
-// gateway with an instruction-following model returns the structured JSON we need.
-const FAL_VISION_MODEL =
-  process.env.FAL_GARMENT_CLASSIFIER_MODEL ?? "fal-ai/any-llm/vision";
-/** Underlying model when FAL_VISION_MODEL is the any-llm/vision gateway. */
-const FAL_VISION_LLM =
-  process.env.FAL_GARMENT_CLASSIFIER_LLM ?? "google/gemini-flash-1.5";
+const REAL_MODE = boolEnv("USE_REAL_GARMENT_CLASSIFIER", true);
 
 export const CLASSIFIER_PROMPT = `You are sorting photos for a digital wardrobe app.
 
@@ -116,17 +107,6 @@ Rules:
 
 Reply with ONLY valid JSON (no markdown):
 {"isGarment":true|false,"garments":[{"category":"top"|"bottom"|"dress"|"outerwear"|"shoes"|"accessory"|"other","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"optional skip reason when isGarment is false"}`;
-
-let falConfigured = false;
-function ensureFalConfigured() {
-  if (falConfigured) return;
-  const key = process.env.FAL_KEY;
-  if (!key) {
-    throw new Error("FAL_KEY is not set");
-  }
-  fal.config({ credentials: key });
-  falConfigured = true;
-}
 
 /** Map vision-model category labels to wardrobe DB categories. */
 export function mapClassifierCategory(raw: string | undefined): string {
@@ -314,36 +294,23 @@ function dedupeGarments(garments: DetectedGarment[]): DetectedGarment[] {
   return out;
 }
 
-async function uploadKeyToFal(key: string): Promise<string> {
+async function loadImage(key: string): Promise<{ buffer: Buffer; mime: string }> {
   const buf = await getObject(key);
   if (!buf) throw new Error(`Missing image: ${key}`);
-  const file = new File([new Uint8Array(buf)], path.basename(key) || "photo.jpg", {
-    type: "image/jpeg",
-  });
-  return fal.storage.upload(file);
+  return { buffer: buf, mime: contentTypeFor(key) };
 }
 
 async function realClassifyGarment(imagePath: string): Promise<GarmentScanDetection> {
-  ensureFalConfigured();
-  const imageUrl = await uploadKeyToFal(imagePath);
+  const image = await loadImage(imagePath);
   const startedAt = Date.now();
-  let text = "";
-  // The any-llm/vision gateway needs the underlying model in the input.
-  const input: Record<string, unknown> = { image_url: imageUrl, prompt: CLASSIFIER_PROMPT };
-  if (FAL_VISION_MODEL.includes("any-llm")) input.model = FAL_VISION_LLM;
+  let text: string;
   try {
-    const response = await fal.subscribe(FAL_VISION_MODEL, {
-      input,
-      logs: false,
-    });
-    const data = response?.data as { output?: string; text?: string; answer?: string } | undefined;
-    text = data?.output ?? data?.text ?? data?.answer ?? "";
-    if (!text && typeof response?.data === "string") text = response.data;
+    text = await geminiText(CLASSIFIER_PROMPT, { images: [image] });
   } catch (err) {
-    log.error("garment.classifier.fal.failed", err, { model: FAL_VISION_MODEL, ms: Date.now() - startedAt });
+    log.error("garment.classifier.failed", err, { ms: Date.now() - startedAt });
     throw err;
   }
-  log.info("garment.classifier.ok", { model: FAL_VISION_MODEL, ms: Date.now() - startedAt });
+  log.info("garment.classifier.ok", { provider: "gemini", ms: Date.now() - startedAt });
 
   const parsed = parseClassifierJson(text);
   if (!parsed) {
@@ -355,21 +322,32 @@ async function realClassifyGarment(imagePath: string): Promise<GarmentScanDetect
   return normalizeScanDetection(parsed);
 }
 
+/**
+ * Bounding box for one garment inside a multi-item photo.
+ *
+ * Was fal Moondream object-detection. Gemini has no detection endpoint, so it is
+ * asked for normalised coordinates directly. The prompt pins the coordinate
+ * space (0-1, origin top-left) because that is the one thing a vision model will
+ * otherwise vary between pixels, percentages, and 0-1000 grids between calls.
+ */
 export async function detectGarmentBounds(
   imagePath: string,
   garment: DetectedGarment,
 ): Promise<import("./garment-crop").NormalizedBBox | null> {
-  if (!REAL_MODE || !process.env.FAL_KEY) return null;
-  ensureFalConfigured();
+  if (!REAL_MODE || !geminiTextConfigured()) return null;
   const { detectionLabelForGarment, largestBBox } = await import("./garment-crop");
-  const imageUrl = await uploadKeyToFal(imagePath);
   const object = detectionLabelForGarment(garment.name, garment.category);
+  const prompt = `Locate every "${object}" in this photo.
+
+Coordinates MUST be normalised floats from 0 to 1, with the origin at the TOP-LEFT
+of the image: x_min/x_max are fractions of the image width, y_min/y_max fractions
+of its height. Do not use pixels, percentages, or a 0-1000 grid.
+
+Return ONLY valid JSON: {"objects":[{"x_min":0.0,"y_min":0.0,"x_max":0.0,"y_max":0.0}]}
+If the item is not visible, return {"objects":[]}.`;
   try {
-    const response = await fal.subscribe(FAL_DETECT_MODEL, {
-      input: { image_url: imageUrl, object },
-      logs: false,
-    });
-    const data = response?.data as { objects?: RawDetectObject[] } | undefined;
+    const image = await loadImage(imagePath);
+    const data = await geminiJson<{ objects?: RawDetectObject[] }>(prompt, { images: [image] });
     const boxes =
       data?.objects
         ?.map((o) => ({
@@ -381,7 +359,7 @@ export async function detectGarmentBounds(
         .filter((b) => b.x_max > b.x_min && b.y_max > b.y_min) ?? [];
     return largestBBox(boxes);
   } catch (err) {
-    log.error("garment.detect.failed", err, { model: FAL_DETECT_MODEL, object });
+    log.error("garment.detect.failed", err, { object });
     return null;
   }
 }
@@ -403,7 +381,7 @@ export async function detectGarmentsInPhoto(imagePath: string): Promise<GarmentS
   if (!(await objectExists(imagePath))) {
     return { isGarment: false, garments: [], skipReason: "Image missing" };
   }
-  if (!REAL_MODE || !process.env.FAL_KEY) {
+  if (!REAL_MODE || !geminiTextConfigured()) {
     return stubScanDetection(imagePath);
   }
   try {

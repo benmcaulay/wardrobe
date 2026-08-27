@@ -11,6 +11,7 @@ import type { ItemFormValue } from "@/lib/types";
 import { EditForm } from "./edit-form";
 import { requireGhostCategory } from "@/lib/services/ghost-mannequin-shared";
 import { ImageCarousel } from "./image-carousel";
+import { currentGenerationCost } from "@/lib/ai-costs";
 
 type StoredGhostView = { label: string; imagePath: string; mirror: boolean; thumbZoom: number };
 
@@ -101,6 +102,9 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
             primaryGhostPath={item.ghostImagePath}
             extraImagePaths={extraPaths}
             credits={dbUser?.credits ?? 0}
+            costLabel={
+              currentGenerationCost(item.category === "shoes" ? "footwear" : "apparel").label
+            }
             categoryBlocked={categoryGate.ok ? null : categoryGate.error}
           />
           <dl className="grid grid-cols-2 gap-4 text-xs">

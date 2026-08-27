@@ -159,7 +159,7 @@ async function main() {
   const user = await prisma.user.upsert({
     where: { email: "demo@local.test" },
     update: {},
-    create: { email: "demo@local.test", name: "Demo", credits: 100 },
+    create: { email: "demo@local.test", name: "Demo", credits: 1_000_000 },
   });
 
   const existing = await prisma.wardrobeItem.count({ where: { userId: user.id } });

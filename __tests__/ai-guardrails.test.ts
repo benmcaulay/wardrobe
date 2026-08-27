@@ -54,6 +54,32 @@ describe("quotaLimits env parsing", () => {
     expect(quotaLimits().perUserDaily).toBe(200);
     expect(quotaLimits().globalDaily).toBe(1000);
   });
+
+  /**
+   * Regression: .env.example ships these as NAME="", and Number("") is 0 (not
+   * NaN), so the old parser returned a quota of 0 — refusing every generation
+   * on a fresh clone with the misleading "reached today's limit" message.
+   */
+  it("treats a present-but-empty value as unset, not as zero", () => {
+    process.env.AI_DAILY_LIMIT_PER_USER = "";
+    process.env.AI_DAILY_LIMIT_GLOBAL = "";
+    process.env.AI_GENERATIONS_DISABLED = "";
+    expect(quotaLimits()).toEqual({ disabled: false, perUserDaily: 200, globalDaily: 1000 });
+  });
+
+  it("still allows generation on a freshly copied .env.example", () => {
+    process.env.AI_DAILY_LIMIT_PER_USER = "";
+    process.env.AI_DAILY_LIMIT_GLOBAL = "";
+    process.env.AI_GENERATIONS_DISABLED = "";
+    expect(decideQuota(quotaLimits(), 0, 0)).toEqual({ ok: true });
+  });
+
+  it("honors an explicit zero as a deliberate freeze", () => {
+    process.env.AI_DAILY_LIMIT_PER_USER = "0";
+    expect(quotaLimits().perUserDaily).toBe(0);
+    const d = decideQuota(quotaLimits(), 0, 0);
+    expect(d.ok).toBe(false);
+  });
 });
 
 describe("startOfUtcDay", () => {

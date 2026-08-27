@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { DEMO_USER_COOKIE } from "@/lib/auth";
+import { strEnv } from "@/lib/env";
 
 /**
  * Unified sign-out for both session kinds. Lives outside /api/auth/* because
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
     await prisma.session.deleteMany({ where: { sessionToken } });
   }
 
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  const base = strEnv("NEXT_PUBLIC_APP_URL") ?? new URL(request.url).origin;
   const res = NextResponse.redirect(new URL("/", base), { status: 303 });
   res.cookies.delete(DEMO_USER_COOKIE);
   res.cookies.delete("next-auth.session-token");

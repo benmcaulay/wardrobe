@@ -103,6 +103,8 @@ export async function generateGhostFor(itemId: string): Promise<GenerateGhostRes
         itemId,
         resultImagePath: result.resultImagePath,
         creditsUsed: result.credits,
+        model: result.model,
+        costTenthCents: result.costTenthCents,
       },
     });
     if (REAL_GHOST) {
@@ -536,6 +538,9 @@ export type GhostJobStatusResponse =
       creditsRemaining: number;
       creditsUsed?: number;
       viewLabel?: string;
+      /** Model that generated it, and its list-price cost in tenths of a cent. */
+      model?: string | null;
+      costTenthCents?: number;
     }
   | { ok: false; error: string };
 
@@ -666,6 +671,8 @@ export async function getGhostJobStatus(jobId: string): Promise<GhostJobStatusRe
       ghostImagePath: preview.ghostImagePath,
       creditsRemaining: preview.creditsRemaining,
       creditsUsed: preview.creditsUsed,
+      model: preview.model ?? null,
+      costTenthCents: preview.costTenthCents ?? 0,
     };
   }
   return { ok: true, status: job.status === "running" ? "running" : "queued" };

@@ -61,6 +61,10 @@ export type GhostPreviewJobResult = {
   creditsRemaining: number;
   creditsUsed: number;
   viewLabel?: string;
+  /** Model that produced it, so the ledger row can attribute the spend. */
+  model?: string | null;
+  /** List-price cost in tenths of a cent; 0 for a cache hit or stub. */
+  costTenthCents?: number;
 };
 
 export type CameraRollScanPayload = {

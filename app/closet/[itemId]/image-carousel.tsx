@@ -50,6 +50,8 @@ type Props = {
   primaryGhostPath: string | null;
   extraImagePaths: string[];
   credits: number;
+  /** Per-generation money cost, e.g. "$0.067" or "free in stub mode". */
+  costLabel: string;
   /** Non-null when the item's type can't be classified, so AI is unavailable. */
   categoryBlocked?: string | null;
 };
@@ -63,6 +65,7 @@ export function ImageCarousel({
   primaryGhostPath,
   extraImagePaths,
   credits,
+  costLabel,
   categoryBlocked = null,
 }: Props) {
   const [ghostViews, setGhostViews] = useState(initialGhostViews);
@@ -377,7 +380,9 @@ export function ImageCarousel({
           </p>
           <p className="text-[11px] text-ink-muted">
             Paste or upload a photo to add a view for free, or generate one with AI
-            {noCredits ? " (out of credits — buy more in Settings)." : " (1 credit)."}
+            {noCredits
+              ? " (out of credits — buy more in Settings)."
+              : ` (1 credit · ${costLabel}).`}
           </p>
           {ghostGenerating && (
             <p className="text-[11px] text-ink-muted">
@@ -420,6 +425,7 @@ export function ImageCarousel({
       {pickingImages && (
         <GenerateViewModal
           variant={hasGhosts ? "another" : "first"}
+          costLabel={costLabel}
           originalPath={origPath}
           extraImagePaths={sourceImagePaths}
           pickState={pickingImages}
@@ -863,6 +869,7 @@ function ViewThumb({
 
 function GenerateViewModal({
   variant,
+  costLabel,
   originalPath,
   extraImagePaths,
   pickState,
@@ -877,6 +884,7 @@ function GenerateViewModal({
   onCancel,
 }: {
   variant: "first" | "another";
+  costLabel: string;
   originalPath: string;
   extraImagePaths: string[];
   pickState: PickImageState;
@@ -995,7 +1003,9 @@ function GenerateViewModal({
         >
           <summary className="text-xs font-medium cursor-pointer list-none flex items-center justify-between">
             <span>{aiFirst ? "Render settings" : "Or generate with AI"}</span>
-            <span className="text-[10px] text-ink-muted group-open:hidden">1 credit</span>
+            <span className="text-[10px] text-ink-muted group-open:hidden">
+              1 credit · {costLabel}
+            </span>
           </summary>
           <div className="mt-3 space-y-3">
             <p className="text-[11px] text-ink-muted">

@@ -71,6 +71,13 @@ type Props = {
   ownersList: Owner[];
   colorList: Color[];
   credits: number;
+  spend: {
+    /** Formatted total, e.g. "$1.34". */
+    total: string;
+    generations: number;
+    billedGenerations: number;
+    byModel: Array<{ model: string; generations: number; cost: string }>;
+  };
   autoGenerateGhost: boolean;
   purchasesEnabled: boolean;
 };
@@ -86,6 +93,7 @@ export function SettingsClient({
   ownersList,
   colorList,
   credits,
+  spend,
   autoGenerateGhost,
   purchasesEnabled,
 }: Props) {
@@ -459,9 +467,40 @@ export function SettingsClient({
               </span>
             </h3>
             <p className="text-xs text-ink-muted mt-1">
-              1 credit = 1 ghost-mannequin generation (~$0.02 with the real provider).
+              1 credit = 1 generation. Cost per generation depends on the model —
+              shown on each generate button.
             </p>
           </div>
+        </div>
+        <div className="pt-2 border-t border-ink/10">
+          <div className="flex items-baseline justify-between gap-4">
+            <p className="text-xs text-ink-muted">Spent on generation</p>
+            <p className="font-serif text-xl tracking-tight tabular-nums">{spend.total}</p>
+          </div>
+          {spend.byModel.length > 0 ? (
+            <ul className="mt-2 space-y-1">
+              {spend.byModel.map((m) => (
+                <li key={m.model} className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="text-ink-muted truncate">{m.model}</span>
+                  <span className="text-ink-muted tabular-nums shrink-0">
+                    {m.generations}&times; · {m.cost}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-xs text-ink-muted">
+              {spend.generations === 0
+                ? "No generations yet."
+                : `${spend.generations} ${spend.generations === 1 ? "generation" : "generations"}, none billed — stub mode or served from cache.`}
+            </p>
+          )}
+          {spend.billedGenerations > 0 && spend.billedGenerations < spend.generations && (
+            <p className="mt-1 text-[11px] text-ink-muted">
+              {spend.generations - spend.billedGenerations} of {spend.generations} were free
+              (cache hits, stubs, or generated before cost tracking).
+            </p>
+          )}
         </div>
         {purchasesEnabled ? (
           <div className="pt-2 border-t border-ink/10">

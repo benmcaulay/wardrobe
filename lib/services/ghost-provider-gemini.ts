@@ -31,6 +31,8 @@
  * request, and the schema is pinned by the types below.
  */
 
+import { strEnv } from "../env";
+
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 
 /**
@@ -137,12 +139,44 @@ export type GeminiEditOptions = {
  * Edit `images` according to `prompt` and return the resulting image bytes.
  * Throws on any outcome that is not an image, so callers can fall back.
  */
+/**
+ * Retry the transient server-side failures.
+ *
+ * The flash image models return 503 "experiencing high demand" under load, and
+ * it is explicitly temporary. Without a retry that surfaces as a failed
+ * generation the user has to notice and re-click — and on the ghost path the
+ * surrounding blank-retry loop rethrows rather than absorbing it, so one 503
+ * ends the whole attempt.
+ *
+ * 429 is deliberately NOT retried: that is a quota signal the caller should see
+ * immediately, not something waiting will fix.
+ */
+const TRANSIENT_HTTP = /HTTP (500|502|503|504)/;
+const IMAGE_MAX_ATTEMPTS = 3;
+const IMAGE_BACKOFF_MS = 500;
+
 export async function geminiEditImage(
   prompt: string,
   images: GeminiImageInput[],
   opts: GeminiEditOptions = {},
 ): Promise<Buffer> {
-  const apiKey = opts.apiKey ?? process.env.GEMINI_API_KEY ?? "";
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await geminiEditImageOnce(prompt, images, opts);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!TRANSIENT_HTTP.test(message) || attempt >= IMAGE_MAX_ATTEMPTS) throw err;
+      await new Promise((resolve) => setTimeout(resolve, IMAGE_BACKOFF_MS * 2 ** (attempt - 1)));
+    }
+  }
+}
+
+async function geminiEditImageOnce(
+  prompt: string,
+  images: GeminiImageInput[],
+  opts: GeminiEditOptions = {},
+): Promise<Buffer> {
+  const apiKey = opts.apiKey?.trim() || strEnv("GEMINI_API_KEY", "");
   if (!apiKey) {
     throw new Error(
       "GEMINI_API_KEY is not set. Get a key from Google AI Studio and add it to .env.",
@@ -152,7 +186,9 @@ export async function geminiEditImage(
     throw new Error("geminiEditImage needs at least one input image.");
   }
 
-  const model = opts.model ?? process.env.GEMINI_IMAGE_MODEL ?? DEFAULT_GEMINI_IMAGE_MODEL;
+  // `??` would accept the empty string .env.example ships, and an empty model id
+  // reaches the API as "Model '' not found".
+  const model = opts.model?.trim() || strEnv("GEMINI_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 120_000);
 

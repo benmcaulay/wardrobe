@@ -1,9 +1,5 @@
 import sharp from "sharp";
-
-function numEnv(name: string, fallback: number): number {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) ? n : fallback;
-}
+import { numEnv } from "../env";
 
 const NECK_BRIGHT_MIN = numEnv("GHOST_NECK_WHITE_MIN", 220);
 const BRIGHTNESS_DELTA = numEnv("GHOST_NECK_BRIGHTNESS_DELTA", 16);

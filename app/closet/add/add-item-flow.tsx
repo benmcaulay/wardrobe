@@ -48,6 +48,9 @@ type GhostView = {
   label: string;
   imagePath: string;
   creditsUsed: number;
+  /** From the preview job, so the saved ledger row records real spend. */
+  model?: string | null;
+  costTenthCents?: number;
 };
 type PickImageState = {
   selectedExtraIds: string[];
@@ -85,6 +88,8 @@ type FlowState =
 
 type Props = {
   credits: number;
+  /** Per-generation money cost, e.g. "$0.067" or "free in stub mode". */
+  costLabel: string;
   autoGenerateGhost: boolean;
   categories: string[];
   styleTagsList: string[];
@@ -161,6 +166,7 @@ function buildReadyState(
 
 export function AddItemFlow({
   credits: initialCredits,
+  costLabel,
   autoGenerateGhost,
   categories,
   styleTagsList,
@@ -473,7 +479,13 @@ export function AddItemFlow({
   }
 
   function applyGhostPreviewResult(
-    res: { ghostImagePath: string; creditsRemaining: number; creditsUsed?: number },
+    res: {
+      ghostImagePath: string;
+      creditsRemaining: number;
+      creditsUsed?: number;
+      model?: string | null;
+      costTenthCents?: number;
+    },
     viewLabel: string,
   ) {
     setState((s) => {
@@ -483,6 +495,8 @@ export function AddItemFlow({
         label: viewLabel,
         imagePath: res.ghostImagePath,
         creditsUsed: res.creditsUsed ?? 1,
+        model: res.model ?? null,
+        costTenthCents: res.costTenthCents ?? 0,
       };
       return {
         ...s,
@@ -662,6 +676,8 @@ export function AddItemFlow({
           label: v.label,
           imagePath: v.imagePath,
           creditsUsed: v.creditsUsed,
+          model: v.model ?? null,
+          costTenthCents: v.costTenthCents ?? 0,
         })),
         extraImagePaths: snapshot.extras.map((e) => e.path),
         sourceData: snapshot.analyze.bundle.sourceData,
@@ -734,6 +750,7 @@ export function AddItemFlow({
       {state.kind === "ready" && (
         <ReadyView
           state={state}
+          costLabel={costLabel}
           categories={categories}
           styleTagsList={styleTagsList}
           ownersList={ownersList}
@@ -1159,6 +1176,7 @@ function ViewThumb({
 }
 
 function ImagePickerPanel({
+  costLabel,
   previewUrl,
   extras,
   pickState,
@@ -1174,6 +1192,7 @@ function ImagePickerPanel({
   onCancel,
   onAddManualView,
 }: {
+  costLabel: string;
   previewUrl: string;
   extras: ExtraImage[];
   pickState: PickImageState;
@@ -1247,7 +1266,7 @@ function ImagePickerPanel({
         className={`${aiFirst ? "order-2" : "order-5"} rounded-lg border border-ink/10 bg-white p-3`}
       >
         <summary className="text-xs font-medium cursor-pointer list-none">
-          {aiFirst ? "Render settings" : "Or generate with AI · 1 credit"}
+          {aiFirst ? "Render settings" : `Or generate with AI · 1 credit · ${costLabel}`}
         </summary>
         <div className="mt-3 space-y-3">
           <p className="text-[11px] text-ink-muted">
@@ -1381,6 +1400,7 @@ function ImagePickerPanel({
 }
 
 function ReadyView({
+  costLabel,
   state,
   categories,
   styleTagsList,
@@ -1422,6 +1442,7 @@ function ReadyView({
   ownersList: Owner[];
   colorOptions: Color[];
   credits: number;
+  costLabel: string;
   extraInputRef: RefObject<HTMLInputElement>;
   webMatchAutofill: boolean;
   onTakePhotoExtra: () => void;
@@ -1489,6 +1510,7 @@ function ReadyView({
 
           {state.pickingImages ? (
             <ImagePickerPanel
+              costLabel={costLabel}
               previewUrl={state.previewUrl}
               extras={state.extras}
               pickState={state.pickingImages}
@@ -1534,7 +1556,7 @@ function ReadyView({
               </button>
               <p className="text-[11px] text-ink-muted">
                 Paste or upload a photo for free, or generate with AI
-                {noCredits ? " (out of credits)." : " (1 credit)."}
+                {noCredits ? " (out of credits)." : ` (1 credit · ${costLabel}).`}
               </p>
               {categoryBlocked && (
                 <p className="text-[11px] text-amber-700">{categoryBlocked}</p>

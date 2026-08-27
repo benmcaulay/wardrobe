@@ -55,11 +55,25 @@ export function resolveGhostModelInput(
 }
 
 export type PreviewGhostResponse =
-  | { ok: true; ghostImagePath: string; creditsRemaining: number; creditsUsed: number }
+  | {
+      ok: true;
+      ghostImagePath: string;
+      creditsRemaining: number;
+      creditsUsed: number;
+      model: string | null;
+      costTenthCents: number;
+    }
   | { ok: false; error: string };
 
 export type GenerateGhostViewResponse =
-  | { ok: true; ghostImagePath: string; creditsRemaining: number; creditsUsed: number }
+  | {
+      ok: true;
+      ghostImagePath: string;
+      creditsRemaining: number;
+      creditsUsed: number;
+      model: string | null;
+      costTenthCents: number;
+    }
   | { ok: false; error: string };
 
 export async function runPreviewGhostMannequin(
@@ -133,6 +147,8 @@ export async function runPreviewGhostMannequin(
     ghostImagePath: result.resultImagePath,
     creditsRemaining,
     creditsUsed: result.credits,
+    model: result.model,
+    costTenthCents: result.costTenthCents,
   };
 }
 
@@ -246,6 +262,8 @@ export async function runGenerateGhostViewFor(
           itemId,
           resultImagePath: result.resultImagePath,
           creditsUsed: result.credits,
+          model: result.model,
+          costTenthCents: result.costTenthCents,
         },
       });
     }
@@ -265,5 +283,7 @@ export async function runGenerateGhostViewFor(
     ghostImagePath: result.resultImagePath,
     creditsRemaining: remaining,
     creditsUsed: result.credits,
+    model: result.model,
+    costTenthCents: result.costTenthCents,
   };
 }

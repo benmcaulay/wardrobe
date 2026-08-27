@@ -18,7 +18,8 @@
  * something with no API key — and it is the fallback whenever the model call
  * fails, which is why it lives here and not in a test file.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { boolEnv } from "@/lib/env";
+import { geminiText, geminiTextConfigured, parseJsonLoose } from "./gemini-text";
 import { classifyGarmentKind } from "@/lib/categories";
 import { isValidRule, type StyleRule } from "@/lib/outfit/style-rules";
 import { OCCASIONS } from "@/lib/wear/occasions";
@@ -38,7 +39,7 @@ export type NoteParse = {
 };
 
 export function styleNoteParserEnabled(): boolean {
-  return process.env.USE_REAL_STYLE_NOTES === "true" && !!process.env.ANTHROPIC_API_KEY;
+  return boolEnv("USE_REAL_STYLE_NOTES") && geminiTextConfigured();
 }
 
 const NEGATION = /\b(don'?t|do not|never|stop|avoid|no more|not with|hate|dislike)\b/i;
@@ -210,36 +211,24 @@ export async function parseStyleNote(
 
   try {
     const scoped = subjects.slice(0, MAX_SUBJECTS);
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model: "claude-opus-5",
-      max_tokens: 4096,
-      system: SYSTEM,
-      // Resolving one demonstrative against three or four visible garments is
-      // not intelligence-sensitive, and low effort keeps it fast enough to run
-      // inline. Thinking stays on — disabling it on this model can leak
-      // internal tags into the response.
-      output_config: { effort: "low", format: { type: "json_schema", schema: PARSE_SCHEMA } },
-      messages: [
-        {
-          role: "user",
-          content: [
-            "Garments on screen:",
-            ...scoped.map((s) => `- id=${s.id} | ${s.name} (${s.category})`),
-            "",
-            `Note: ${trimmed}`,
-          ].join("\n"),
-        },
-      ],
-    });
+    const text = await geminiText(
+      [
+        SYSTEM,
+        "",
+        "Reply with ONLY valid JSON matching this schema:",
+        JSON.stringify(PARSE_SCHEMA),
+        "",
+        "Garments on screen:",
+        ...scoped.map((sub) => `- id=${sub.id} | ${sub.name} (${sub.category})`),
+        "",
+        `Note: ${trimmed}`,
+      ].join("\n"),
+    );
 
-    // Safety classifiers can decline with a normal 200; check before reading.
-    if (response.stop_reason === "refusal") return parseStyleNoteWithKeywords(trimmed, subjects);
 
-    const block = response.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") return parseStyleNoteWithKeywords(trimmed, subjects);
 
-    const parsed = JSON.parse(block.text) as { rules?: unknown; summary?: unknown };
+    const parsed = parseJsonLoose<{ rules?: unknown; summary?: unknown }>(text);
+    if (!parsed) return parseStyleNoteWithKeywords(trimmed, subjects);
     const rules = Array.isArray(parsed.rules)
       ? parsed.rules.filter((rule): rule is StyleRule => isValidRule(rule, known))
       : [];

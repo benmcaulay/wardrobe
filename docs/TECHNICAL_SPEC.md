@@ -565,8 +565,8 @@ the `lib/json.ts` helpers — and provision managed Postgres for deployment.
 
 `lib/storage.ts` is a key-based seam with two drivers behind one API
 (`putObject` / `getObject` / `objectExists` / `deleteObject` / `deletePrefix` /
-`getSignedReadUrl`): **local disk** (default, dev) and **S3/R2** (auto-selected
-when `R2_BUCKET` is set). The DB-relative paths already stored on rows are the
+`getSignedReadUrl`): **local disk** (default, dev) and **S3-compatible**
+(Supabase Storage / R2 / AWS / MinIO, auto-selected when `S3_BUCKET` is set). The DB-relative paths already stored on rows are the
 object keys, so no data shape changed. On the S3 driver the image routes keep
 the per-user authorization check, then **302-redirect to a short-lived signed
 URL** so object bytes never transit the app server (a public/CDN base URL via
@@ -674,11 +674,12 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 `FAL_GHOST_MODEL`, `FAL_VTON_MODEL`, `FASHN_API_KEY`, `FASHN_TRYON_MODEL`,
 `FASHN_TRYON_MODE`, `FASHN_GARMENT_PHOTO_TYPE`, `GHOST_FOOTWEAR_ANGLE`,
 `GHOST_APPAREL_ANGLE`, `GHOST_WHITEN_*`, `USE_REAL_VISION`,
-`USE_REAL_REVERSE_IMAGE_SEARCH`, `SERPAPI_KEY`, `USE_REAL_PRODUCT_SCRAPER`,
-`USE_REAL_WEATHER`, `DATABASE_URL`, `AUTH_DEMO_MODE`, `NEXTAUTH_SECRET`,
-`NEXTAUTH_URL`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `STORAGE_DRIVER`,
-`R2_BUCKET`, `R2_ACCOUNT_ID`/`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`/
-`R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`. Full list in `.env.example`.
+`USE_REAL_PRODUCT_SCRAPER`, `USE_REAL_WEATHER`, `DATABASE_URL`,
+`DIRECT_DATABASE_URL`, `AUTH_DEMO_MODE`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`,
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `STORAGE_DRIVER`, `S3_BUCKET`,
+`S3_ENDPOINT`/`S3_ACCOUNT_ID`, `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`,
+`S3_REGION`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_BASE_URL`. Full list in
+`.env.example`.
 
 ### 15.2 Server-action / route inventory (write surface)
 

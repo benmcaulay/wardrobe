@@ -25,8 +25,8 @@ export async function getOrCreateDemoUser(): Promise<User> {
   const existing = await prisma.user.findUnique({ where: { email: DEMO_USER_EMAIL } });
   if (existing) return existing;
   return prisma.user.create({
-    // 250 credits ≈ $10 at ~$0.03-0.04 per fal.ai generation.
-    data: { email: DEMO_USER_EMAIL, name: "Demo", credits: 250 },
+    // Local demo account: effectively unmetered so the demo never stalls.
+    data: { email: DEMO_USER_EMAIL, name: "Demo", credits: 1_000_000 },
   });
 }
 

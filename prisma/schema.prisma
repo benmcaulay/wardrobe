@@ -5,6 +5,13 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Migrations and DDL must bypass the connection pooler.
+  //
+  // Supabase's pooler (Supavisor, port 6543, transaction mode) does not support
+  // prepared statements or DDL, so `prisma migrate` over it fails. Runtime
+  // queries want the pooler; migrations want the direct connection on 5432.
+  // Locally both point at the same Postgres, so this costs nothing to keep set.
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 // NOTE on JSON columns:
@@ -263,6 +270,10 @@ model TryOnGeneration {
   item            WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   resultImagePath String
   creditsUsed     Int          @default(1)
+  /// Model that produced the image, for per-model spend reporting.
+  model           String?
+  /// List-price cost in tenths of a US cent. 0 for a cache hit or a stub.
+  costTenthCents  Int          @default(0)
   createdAt       DateTime     @default(now())
 
   @@index([userId])
@@ -311,6 +322,10 @@ model VirtualTryOn {
   prompt          String?
   resultImagePath String
   creditsUsed     Int         @default(1)
+  /// Model that produced the image, for per-model spend reporting.
+  model           String?
+  /// List-price cost in tenths of a US cent. 0 for a cache hit or a stub.
+  costTenthCents  Int         @default(0)
   createdAt       DateTime    @default(now())
 
   @@index([userId])

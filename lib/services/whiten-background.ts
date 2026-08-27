@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { numEnv } from "../env";
 
 /**
  * Post-process an AI-generated catalog image to guarantee a pure-white
@@ -23,11 +24,6 @@ import sharp from "sharp";
  *  cutout:   the same image with background pixels made transparent
  *    (suitable for compositing into virtual try-on / outfit shots).
  */
-function numEnv(name: string, fallback: number): number {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 const SEED_MIN = numEnv("GHOST_WHITEN_SEED_MIN", 249);
 const EXPAND_MIN = numEnv("GHOST_WHITEN_EXPAND_MIN", 246);
 const DEFAULT_LEGACY_THRESHOLD = numEnv("GHOST_WHITEN_LEGACY_MIN", 232);

@@ -13,7 +13,6 @@
  */
 
 import { isAggregatorProductUrl, parseBrandFromTitle } from "../shopping-parse";
-import { tryImmersiveProductMetadata } from "../services/immersiveProduct";
 import { scrapeProduct, type ProductMetadata } from "../services/productScraper";
 import type { ProductMatch } from "../services/reverseImageSearch";
 import { searchWebProducts } from "../services/webProductSearch";
@@ -133,28 +132,23 @@ async function priceFromShoppingSearch(
  * only keep the aggregator URL if there's nothing better.
  */
 export async function resolveSearchMatch(match: ProductMatch): Promise<ResolvedProduct> {
-  const immersive = await tryImmersiveProductMetadata(match.immersiveProductPageToken);
-  const storeUrl = immersive?.productUrl?.trim();
+  const storeUrl = match.url.trim();
   const hasRealStoreUrl = !!storeUrl && isHttpUrl(storeUrl) && !isAggregatorProductUrl(storeUrl);
 
-  const priceCents =
-    match.priceCents > 0
-      ? match.priceCents
-      : immersive && immersive.priceCents > 0
-        ? immersive.priceCents
-        : null;
-
   return {
-    name: immersive?.name?.trim() || match.name,
-    brand: immersive?.brand?.trim() || match.brand || parseBrandFromTitle(match.name),
-    priceCents,
-    currency: match.currency || immersive?.currency || "USD",
-    retailer: immersive?.retailer?.trim() || match.retailer || null,
+    name: match.name,
+    brand: match.brand || parseBrandFromTitle(match.name),
+    // Identification no longer carries a price (see webProductSearch), so a
+    // search-only match starts unpriced and gets its real price from the
+    // scraper once a merchant URL is attached.
+    priceCents: match.priceCents > 0 ? match.priceCents : null,
+    currency: match.currency || "USD",
+    retailer: match.retailer || null,
     productUrl: hasRealStoreUrl ? storeUrl : match.url,
     imageUrl: match.thumbnailUrl,
-    colors: immersive?.colors ?? [],
-    material: immersive?.material ?? null,
-    priceSource: priceCents != null ? "shopping-search" : "none",
+    colors: [],
+    material: null,
+    priceSource: match.priceCents > 0 ? "shopping-search" : "none",
   };
 }
 

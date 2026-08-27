@@ -17,7 +17,8 @@
  * the feature works with no API key at all — it is also the fallback whenever
  * the model call fails, which is why it lives here and not in a test file.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { boolEnv } from "@/lib/env";
+import { geminiText, geminiTextConfigured, parseJsonLoose } from "./gemini-text";
 import {
   ACTIVITIES,
   EMPTY_REQUIREMENTS,
@@ -37,7 +38,7 @@ export type TripParse = {
 };
 
 export function tripParserEnabled(): boolean {
-  return process.env.USE_REAL_TRIP_PARSER === "true" && !!process.env.ANTHROPIC_API_KEY;
+  return boolEnv("USE_REAL_TRIP_PARSER") && geminiTextConfigured();
 }
 
 /** Phrases that reliably imply an activity, for the keyless path. */
@@ -83,9 +84,11 @@ export function parseTripTextWithKeywords(text: string): TripParse {
 const ACTIVITY_IDS = ACTIVITIES.map((a) => a.id);
 
 /**
- * Schema the model must fill. `additionalProperties: false` plus `required` on
- * every field is what makes structured outputs a guarantee rather than a hope —
- * the response is validated server-side, so there is no JSON to repair here.
+ * Shape the model must fill. This used to be an Anthropic structured-output
+ * schema, validated server-side, so the reply needed no repair. Gemini is asked
+ * for JSON and handed the same shape in the prompt, which is a strong hint and
+ * not a guarantee — so the reply goes through parseJsonLoose, and every field is
+ * re-validated below before use. A malformed reply falls back to keywords.
  */
 const PARSE_SCHEMA = {
   type: "object",
@@ -135,29 +138,22 @@ export async function parseTripText(text: string): Promise<TripParse> {
   if (!tripParserEnabled()) return parseTripTextWithKeywords(trimmed);
 
   try {
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model: "claude-opus-5",
-      max_tokens: 4096,
-      system: SYSTEM,
-      // Extraction is not intelligence-sensitive, and low effort keeps this
-      // fast and cheap. Thinking stays on — disabling it on this model can leak
-      // internal tags into the response.
-      output_config: { effort: "low", format: { type: "json_schema", schema: PARSE_SCHEMA } },
-      messages: [{ role: "user", content: trimmed }],
-    });
+    const text = await geminiText(
+      `${SYSTEM}
 
-    // Safety classifiers can decline with a normal 200; check before reading.
-    if (response.stop_reason === "refusal") return parseTripTextWithKeywords(trimmed);
+Reply with ONLY valid JSON matching this schema:
+${JSON.stringify(PARSE_SCHEMA)}
 
-    const block = response.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") return parseTripTextWithKeywords(trimmed);
+Trip description:
+${trimmed}`,
+    );
 
-    const parsed = JSON.parse(block.text) as {
+    const parsed = parseJsonLoose<{
       activities?: unknown;
       laundry?: unknown;
       summary?: unknown;
-    };
+    }>(text);
+    if (!parsed) return parseTripTextWithKeywords(trimmed);
     const activities = Array.isArray(parsed.activities)
       ? [...new Set(parsed.activities.filter((a): a is TripActivity => typeof a === "string" && isTripActivity(a)))]
       : [];
