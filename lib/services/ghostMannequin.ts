@@ -70,7 +70,7 @@ export type GhostMannequinResult = {
 const BASE_WIDTH = 1024;
 const BASE_HEIGHT = 1366; // 3:4 portrait
 /** Bump when prompt/post-process changes so new runs don't reuse stale cache keys. */
-const PROMPT_VERSION = "2026-08-footwear-same-direction";
+const PROMPT_VERSION = "2026-08-footwear-positive";
 /**
  * Catalog post-process after fal returns.
  * Bakeoff winner was `none` (prod-raw): resize only for the JPEG; cutout still
@@ -149,9 +149,54 @@ function providerForCategory(category: GhostMannequinCategory): GhostProvider {
 
 const GEMINI_IMAGE_MODEL = strEnv("GEMINI_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL);
 
+/**
+ * Footwear runs on the pro image model when it runs on gemini at all.
+ *
+ * Measured: given the same prompt, `gemini-3.1-flash-image` renders the pair
+ * mirrored sole-to-sole while `gemini-3-pro-image` gets the direction right. It
+ * still floats them slightly and adds a cast shadow, but the shadow is removed
+ * by the whiten pass footwear already gets, and a tilt is a far smaller error
+ * than a mirrored pair. Twice the price ($0.134 vs $0.067) on the one category
+ * where the pose is least forgiving.
+ *
+ * An explicit GEMINI_IMAGE_MODEL still wins, so this can be overridden or
+ * A/B tested without a code change.
+ */
+const GEMINI_FOOTWEAR_MODEL = strEnv("GEMINI_FOOTWEAR_MODEL", "gemini-3-pro-image");
+
+function geminiModelFor(category: GhostMannequinCategory): string {
+  if (strEnv("GEMINI_IMAGE_MODEL")) return GEMINI_IMAGE_MODEL;
+  return category === "footwear" ? GEMINI_FOOTWEAR_MODEL : GEMINI_IMAGE_MODEL;
+}
+
+/**
+ * Optional pose exemplar for footwear: a storage key holding an image whose
+ * *arrangement* should be copied, identity ignored.
+ *
+ * Few-shot for geometry. Describing a pose in words is exactly what these models
+ * are worst at, and showing one is the standard lever when a description does not
+ * land — the edit endpoint already accepts several images, so this costs nothing
+ * but the extra bytes.
+ *
+ * Off by default, because the positive prompt plus the pro model already produce
+ * a correct pair and an unnecessary reference is one more thing to drift. Point
+ * it at any render you like — a good previous output of your own is ideal, and
+ * avoids shipping someone else's catalog photo as an asset.
+ */
+const GHOST_FOOTWEAR_POSE_REFERENCE = strEnv("GHOST_FOOTWEAR_POSE_REFERENCE");
+
+/** Appended only when an exemplar is actually attached, so it cannot dangle. */
+const POSE_REFERENCE_NOTE = `Arrangement reference:
+- The final image shows the arrangement to copy: how the two shoes are angled, spaced, and stood.
+- Copy that arrangement only. The shoes themselves come from the first image.`;
+
+export function footwearPoseReferenceKey(): string | undefined {
+  return GHOST_FOOTWEAR_POSE_REFERENCE;
+}
+
 /** Model string for logs and cache keys, for whichever provider ran. */
-function modelLabelFor(provider: GhostProvider): string {
-  return provider === "gemini" ? GEMINI_IMAGE_MODEL : FAL_GHOST_MODEL;
+function modelLabelFor(provider: GhostProvider, category: GhostMannequinCategory): string {
+  return provider === "gemini" ? geminiModelFor(category) : FAL_GHOST_MODEL;
 }
 
 let falConfigured = false;
@@ -184,7 +229,10 @@ function deterministicHash(input: GhostMannequinInput): string {
         // The endpoint is part of a render's identity: without it a model swap
         // would silently reuse the old image. Resolved per category, since
         // footwear and apparel go to different vendors.
-        modelLabelFor(providerForCategory(input.category)),
+        modelLabelFor(providerForCategory(input.category), input.category),
+        // So does the pose exemplar: attaching or changing one changes the
+        // output, and without this the old render would be served instead.
+        input.category === "footwear" ? (GHOST_FOOTWEAR_POSE_REFERENCE ?? "no-pose-ref") : "",
         EXPOSURE_NORMALIZE ? "exposure" : "no-exposure",
       ].join("|"),
     )
@@ -221,7 +269,7 @@ export async function createGhostMannequin(
       cached: true,
       // Nothing was generated, so nothing is charged — but report which model's
       // artifact is being served so the breakdown attributes it correctly.
-      model: REAL_MODE ? modelLabelFor(providerForCategory(input.category)) : null,
+      model: REAL_MODE ? modelLabelFor(providerForCategory(input.category), input.category) : null,
       costTenthCents: 0,
     };
   }
@@ -284,28 +332,30 @@ const TYPE_DRESS = `TYPE — dress:
 - Neck/collar opening shows back lining only (see openings rule).`;
 
 /**
- * Footwear pose. Overridable with GHOST_FOOTWEAR_ANGLE, which .env.example has
- * documented since the angle work but nothing ever read.
+ * Footwear pose, stated positively.
+ *
+ * The previous version was a wall of prohibitions — "not mirrored", "not
+ * symmetric", "never sole-toward-the-camera", nine `never`s in total, with the
+ * key rule in capitals. It did not work, and it plausibly made things worse:
+ * image models are weak at negation, and naming "mirrored" repeatedly is as
+ * likely to anchor the layout as to forbid it. Measured output was a mirrored
+ * sole-to-sole pair on flash, every time.
+ *
+ * So this describes the target and nothing else. One short sentence per fact,
+ * no "not", no capitals. Overridable with GHOST_FOOTWEAR_ANGLE.
  */
 const FOOTWEAR_ANGLE = strEnv(
   "GHOST_FOOTWEAR_ANGLE",
-  "angled ~45° to the viewer's left",
+  "angled about 45° toward the viewer's left",
 );
 
 const TYPE_FOOTWEAR = `TYPE — footwear:
-- BOTH SHOES FACE THE SAME DIRECTION. This is the single most important rule of
-  this shot. Both toes point to the viewer's left. The pair is NOT mirrored, NOT
-  symmetric, NOT reflected: do not point one shoe left and the other right, do
-  not put the two outsoles together, do not make the pair a butterfly or a V.
-  Photograph both shoes from their outer side, as a shop shelf would show them.
-- Both shoes as a matched pair, ${FOOTWEAR_ANGLE}, same height and orientation.
-- Upright and level, standing squarely on their soles as they would on a shelf —
-  never lying on their side, never tipped, tilted, or leaning, never floating at
-  an angle, never sole-toward-the-camera, never soles visible.
-- Side by side and close together, inner edges nearly touching, the near shoe
-  slightly in front of the far one, both pointing the same way.
-- Not toe-on, not heel-to-heel V, not splayed apart, not overlapping or stacked.
-- No legs, ankles, or feet.`;
+- Two shoes of the same pair, ${FOOTWEAR_ANGLE}.
+- Both shoes point the same way, as a shop displays them on a shelf.
+- Each shoe is seen from its outer side.
+- Both stand upright and level on their soles, at the same height.
+- They sit side by side and close together, the near one slightly forward.
+- The frame contains the shoes alone.`;
 
 const TYPE_ACCESSORY = `TYPE — accessory (hat, bag, scarf, belt, or similar):
 - Present the exact accessory from the reference in a clean retail catalog pose.
@@ -666,11 +716,11 @@ async function postProcessGhostRaw(
       );
       processed = await runPipeline(repairedBuffer);
       neckRepairUsed = true;
-      log.info("ghost.neck.repair", { provider, model: modelLabelFor(provider) });
+      log.info("ghost.neck.repair", { provider, model: modelLabelFor(provider, category) });
     } catch (err) {
       log.error("ghost.neck.repair.failed", err, {
         provider,
-        model: modelLabelFor(provider),
+        model: modelLabelFor(provider, category),
       });
     }
   }
@@ -727,6 +777,7 @@ async function generateViaGemini(
   prompt: string,
   garmentKey: string,
   extraKeys: string[],
+  category: GhostMannequinCategory,
 ): Promise<Buffer> {
   const keys = [garmentKey, ...extraKeys];
   const loaded = await Promise.all(
@@ -736,7 +787,25 @@ async function generateViaGemini(
       return { buffer, mime: contentTypeFor(k) };
     }),
   );
-  return geminiEditImage(prompt, loaded, { model: GEMINI_IMAGE_MODEL });
+
+  // The exemplar goes last so "the final image" in the note is unambiguous
+  // regardless of how many context shots the user attached.
+  let fullPrompt = prompt;
+  const poseKey = category === "footwear" ? GHOST_FOOTWEAR_POSE_REFERENCE : undefined;
+  if (poseKey) {
+    const poseBuffer = await getObject(poseKey);
+    if (poseBuffer) {
+      loaded.push({ buffer: poseBuffer, mime: contentTypeFor(poseKey) });
+      fullPrompt = `${prompt}\n\n${POSE_REFERENCE_NOTE}`;
+      log.info("ghost.poseReference.attached", { key: poseKey });
+    } else {
+      // Silently generating without it would make a misconfigured key look like
+      // a model that ignores exemplars.
+      log.warn("ghost.poseReference.missing", { key: poseKey });
+    }
+  }
+
+  return geminiEditImage(fullPrompt, loaded, { model: geminiModelFor(category) });
 }
 
 /** Storage keys for one request. Derived from the same hash, so they move together. */
@@ -769,7 +838,7 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
 
   const startedAt = Date.now();
   const provider = providerForCategory(input.category);
-  const modelLabel = modelLabelFor(provider);
+  const modelLabel = modelLabelFor(provider, input.category);
 
   // The image models intermittently return a blank frame — observed roughly one
   // call in three on footwear. A blank is not a permanent failure, so retry it
@@ -784,7 +853,7 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
     try {
       rawBuffer =
         provider === "gemini"
-          ? await generateViaGemini(prompt, input.garmentImagePath, extraKeys)
+          ? await generateViaGemini(prompt, input.garmentImagePath, extraKeys, input.category)
           : await generateViaFal(prompt, input.garmentImagePath, extraKeys);
     } catch (err) {
       log.error("ghost.generate.failed", err, {
