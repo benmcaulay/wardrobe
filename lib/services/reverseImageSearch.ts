@@ -1,30 +1,30 @@
 /**
- * Identify the product in a photo, for prefilling the add-item form.
+ * Find the product in a photo, for prefilling the add-item form.
  *
- * ── What changed and why it matters ─────────────────────────────────────────
+ * Three lanes, in order:
  *
- * This was Google Lens through SerpAPI: a real reverse-image search that
- * returned real listings, with real prices and real URLs. It is now gemini
- * vision, which is a different thing wearing the same interface — it recognises
- * the garment from what the model knows, it does not look anything up.
+ *  1. **Google Lens via SerpAPI** — a real reverse-image search returning real
+ *     listings with real prices and URLs. Needs SERPAPI_KEY *and* a publicly
+ *     reachable image URL (PUBLIC_APP_URL + PUBLIC_IMAGE_SECRET), because
+ *     SerpAPI has to fetch the image itself. That rules it out on localhost.
+ *  2. **Gemini vision** — recognises the garment from what the model knows
+ *     rather than looking it up, so it names the piece but cannot price or link
+ *     it. `priceCents` stays 0 and `url` stays empty rather than being invented:
+ *     the wishlist budget sums these, and a plausible guess would corrupt it
+ *     silently. Good at name, brand when a logo is legible, material, pattern.
+ *  3. **Stub** for offline dev.
  *
- * Two consequences are deliberate rather than incidental:
- *
- *  - **No URLs.** A model asked for a product link invents a plausible one.
- *    `url` stays empty; paste a link and the (keyless) product scraper reads the
- *    real page instead.
- *  - **No prices.** `priceCents` stays 0 for the same reason. The wishlist
- *    budget at /closet/wishlist sums these, and a fabricated price makes that
- *    number silently wrong — the exact failure the old stub was criticised for
- *    in .env.example.
- *
- * What it is genuinely good at, and all we ask of it: the garment's name, its
- * brand when a logo or silhouette is recognisable, and its material/pattern.
+ * The lane actually used is logged, because "no price" versus "real price" is
+ * the difference between the wishlist budget working and not, and it is not
+ * otherwise visible from the result.
  */
 import { log } from "../log";
 import { normalizeColorName } from "../colors";
+import { parseBrandFromTitle } from "../shopping-parse";
+import { signedPublicImageUrl } from "../public-image-url";
 import { contentTypeFor, getObject } from "../storage";
 import { geminiJson, geminiTextConfigured } from "./gemini-text";
+import { serpApiGet, serpApiLensEnabled } from "./serpapi-client";
 import { pick, range, seededRng } from "./_rng";
 
 export type ProductMatch = {
@@ -35,6 +35,8 @@ export type ProductMatch = {
   retailer: string;
   url: string;
   thumbnailUrl: string | null;
+  /** SerpAPI token for Google Immersive Product (merchant link, specs). */
+  immersiveProductPageToken?: string;
   /** 0..1 — how confident the match is. Highest first in the returned array. */
   confidence: number;
 };
@@ -157,12 +159,111 @@ function reverseImageSearchStub(imagePath: string): ProductMatch[] {
   ];
 }
 
+// -----------------------------------------------------------------------------
+// Lane 1: Google Lens via SerpAPI
+// -----------------------------------------------------------------------------
+
+type LensPrice = { extracted_value?: number; currency?: string };
+type LensMatch = {
+  title?: string;
+  link?: string;
+  source?: string;
+  thumbnail?: string;
+  price?: LensPrice | string;
+};
+type LensResponse = { visual_matches?: LensMatch[]; products?: LensMatch[] };
+
+function parseLensPrice(price: LensMatch["price"]): { cents: number; currency: string } {
+  if (!price) return { cents: 0, currency: "USD" };
+  if (typeof price === "string") {
+    const num = parseFloat(price.replace(/[^0-9.]/g, ""));
+    return { cents: Number.isFinite(num) && num > 0 ? Math.round(num * 100) : 0, currency: "USD" };
+  }
+  const value = price.extracted_value;
+  return {
+    cents: typeof value === "number" && value > 0 ? Math.round(value * 100) : 0,
+    currency: price.currency?.trim() || "USD",
+  };
+}
+
+function mapLensMatch(item: LensMatch, confidence: number): ProductMatch | null {
+  const url = item.link?.trim();
+  const name = item.title?.trim();
+  if (!url || !name) return null;
+
+  const { cents, currency } = parseLensPrice(item.price);
+  const retailer = item.source?.trim() || "Shop";
+  return {
+    name,
+    brand: parseBrandFromTitle(name) || retailer,
+    priceCents: cents,
+    currency,
+    retailer,
+    url,
+    thumbnailUrl: item.thumbnail ?? null,
+    confidence,
+  };
+}
+
+async function reverseImageSearchSerp(imagePath: string): Promise<ProductMatch[]> {
+  const imageUrl = signedPublicImageUrl(imagePath);
+  if (!imageUrl) return [];
+
+  const data = await serpApiGet<LensResponse>({
+    engine: "google_lens",
+    url: imageUrl,
+    type: "products",
+    hl: "en",
+    country: "us",
+  });
+
+  const rows = [...(data.products ?? []), ...(data.visual_matches ?? [])];
+  const matches: ProductMatch[] = [];
+  const seen = new Set<string>();
+  let confidence = 0.95;
+  for (const row of rows) {
+    const m = mapLensMatch(row, confidence);
+    if (!m || seen.has(m.url)) continue;
+    seen.add(m.url);
+    matches.push(m);
+    confidence = Math.max(0.3, confidence - 0.07);
+    if (matches.length >= 10) break;
+  }
+  return matches;
+}
+
 /**
- * Products matching an image. Kept on the old name and shape so the add-item and
- * wishlist flows are unchanged; the engine underneath is now gemini vision.
+ * Products matching an image. Same name and shape as always, so the add-item and
+ * wishlist flows do not care which lane answered.
  */
 export async function reverseImageSearch(imagePath: string): Promise<ProductMatch[]> {
-  if (!geminiTextConfigured()) return reverseImageSearchStub(imagePath);
-  const identified = await identifyGarmentInImage(imagePath);
-  return identified ? [identified.match] : [];
+  if (serpApiLensEnabled()) {
+    const startedAt = Date.now();
+    try {
+      const matches = await reverseImageSearchSerp(imagePath);
+      if (matches.length > 0) {
+        log.info("reverse-image.ok", {
+          provider: "serpapi-lens",
+          ms: Date.now() - startedAt,
+          results: matches.length,
+        });
+        return matches;
+      }
+      log.info("reverse-image.empty", { provider: "serpapi-lens", ms: Date.now() - startedAt });
+    } catch (err) {
+      // Fall through: a named garment with no price beats no answer at all.
+      log.error("reverse-image.serpapi.failed", err, { ms: Date.now() - startedAt });
+    }
+  }
+
+  if (geminiTextConfigured()) {
+    const identified = await identifyGarmentInImage(imagePath);
+    if (identified) {
+      log.info("reverse-image.ok", { provider: "gemini", results: 1, priced: false });
+      return [identified.match];
+    }
+    return [];
+  }
+
+  return reverseImageSearchStub(imagePath);
 }

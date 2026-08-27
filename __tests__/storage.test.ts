@@ -60,3 +60,54 @@ describe("storageDriver selection", () => {
     expect(storageDriver()).toBe("local");
   });
 });
+
+describe("driver selection", () => {
+  const clearStorageEnv = () => {
+    for (const suffix of ["BUCKET", "ENDPOINT", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ACCOUNT_ID", "REGION"]) {
+      delete process.env[`S3_${suffix}`];
+      delete process.env[`R2_${suffix}`];
+    }
+    delete process.env.STORAGE_DRIVER;
+  };
+
+  it("defaults to local with nothing configured", () => {
+    clearStorageEnv();
+    expect(storageDriver()).toBe("local");
+  });
+
+  /**
+   * The trap this caused in practice: scaffolding S3_BUCKET ahead of the
+   * credentials silently switched the whole app to the s3 driver, and every
+   * upload failed with the SDK's "InvalidAccessKeyId" — which names nothing you
+   * can act on and points five frames deep into an upload.
+   */
+  it("selects s3 from the bucket alone, even with STORAGE_DRIVER blank", () => {
+    clearStorageEnv();
+    process.env.STORAGE_DRIVER = "";
+    process.env.S3_BUCKET = "wardrobe-images";
+    expect(storageDriver()).toBe("s3");
+  });
+
+  it("honours the legacy R2_BUCKET spelling", () => {
+    clearStorageEnv();
+    process.env.R2_BUCKET = "wardrobe-images";
+    expect(storageDriver()).toBe("s3");
+  });
+
+  it("lets an explicit local override a set bucket", () => {
+    clearStorageEnv();
+    process.env.S3_BUCKET = "wardrobe-images";
+    process.env.STORAGE_DRIVER = "local";
+    expect(storageDriver()).toBe("local");
+  });
+
+  it("names the missing credentials instead of failing inside the AWS SDK", async () => {
+    clearStorageEnv();
+    process.env.S3_BUCKET = "wardrobe-images";
+    process.env.S3_ENDPOINT = "https://example.supabase.co/storage/v1/s3";
+    const { putObject } = await import("../lib/storage");
+    await expect(putObject("u/x.jpg", Buffer.from("x"), "image/jpeg")).rejects.toThrow(
+      /S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY are not set/,
+    );
+  });
+});

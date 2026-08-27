@@ -11,13 +11,24 @@ Background removal runs for real, free, client-side via
 Google Gemini when you set `GEMINI_API_KEY` and
 `USE_REAL_GHOST_MANNEQUIN="true"`; otherwise it falls back to a stub composite.
 
-**Gemini is the only AI vendor**, with one deliberate exception: **footwear**
-still renders on fal Seedream v4 edit, because gemini will not obey the
-shoes-upright-at-45°-side-by-side pose — flash mirrors the pair sole-to-sole and
-pro floats them tilted, measured against the same prompt. Set `FAL_KEY` to get
-that path; without it footwear falls back to gemini and is posed worse. Virtual
-try-on, garment classification, product identification, trip parsing, and
-style-note parsing all run on gemini.
+**Gemini runs almost everything**, with two deliberate exceptions, both because
+gemini measurably cannot do the job:
+
+- **Footwear** renders on fal Seedream v4 edit. Gemini will not obey the
+  shoes-upright-at-45°-side-by-side pose — flash mirrors the pair sole-to-sole,
+  pro floats them tilted, both with the instruction as the first rule in the
+  prompt. Set `FAL_KEY` for that path; without it footwear falls back to gemini
+  and is posed worse.
+- **Product lookup** uses SerpAPI. Gemini has no web access, so it can name a
+  garment but not price or link it — and a fabricated price silently corrupts the
+  wishlist budget. `SERPAPI_KEY` alone enables the text lane (Google Shopping);
+  the Google Lens photo-match lane also needs `PUBLIC_APP_URL` +
+  `PUBLIC_IMAGE_SECRET`, since SerpAPI has to fetch the image itself and cannot
+  reach localhost. Without a key, lookup degrades to gemini identification:
+  name and brand, no price, no URL.
+
+Virtual try-on, garment classification, trip parsing, and style-note parsing all
+run on gemini.
 
 ## Quick start (stub mode — no keys)
 
@@ -158,8 +169,8 @@ signature. Swapping in a real API only edits one file.
 | `lib/services/ghostMannequin.ts` ✅     | Composite a garment as a ghost mannequin      | Gemini Interactions API *(default)* or fal.ai (SeedDream / Flux Kontext) | `USE_REAL_GHOST_MANNEQUIN`, `GHOST_PROVIDER`, `GEMINI_API_KEY`, `FAL_KEY`, `FAL_GHOST_MODEL` |
 | `lib/client/background-removal.ts` ✅   | Transparent-background cutouts (live, client) | `@imgly/background-removal` (already wired)                          | none — runs free in-browser via WASM                         |
 | `lib/services/vision.ts`               | Garment category / color / style tagging      | Anthropic Claude Vision, OpenAI Vision, Google Vision AI             | `USE_REAL_VISION`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`     |
-| `lib/services/reverseImageSearch.ts`   | Identify the product in a photo               | Gemini vision. No web lookup, so no prices or URLs — see the module docstring | `GEMINI_API_KEY`                     |
-| `lib/services/productScraper.ts`       | Pull price / brand / material from a URL      | ScrapingBee, Bright Data, Apify, custom fetcher                      | `USE_REAL_PRODUCT_SCRAPER`, `SCRAPINGBEE_API_KEY`            |
+| `lib/services/reverseImageSearch.ts`   | Find the product in a photo                   | SerpAPI Google Lens (real prices + URLs, needs a public origin), else gemini vision (name/brand only) | `SERPAPI_KEY`, `PUBLIC_APP_URL`, `PUBLIC_IMAGE_SECRET`, `GEMINI_API_KEY` |
+| `lib/services/productScraper.ts`       | Pull price / brand / material from a URL      | Direct fetch + schema.org/Product JSON-LD. No API key                | `USE_REAL_PRODUCT_SCRAPER`                                   |
 | `lib/services/backgroundRemoval.ts`    | Server-side bg-removal fallback               | remove.bg, Photoroom, Replicate rembg                                | `USE_REAL_BACKGROUND_REMOVAL`, `REMOVE_BG_API_KEY`           |
 
 ✅ = real implementation already wired. See `.env.example` for the full list.

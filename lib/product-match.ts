@@ -1,3 +1,4 @@
+import { tryImmersiveProductMetadata } from "./services/immersiveProduct";
 import type { Color } from "./json";
 import { isAggregatorProductUrl, parseBrandFromTitle } from "./shopping-parse";
 import type { PrefillResult } from "./prefill";
@@ -55,12 +56,17 @@ function trustedScrape(scraped: ProductMetadata | null | undefined): ProductMeta
 }
 
 /**
- * Resolve listing metadata by scraping the merchant PDP. The SerpAPI Immersive
- * Product lane that used to run first is gone with the rest of the SerpAPI
- * wiring, so a match with no URL now resolves to null rather than to
- * search-derived metadata.
+ * Resolve listing metadata: Immersive Product (SerpAPI) when the match carries a
+ * token, else a direct scrape of the merchant PDP. Never returns aggregator junk.
+ *
+ * The immersive lane matters because a Google Shopping `url` is a redirect
+ * rather than the shop: storing it would give a "buy at Nordstrom" button that
+ * lands on a search page, and the price watcher refuses to re-read it.
  */
 export async function resolveProductMetadata(match: ProductMatch): Promise<ProductMetadata | null> {
+  const immersive = await tryImmersiveProductMetadata(match.immersiveProductPageToken);
+  if (immersive?.name) return immersive;
+
   if (!match.url) return null;
 
   if (!isAggregatorProductUrl(match.url)) {

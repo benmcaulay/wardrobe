@@ -80,15 +80,31 @@ async function s3() {
     s3Env("ENDPOINT") ??
     // R2 derives its endpoint from the account id; other providers give one.
     (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
+  // Fail on the missing variable rather than letting AWS answer
+  // "InvalidAccessKeyId" five frames deep in an upload. Setting only S3_BUCKET
+  // is enough to select this driver, so it is easy to end up here half
+  // configured — and the SDK's error names nothing you can act on.
+  const accessKeyId = s3Env("ACCESS_KEY_ID");
+  const secretAccessKey = s3Env("SECRET_ACCESS_KEY");
+  if (!accessKeyId || !secretAccessKey || !endpoint) {
+    const missing = [
+      !accessKeyId ? "S3_ACCESS_KEY_ID" : null,
+      !secretAccessKey ? "S3_SECRET_ACCESS_KEY" : null,
+      !endpoint ? "S3_ENDPOINT (or S3_ACCOUNT_ID for R2)" : null,
+    ].filter((n): n is string => n !== null);
+    throw new Error(
+      `Storage driver is "s3" but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set. ` +
+        "Fill the credentials in, or clear S3_BUCKET to stay on local disk — " +
+        "setting S3_BUCKET alone is enough to select this driver.",
+    );
+  }
+
   s3Singleton = new S3Client({
     // R2 ignores region and accepts "auto"; Supabase and AWS want a real one.
     region: s3Env("REGION") ?? "auto",
     endpoint,
     forcePathStyle: boolEnv("S3_FORCE_PATH_STYLE"),
-    credentials: {
-      accessKeyId: s3Env("ACCESS_KEY_ID") ?? "",
-      secretAccessKey: s3Env("SECRET_ACCESS_KEY") ?? "",
-    },
+    credentials: { accessKeyId, secretAccessKey },
   });
   return s3Singleton;
 }
