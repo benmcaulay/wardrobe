@@ -1,5 +1,6 @@
 "use server";
 
+import { autoWhitenEnabled, whitenSavedUpload } from "@/lib/services/auto-whiten-upload";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -170,6 +171,10 @@ export type GhostViewInput = {
   creditsUsed: number;
   mirror?: boolean;
   thumbZoom?: number;
+  /** Model that generated this view, carried from the preview job result. */
+  model?: string | null;
+  /** List-price cost in tenths of a cent, from the preview job result. */
+  costTenthCents?: number;
 };
 
 export type CreateItemInput = ItemFormValue & {
@@ -211,6 +216,19 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
     }
   }
   if (!input.name.trim()) return { ok: false, error: "Name is required" };
+
+  // Automatic backdrop whiten, on the upload's own source image, at save time.
+  //
+  // Here rather than in saveUpload because it must happen when the user commits
+  // the piece to the closet — not while they are still previewing, cropping, or
+  // generating, where an image changing under them would be jarring and where
+  // discarded uploads would be processed for nothing.
+  //
+  // Best-effort by design: autoWhitenUpload never throws, and a failure leaves
+  // the original bytes in place. Whitening is cosmetic; losing the photo is not.
+  if (autoWhitenEnabled()) {
+    await whitenSavedUpload(input.originalImagePath);
+  }
 
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
@@ -260,6 +278,8 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
         itemId: item.id,
         resultImagePath: v.imagePath,
         creditsUsed: v.creditsUsed,
+        model: v.model ?? null,
+        costTenthCents: v.costTenthCents ?? 0,
       })),
     });
   } else if (input.ghostImagePath) {

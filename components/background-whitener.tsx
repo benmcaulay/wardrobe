@@ -1,5 +1,6 @@
 "use client";
 
+import { fillToWhite } from "@/lib/bucket-whiten";
 import { useEffect, useRef, useState } from "react";
 
 type Props = {
@@ -245,7 +246,7 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
     pushUndo();
 
     const working = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    fillToWhite(working, canvas.width, canvas.height, x, y, tolerance, contiguous);
+    fillToWhite(working.data, canvas.width, canvas.height, { x, y }, tolerance, contiguous);
     ctx.putImageData(working, 0, 0);
     setDirty(true);
   }
@@ -424,72 +425,4 @@ export function BackgroundWhitener({ src, onCancel, onSave }: Props) {
   );
 }
 
-/**
- * Paint pixels matching the seed color at (sx, sy) to pure white. `tol` is the
- * max per-channel difference. When `contiguous`, only the connected region
- * reachable from the seed is filled (4-neighbour flood fill).
- */
-function fillToWhite(
-  img: ImageData,
-  w: number,
-  h: number,
-  sx: number,
-  sy: number,
-  tol: number,
-  contiguous: boolean,
-) {
-  const data = img.data;
-  const si = (sy * w + sx) * 4;
-  const tr = data[si]!;
-  const tg = data[si + 1]!;
-  const tb = data[si + 2]!;
 
-  const within = (i: number) =>
-    Math.abs(data[i]! - tr) <= tol &&
-    Math.abs(data[i + 1]! - tg) <= tol &&
-    Math.abs(data[i + 2]! - tb) <= tol;
-  const paint = (i: number) => {
-    data[i] = 255;
-    data[i + 1] = 255;
-    data[i + 2] = 255;
-    data[i + 3] = 255;
-  };
-
-  if (!contiguous) {
-    for (let i = 0; i < data.length; i += 4) if (within(i)) paint(i);
-    return;
-  }
-
-  const total = w * h;
-  const visited = new Uint8Array(total);
-  const stack = new Int32Array(total);
-  let top = 0;
-  const start = sy * w + sx;
-  visited[start] = 1;
-  stack[top++] = start;
-
-  while (top > 0) {
-    const p = stack[--top]!;
-    const i = p * 4;
-    if (!within(i)) continue;
-    paint(i);
-    const x = p % w;
-    const y = (p - x) / w;
-    if (x > 0 && !visited[p - 1]) {
-      visited[p - 1] = 1;
-      stack[top++] = p - 1;
-    }
-    if (x < w - 1 && !visited[p + 1]) {
-      visited[p + 1] = 1;
-      stack[top++] = p + 1;
-    }
-    if (y > 0 && !visited[p - w]) {
-      visited[p - w] = 1;
-      stack[top++] = p - w;
-    }
-    if (y < h - 1 && !visited[p + w]) {
-      visited[p + w] = 1;
-      stack[top++] = p + w;
-    }
-  }
-}
