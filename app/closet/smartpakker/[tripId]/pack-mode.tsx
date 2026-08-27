@@ -54,6 +54,9 @@ import {
  */
 export const RAIL_ZONE = "__rail__";
 
+/** How long an arriving piece takes to surface in its orbit after landing. */
+const REVEAL_FADE_MS = 260;
+
 /** Anything you can put in a bag, garment or gear, flattened for the rail. */
 export type PackCandidate = {
   kind: "item" | "gear";
@@ -285,7 +288,10 @@ export function PackMode({
         </ul>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      {/* overflow-hidden so a child that will not fit has to scroll internally
+          rather than spilling past the fixed overlay, which is what put the bag
+          out of reach on a phone. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
         {/* The rail you drag out of. */}
         <Rail
           query={query}
@@ -304,6 +310,7 @@ export function PackMode({
           bag={bag}
           contents={contents}
           packEl={packEl}
+          flyingKey={flight?.key ?? null}
           onAdjustSize={onAdjustSize}
           onSetDailyWear={onSetDailyWear}
         />
@@ -348,7 +355,18 @@ function Rail({
   return (
     <aside
       ref={ref}
-      className={`flex min-h-0 shrink-0 flex-col border-b transition-colors md:w-80 md:border-b-0 md:border-r ${
+      /*
+       * Height-capped on mobile, fixed-width on desktop.
+       *
+       * It used to be `shrink-0` at every size. In the desktop row layout that
+       * is right — it is a 20rem column beside the stage. Stacked on a phone it
+       * meant the rail grew to fit every row: 23 garments made it 1400px tall,
+       * pushing the bag stage below the viewport of a `fixed inset-0` overlay
+       * with nothing scrollable in between, so the thing you were dragging into
+       * could not be reached at all. Capped at 40vh the list scrolls inside
+       * itself (it already had overflow-y-auto) and the stage keeps its 18rem.
+       */
+      className={`flex max-h-[40vh] min-h-0 flex-col border-b transition-colors md:max-h-none md:w-80 md:shrink-0 md:border-b-0 md:border-r ${
         isOver ? "border-accent bg-accent/10" : "border-ink/10"
       }`}
     >
@@ -601,6 +619,7 @@ function BagStage({
   bag,
   contents,
   packEl,
+  flyingKey,
   onAdjustSize,
   onSetDailyWear,
 }: {
@@ -608,6 +627,8 @@ function BagStage({
   contents: PackCandidate[];
   /** Shared with PackMode: the pack graphic a dropped piece flies into. */
   packEl: MutableRefObject<HTMLDivElement | null>;
+  /** Content key currently mid-flight, whose orbiting piece stays hidden. */
+  flyingKey: string | null;
   onAdjustSize: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
   onSetDailyWear: (itemId: string, dailyWear: boolean | null) => void;
 }) {
@@ -622,6 +643,27 @@ function BagStage({
   const elapsed = useRef(0);
   const lastFrame = useRef<number | null>(null);
   const hovering = useRef(false);
+  /**
+   * The piece still flying in from the pointer.
+   *
+   * The server confirms the pack in a few hundred milliseconds, but the flight
+   * runs for two seconds — so without this the item pops into its orbit while
+   * its own overlay is still in the air, and you briefly see the same garment
+   * twice. Held in a ref, and read inside the rAF loop, so that changing it does
+   * not tear the loop down and reset the system's angles.
+   */
+  const flyingKeyRef = useRef<string | null>(null);
+  const previousFlyingKey = useRef<string | null>(null);
+  /**
+   * When each arriving piece became visible, so it can fade in rather than pop.
+   *
+   * The flight ends at the centre of the pack, but the piece's orbit slot is out
+   * on the ellipse — so revealing it at full opacity the instant the flight lands
+   * would snap it from the pack to its orbit. A short fade covers that gap: the
+   * flight disappears into the pack and the piece surfaces in its orbit.
+   */
+  const revealedAt = useRef(new Map<string, number>());
+  flyingKeyRef.current = flyingKey;
   // Keep both refs: one for the drop-zone registry, one to measure the stage.
   const setStage = useCallback(
     (el: HTMLDivElement | null) => {
@@ -683,6 +725,12 @@ function BagStage({
       const dt = now - lastFrame.current;
       lastFrame.current = now;
       if (!reduceMotion) elapsed.current += dt;
+
+      // The frame a flight ends is the frame its piece starts fading in.
+      if (previousFlyingKey.current && previousFlyingKey.current !== flyingKeyRef.current) {
+        revealedAt.current.set(previousFlyingKey.current, now);
+      }
+      previousFlyingKey.current = flyingKeyRef.current;
       const phase = phaseAt(elapsed.current);
       const lift = hovering.current;
 
@@ -694,8 +742,20 @@ function BagStage({
         // steady orbit, which is why this loop has no special cases left.
         const slot = planetSlot(orbits[i], phase);
         node.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${slot.y.toFixed(1)}px, 0) scale(${slot.scale.toFixed(3)})`;
-        // Hovering brightens the system without stopping it.
-        node.style.opacity = String(lift ? Math.min(1, slot.opacity + 0.15) : slot.opacity);
+        // Still in the air: keep its orbiting copy invisible so the flight is
+        // the only version of the piece on screen. It keeps its transform, so it
+        // is already in the right place the moment it is revealed.
+        const key = contentKeys[i];
+        const arriving = key === flyingKeyRef.current;
+        const revealStart = key === undefined ? undefined : revealedAt.current.get(key);
+        const fade =
+          revealStart === undefined
+            ? 1
+            : Math.min(1, (now - revealStart) / REVEAL_FADE_MS);
+        if (fade >= 1 && revealStart !== undefined) revealedAt.current.delete(key!);
+
+        const settled = lift ? Math.min(1, slot.opacity + 0.15) : slot.opacity;
+        node.style.opacity = arriving ? "0" : String(settled * fade);
         node.style.zIndex = String(slot.zIndex);
       }
       raf = requestAnimationFrame(frame);

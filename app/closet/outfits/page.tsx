@@ -23,7 +23,18 @@ import type { RandomOutfitItem } from "./random-outfit-builder";
 // Reads today's forecast and the preference log, so this page can't be static.
 export const dynamic = "force-dynamic";
 
-export default async function OutfitsPage() {
+/**
+ * `?tab`, `?items`, `?returnTo` and `?returnLabel` let another surface hand a
+ * look over for arranging and get the user back afterwards — the trip planner's
+ * "Edit this look" uses all four. Only relative paths are honoured for
+ * `returnTo`: it ends up in an href, and accepting an absolute URL from a query
+ * string is an open redirect.
+ */
+export default async function OutfitsPage({
+  searchParams,
+}: {
+  searchParams?: { tab?: string; items?: string; returnTo?: string; returnLabel?: string };
+}) {
   const user = await requireUser();
   const [items, layouts, dbUser, dailyContext, pending, notes] = await Promise.all([
     prisma.wardrobeItem.findMany({
@@ -117,6 +128,17 @@ export default async function OutfitsPage() {
         </Link>
       </nav>
       <OutfitStudio
+        initialTab={searchParams?.tab === "compose" || searchParams?.tab === "train" ? searchParams.tab : "generate"}
+        initialPieceIds={(searchParams?.items ?? "")
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean)}
+        returnTo={
+          searchParams?.returnTo?.startsWith("/") && !searchParams.returnTo.startsWith("//")
+            ? searchParams.returnTo
+            : null
+        }
+        returnLabel={searchParams?.returnLabel ?? "Back"}
         items={closetItems}
         colorOptions={colorOptions}
         initialOutfits={savedOutfits}

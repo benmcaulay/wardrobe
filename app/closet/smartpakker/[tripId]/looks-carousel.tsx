@@ -56,6 +56,15 @@ const SLIDE_HEIGHT = 460;
 /** How fast a click-to-select glides the ring round, in turns per second. */
 const SNAP_TURNS_PER_SECOND = 1.1;
 
+/** How much the focused look grows over its ring size. */
+const FOCUS_SCALE = 1.22;
+/** How far the rest of the ring recedes while one look is focused. */
+const FOCUS_DIM = 0.35;
+/** Pointer travel, in px, that turns the ring one full revolution. */
+const DRAG_PX_PER_TURN = 900;
+/** Movement past this counts as a drag rather than a click. */
+const DRAG_SLOP_PX = 4;
+
 export type LookDay = {
   /** 1-based day number. */
   day: number;
@@ -72,11 +81,14 @@ export function LooksCarousel({
   prefs,
   initialDay = 0,
   onClose,
+  onEditLook,
 }: {
   days: LookDay[];
   prefs: LookLayoutPrefs;
   initialDay?: number;
   onClose: () => void;
+  /** Open this look in the outfit composer. Given the day's piece ids. */
+  onEditLook?: (day: LookDay) => void;
 }) {
   const reduceMotion = useReducedMotion();
   const [mounted, setMounted] = useState(false);
@@ -100,6 +112,25 @@ export function LooksCarousel({
    */
   const holdUntilCentred = useRef(false);
   const [front, setFront] = useState(() => frontIndex(phase.current, count));
+  /**
+   * The look you have clicked into, if any.
+   *
+   * Focus is a separate idea from "front". Spinning brings a look to the front;
+   * clicking it says you want to look at *that one*, which stops the ring
+   * responding to the pointer and gives the look somewhere to put its own
+   * controls. Clicking anywhere off a slide lets go again.
+   */
+  const [focused, setFocused] = useState<number | null>(null);
+
+  /**
+   * Live drag state, in a ref because the rAF loop reads it every frame.
+   *
+   * Dragging exists because pointer-position spinning is hard to aim: the ring
+   * moves whenever the cursor moves, so there is no way to hold a position or
+   * to nudge by a known amount. A drag is a direct grip — the ring turns by how
+   * far you moved and stops when you let go.
+   */
+  const drag = useRef<{ pointerId: number; lastX: number; moved: boolean } | null>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
 
   const measure = useCallback((el: HTMLDivElement | null) => {
@@ -122,7 +153,11 @@ export function LooksCarousel({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      // Escape backs out one level: focus first, then the carousel.
+      if (e.key === "Escape") {
+        if (focusedRef.current != null) setFocused(null);
+        else onClose();
+      }
       if (e.key === "ArrowRight") spinTo((frontIndex(phase.current, count) + 1) % count);
       if (e.key === "ArrowLeft") spinTo((frontIndex(phase.current, count) - 1 + count) % count);
     }
@@ -134,6 +169,10 @@ export function LooksCarousel({
       document.body.style.overflow = previous;
     };
   }, [onClose, spinTo, count]);
+
+  /** Focus mirrored into a ref, so changing it does not restart the rAF loop. */
+  const focusedRef = useRef<number | null>(null);
+  focusedRef.current = focused;
 
   const radius = carouselRadius({ width: box.width || 1, slideWidth: SLIDE_WIDTH });
 
@@ -160,6 +199,12 @@ export function LooksCarousel({
         } else {
           phase.current = wrapPhase(phase.current + Math.sign(remaining) * step);
         }
+      } else if (drag.current != null) {
+        // Dragging owns the ring outright; the phase is advanced in the pointer
+        // handler where the delta is known, so there is nothing to do per frame.
+      } else if (focusedRef.current != null) {
+        // Focused: the ring holds still. Following the pointer here would spin
+        // the thing you just asked to look at off the front.
       } else if (pointerX.current != null && !reduceMotion) {
         const velocity = spinVelocity(pointerX.current, box.width);
         // A pick holds until you bring the cursor back to the middle.
@@ -174,8 +219,13 @@ export function LooksCarousel({
         const node = slideRefs.current[i];
         if (!node) continue;
         const slot = carouselSlot(i, count, { radiusX: radius, radiusY: 26, phase: phase.current });
-        node.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${slot.y.toFixed(1)}px, 0) scale(${slot.scale.toFixed(3)})`;
-        node.style.opacity = slot.opacity.toFixed(3);
+        const isFocused = focusedRef.current === i;
+        // The focused look grows and everything else recedes, so the ring reads
+        // as "one of these, chosen" rather than just "one of these, nearest".
+        const scale = isFocused ? slot.scale * FOCUS_SCALE : slot.scale;
+        const dim = focusedRef.current != null && !isFocused ? FOCUS_DIM : 1;
+        node.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${slot.y.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
+        node.style.opacity = (slot.opacity * dim).toFixed(3);
         node.style.zIndex = String(slot.zIndex);
         /*
          * The whole near side is clickable, not just the front slide — picking
@@ -231,8 +281,20 @@ export function LooksCarousel({
           {!current.complete ? " · nothing to wear" : ""}
         </span>
         <span className="ml-auto hidden text-[11px] text-ink-muted sm:block">
-          Move left or right to spin
+          {focused != null ? "Click away to unfocus" : "Drag to spin · click a look to focus"}
         </span>
+        {/* Only offered while focused: "edit this look" is meaningless without
+            a look chosen, and it lives in the header rather than on the slide so
+            it is not a drag target. */}
+        {focused != null && onEditLook ? (
+          <button
+            type="button"
+            onClick={() => onEditLook(days[Math.min(focused, count - 1)])}
+            className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm"
+          >
+            Edit this look
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
@@ -246,14 +308,52 @@ export function LooksCarousel({
       {/* The ring. Pointer position anywhere over this drives the spin. */}
       <div
         ref={measure}
+        onPointerDown={(e) => {
+          // Grab the ring. Captured so the drag survives the pointer leaving
+          // the element, and guarded because setPointerCapture throws for a
+          // pointer id the element never saw.
+          drag.current = { pointerId: e.pointerId, lastX: e.clientX, moved: false };
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            /* window-level move/up still track it */
+          }
+        }}
         onPointerMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           pointerX.current = e.clientX - rect.left;
+
+          const live = drag.current;
+          if (!live || live.pointerId !== e.pointerId) return;
+          const dx = e.clientX - live.lastX;
+          if (Math.abs(dx) > 0) live.lastX = e.clientX;
+          if (Math.abs(dx) >= DRAG_SLOP_PX) live.moved = true;
+          // Turn the ring by the distance dragged. Negated so the slide under
+          // the pointer follows the pointer rather than running from it.
+          phase.current = wrapPhase(phase.current - dx / DRAG_PX_PER_TURN);
+          target.current = null;
+        }}
+        onPointerUp={(e) => {
+          const live = drag.current;
+          drag.current = null;
+          if (!live) return;
+          // A drag that moved is not a click: leave focus alone and settle on
+          // whatever is now nearest the front.
+          if (live.moved) {
+            spinTo(frontIndex(phase.current, count));
+            return;
+          }
+          // A tap on the backdrop — not on a slide, whose own handler stops
+          // propagation — means "stop focusing".
+          setFocused(null);
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
         }}
         onPointerLeave={() => {
           pointerX.current = null;
         }}
-        className="relative min-h-0 flex-1 overflow-hidden"
+        className="relative min-h-0 flex-1 touch-none overflow-hidden"
       >
         {days.map((day, i) => (
           <div
@@ -272,9 +372,21 @@ export function LooksCarousel({
           >
             <button
               type="button"
-              onClick={() => spinTo(i)}
-              aria-label={`Show ${day.label}`}
+              onPointerUp={(e) => {
+                // Let a drag that happens to end over a slide stay a drag.
+                if (drag.current?.moved) return;
+                e.stopPropagation();
+                spinTo(i);
+                setFocused(i);
+              }}
+              onClick={() => {
+                // Keyboard activation, which sends no pointer events.
+                spinTo(i);
+                setFocused(i);
+              }}
+              aria-label={`Focus ${day.label}`}
               aria-current={i === front}
+              aria-pressed={focused === i}
               className="flex h-full w-full flex-col items-center justify-end"
             >
               <LookSlide day={day} prefs={prefs} />

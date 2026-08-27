@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CityPicker } from "@/components/city-picker";
 import { GearIcon } from "@/components/gear-icon";
 import { WorldMap } from "@/components/world-map";
@@ -489,6 +489,16 @@ export function TripPlanner({
     }
 
     const cold = climate ? ["cool", "cold"].includes(climate.band) || climate.rainChance >= 0.4 : false;
+    /*
+     * Outerwear also shows whenever it is actually in the bag.
+     *
+     * The cold/wet test alone meant a packed jacket vanished from every look on
+     * a warm trip — the plan silently ignoring a piece the user had put in the
+     * bag on purpose. Auto-pack does not pack outerwear for a warm trip, so the
+     * only way it is in there is a deliberate drag, and a deliberate drag is a
+     * statement of intent to wear it.
+     */
+    const outerwearPacked = packed.some((p) => p.bucket === "outerwear");
     return planDailyOutfits({
       packed,
       // The trip's dates know how long it is; the forecast is only needed to
@@ -496,7 +506,7 @@ export function TripPlanner({
       // unpinned destination produced a zero-day plan, which disabled the
       // Day-by-day panel and blamed it on unpacked clothes.
       days: climate?.days ?? tripDays,
-      includeOuterwear: cold,
+      includeOuterwear: cold || outerwearPacked,
       wearMultiplier: wearMultiplier(requirements),
       occasionByDay,
     });
@@ -515,7 +525,23 @@ export function TripPlanner({
   /* ------------------------------------------------------------ pack mode --- */
 
   const [packOpen, setPackOpen] = useState(false);
-  const [looksOpen, setLooksOpen] = useState(false);
+  /**
+   * Returning from the composer reopens the carousel on the look you left.
+   *
+   * `?look=<day>` is written into the return URL when Edit is pressed, so the
+   * round trip lands you back where you were rather than on the trip page with
+   * the carousel closed. Read once, from the initial URL, so closing the
+   * carousel does not immediately reopen it.
+   */
+  const searchParams = useSearchParams();
+  const returningToLook = useMemo(() => {
+    const raw = searchParams.get("look");
+    if (!raw) return null;
+    const day = Number.parseInt(raw, 10);
+    return Number.isFinite(day) && day > 0 ? day : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [looksOpen, setLooksOpen] = useState(returningToLook != null);
   const [activeBagId, setActiveBagId] = useState<string>(bags[0]?.id ?? NONE);
 
   const itemCandidate = useCallback(
@@ -976,7 +1002,23 @@ export function TripPlanner({
         <LooksCarousel
           days={lookDays}
           prefs={lookPrefs}
+          initialDay={returningToLook != null ? returningToLook - 1 : 0}
           onClose={() => setLooksOpen(false)}
+          onEditLook={(day) => {
+            /*
+             * Hand the look to the outfit composer, and tell it how to get back.
+             * `returnTo` carries the trip URL plus the day, so the button on the
+             * other side returns to this trip with the carousel reopened on the
+             * same look rather than dropping the user on the trip page.
+             */
+            const params = new URLSearchParams({
+              tab: "compose",
+              items: day.pieces.map((p) => p.id).join(","),
+              returnTo: `/closet/smartpakker/${trip.id}?look=${day.day}`,
+              returnLabel: `Back to ${trip.destination || "trip"}`,
+            });
+            router.push(`/closet/outfits?${params.toString()}`);
+          }}
         />
       ) : null}
     </AnimatePresence>

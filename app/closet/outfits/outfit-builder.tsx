@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { builtinSlotLayout } from "@/lib/outfit-slot-defaults";
 import { isNoneCategoryStored, NONE_CATEGORY } from "@/lib/categories";
 import {
   MultiSelectFilter,
@@ -47,6 +48,12 @@ type Props = {
   items: OutfitClosetItem[];
   colorOptions: Color[];
   initialOutfits: SavedOutfit[];
+  /**
+   * Item ids to open with, handed over from elsewhere — the trip planner's
+   * "Edit this look" passes the pieces of one day's outfit so they can be
+   * arranged here. Seeded once on mount; afterwards the canvas is the user's.
+   */
+  initialPieceIds?: string[];
 };
 export type { SavedOutfit };
 const BASE_PIECE_SIZE = 180;
@@ -86,7 +93,7 @@ function toFilterable(item: OutfitClosetItem): ClosetFilterableItem {
   };
 }
 
-export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
+export function OutfitBuilder({ items, colorOptions, initialOutfits, initialPieceIds }: Props) {
   const [pieces, setPieces] = useState<PlacedPiece[]>([]);
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [frameHeight, setFrameHeight] = useState(1000);
@@ -224,20 +231,88 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
     return out;
   }
 
-  async function addPiece(item: OutfitClosetItem) {
+  async function addPiece(item: OutfitClosetItem, placement?: { x: number; y: number }) {
     await getProcessedUrl(item);
     const id = crypto.randomUUID();
     const piece: PlacedPiece = {
       id,
       itemId: item.id,
-      x: FRAME_WIDTH / 2,
-      y: frameHeight / 2,
+      x: placement?.x ?? FRAME_WIDTH / 2,
+      y: placement?.y ?? frameHeight / 2,
       scale: 1,
       z: nextZ(),
     };
     setPieces((prev) => [...prev, piece]);
     setSelectedPieceId(id);
   }
+
+  /**
+   * Seed the canvas from a handed-over look.
+   *
+   * Runs after mount rather than in the initial state because placing a piece
+   * needs its processed (background-removed) image, which is async.
+   *
+   * The guard records the id list only once the loop *finishes*. Marking it up
+   * front looked equivalent and was not: in development React mounts, cleans
+   * up, and mounts again, so the first pass was cancelled after a single piece
+   * and the second pass skipped itself — one garment on the canvas instead of
+   * four. Clearing the canvas first makes the retry idempotent rather than
+   * additive.
+   */
+  const seededIds = useRef<string | null>(null);
+  useEffect(() => {
+    const ids = initialPieceIds ?? [];
+    const key = ids.join(",");
+    if (key === "" || seededIds.current === key) return;
+
+    let cancelled = false;
+    void (async () => {
+      const chosen = ids
+        .map((id) => items.find((item) => item.id === id))
+        .filter((item): item is OutfitClosetItem => item !== undefined);
+      if (chosen.length === 0) return;
+
+      /*
+       * Build the whole canvas locally, then commit it in one setPieces.
+       *
+       * Adding piece by piece looked simpler and raced: the development
+       * double-mount cancels the first pass mid-loop, and a setPieces it had
+       * already issued landed after the second pass had cleared the canvas —
+       * leaving the same garment on the frame twice. One atomic write cannot
+       * interleave, so a cancelled pass leaves no trace at all.
+       *
+       * Each piece goes to its category's slot rather than the frame centre,
+       * which is what a manual add uses. A handed-over look should arrive
+       * looking like the look, not as four garments stacked on one spot.
+       */
+      const usedPerCategory = new Map<string, number>();
+      const placed: PlacedPiece[] = [];
+      for (const [i, item] of chosen.entries()) {
+        if (cancelled) return;
+        await getProcessedUrl(item);
+        const category = item.category ?? "";
+        const index = usedPerCategory.get(category) ?? 0;
+        usedPerCategory.set(category, index + 1);
+        const slot = builtinSlotLayout([category], index, FRAME_WIDTH, frameHeight);
+        placed.push({
+          id: crypto.randomUUID(),
+          itemId: item.id,
+          x: slot.x,
+          y: slot.y,
+          scale: 1,
+          z: i + 1,
+        });
+      }
+      if (cancelled) return;
+      setPieces(placed);
+      setSelectedPieceId(null);
+      seededIds.current = key;
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPieceIds, items]);
 
   function updateSelectedScale(scale: number) {
     if (!selected) return;

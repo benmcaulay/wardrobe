@@ -11,6 +11,7 @@
  * trainer.
  */
 
+import Link from "next/link";
 import { useCallback, useState, useTransition } from "react";
 import { OutfitBuilder, type SavedOutfit } from "./outfit-builder";
 import { RandomOutfitBuilder, type RandomOutfitItem } from "./random-outfit-builder";
@@ -28,6 +29,16 @@ import { addStyleNote, deactivateStyleNote, type SavedNote } from "@/lib/actions
 
 type Tab = "generate" | "compose" | "train";
 
+/** Params another surface can hand over — see app/closet/outfits/page.tsx. */
+type HandoffProps = {
+  initialTab?: Tab;
+  /** Item ids to seed the composer with, e.g. the pieces of a trip look. */
+  initialPieceIds?: string[];
+  /** Relative path back to wherever the user came from, or null. */
+  returnTo?: string | null;
+  returnLabel?: string;
+};
+
 const TAB_LABELS: Record<Tab, string> = {
   generate: "Smart Generator",
   compose: "Manual compose",
@@ -41,7 +52,7 @@ const TAB_BLURB: Record<Tab, string> = {
   train: "Answer a few rounds, or just tell me a rule. Everything else here gets sharper.",
 };
 
-type Props = {
+type Props = HandoffProps & {
   items: RandomOutfitItem[];
   colorOptions: Color[];
   initialOutfits: SavedOutfit[];
@@ -59,6 +70,10 @@ type Props = {
 };
 
 export function OutfitStudio({
+  initialTab = "generate",
+  initialPieceIds,
+  returnTo = null,
+  returnLabel = "Back",
   items,
   colorOptions,
   initialOutfits,
@@ -74,7 +89,7 @@ export function OutfitStudio({
   initialNotes,
   temperatureUnit,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("generate");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [notes, setNotes] = useState<SavedNote[]>(initialNotes);
   const [noteBusy, startNoteTransition] = useTransition();
 
@@ -119,6 +134,19 @@ export function OutfitStudio({
 
   return (
     <div className="space-y-6">
+      {/*
+        The way back, when another surface sent the user here. Above the heading
+        and always visible: arriving mid-task from a trip and having to find your
+        own way back through the closet nav is the failure this prevents.
+      */}
+      {returnTo ? (
+        <Link
+          href={returnTo}
+          className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm"
+        >
+          ← {returnLabel}
+        </Link>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <header>
           <h1 className="font-serif text-4xl tracking-tight">Outfits</h1>
@@ -151,7 +179,12 @@ export function OutfitStudio({
           }
         />
       ) : tab === "compose" ? (
-        <OutfitBuilder items={items} colorOptions={colorOptions} initialOutfits={initialOutfits} />
+        <OutfitBuilder
+          items={items}
+          colorOptions={colorOptions}
+          initialOutfits={initialOutfits}
+          initialPieceIds={initialPieceIds}
+        />
       ) : (
         <StylistTrainer
           items={items}
