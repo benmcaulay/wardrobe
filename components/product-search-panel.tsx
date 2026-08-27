@@ -106,50 +106,91 @@ export function ProductSearchPanel({
       )}
 
       {results.length > 0 && (
-        <ul className="max-h-64 overflow-y-auto space-y-2 pr-1">
-          {results.map((m) => {
-            const selected = selectedUrl === m.url;
-            return (
-              <li key={m.url}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(m)}
-                  className={`w-full flex items-center gap-3 rounded-xl border p-2 text-left transition ${
-                    selected
-                      ? "border-ink bg-white ring-1 ring-ink"
-                      : "border-ink/10 bg-white hover:border-ink/25"
-                  }`}
-                >
-                  <div className="w-12 h-12 rounded-lg overflow-hidden bg-paper-warm flex-shrink-0">
-                    {m.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[10px] text-ink-muted">
-                        —
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm truncate">{m.name}</div>
-                    <div className="text-[11px] text-ink-muted truncate">
-                      {m.retailer}
-                      {m.priceCents > 0
-                        ? ` · ${formatPrice(m.priceCents, m.currency)}`
-                        : ""}
+        <>
+          {/*
+            A grid rather than a list of rows. The old layout gave each result a
+            48px square with object-cover, which both shrank the photo and
+            cropped it — you could not tell a full product shot from a detail
+            crop, which is the only judgement that matters when picking a
+            reference. Thumbnails come back 245–686px square, so a ~180px tile
+            is well within their resolution.
+          */}
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 max-h-[26rem] overflow-y-auto pr-1">
+            {results.map((m) => {
+              const selected = selectedUrl === m.url;
+              return (
+                <li key={m.url}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(m)}
+                    className={`group w-full overflow-hidden rounded-xl border bg-white text-left transition ${
+                      selected
+                        ? "border-ink ring-1 ring-ink"
+                        : "border-ink/10 hover:border-ink/30"
+                    }`}
+                  >
+                    <div className="relative aspect-square bg-paper-warm">
+                      {m.thumbnailUrl ? (
+                        // object-contain, not cover: the whole product has to be
+                        // visible for the user to judge whether it is a usable
+                        // reference. Padding keeps it off the tile edge.
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.thumbnailUrl}
+                          alt=""
+                          loading="lazy"
+                          className="h-full w-full object-contain p-2 transition group-hover:scale-[1.03]"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-[10px] text-ink-muted">
+                          no photo
+                        </div>
+                      )}
+                      {selected && (
+                        <span className="absolute right-1.5 top-1.5 rounded-full bg-ink px-2 py-0.5 text-[10px] uppercase tracking-wide text-paper">
+                          Selected
+                        </span>
+                      )}
                     </div>
-                  </div>
-                  {selected && (
-                    <span className="text-[10px] uppercase tracking-wide text-ink-muted shrink-0">
-                      Selected
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                    <div className="space-y-0.5 border-t border-ink/10 px-2.5 py-2">
+                      <div className="line-clamp-2 text-xs leading-snug">{m.name}</div>
+                      {/*
+                        Price on its own row and never truncated. Sharing a line
+                        with the retailer meant a long seller name ("Joe's New
+                        Balance Outlet") clipped the price to "$109…", losing the
+                        one number the user is comparing across results.
+                      */}
+                      <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-muted">
+                        <span className="truncate">{m.retailer}</span>
+                        {m.priceCents > 0 && (
+                          <span className="shrink-0 tabular-nums text-ink">
+                            {formatPrice(m.priceCents, m.currency)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/*
+            What actually makes a good reference, which is not what people
+            assume. A single shoe is fine: the ghost prompt treats the reference
+            as identity-only and rebuilds the pair, verified against a toe-on
+            single-shoe listing. Resolution and a clean background are what carry
+            through, so that is what the hint points at.
+          */}
+          <p className="text-[11px] leading-relaxed text-ink-muted">
+            Pick the clearest photo of the item itself — sharp, well lit, plain
+            background, nothing else in frame. A single shoe is fine; the catalog
+            render rebuilds the pair. Avoid photos worn by a model, flat-lays with
+            props, or collages.
+          </p>
+        </>
       )}
+
     </div>
   );
 }

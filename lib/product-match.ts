@@ -65,7 +65,24 @@ function trustedScrape(scraped: ProductMetadata | null | undefined): ProductMeta
  */
 export async function resolveProductMetadata(match: ProductMatch): Promise<ProductMetadata | null> {
   const immersive = await tryImmersiveProductMetadata(match.immersiveProductPageToken);
-  if (immersive?.name) return immersive;
+  if (immersive?.name) {
+    // Immersive returns specs, a price, and the merchant link — but never an
+    // image (`imageUrls` is always empty). The merchant page does have one, at
+    // full resolution, so follow the link it just gave us and read og:image /
+    // JSON-LD off it. Without this hop the importer falls back to the search
+    // thumbnail, which is as small as 245px.
+    if (immersive.imageUrls.length === 0 && immersive.productUrl && !isAggregatorProductUrl(immersive.productUrl)) {
+      try {
+        const scraped = trustedScrape(await scrapeProduct(immersive.productUrl));
+        if (scraped && scraped.imageUrls.length > 0) {
+          return { ...immersive, imageUrls: scraped.imageUrls };
+        }
+      } catch {
+        /* the immersive metadata is still good on its own */
+      }
+    }
+    return immersive;
+  }
 
   if (!match.url) return null;
 
