@@ -151,21 +151,35 @@ export function PackMode({
   const bag = bags.find((b) => b.id === activeBagId) ?? bags[0];
   const contents = bag ? contentsOf(bag.id) : [];
 
+  /** The orbit stage element, so a drop can be measured against it. */
+  const stageEl = useRef<HTMLDivElement | null>(null);
+
   /**
-   * Where each piece was released, in client coordinates, keyed by content key.
+   * Where each piece was released, as an offset from the centre of the orbit
+   * stage, keyed by content key.
    *
-   * A ref rather than state: the arrival animation reads it once when it starts
-   * and re-rendering on drop would be pointless work. Written here because this
-   * is where the drag layer reports the release, read in BagStage where the
-   * orbit lives.
+   * Stored as an **offset**, converted here at the moment of release, rather
+   * than as client coordinates converted later. Packing a piece removes its row
+   * from the rail above, so the list shrinks and everything below it shifts up —
+   * measuring the stage after that re-render puts the release point and the
+   * stage centre in different frames, and the arrival starts ~32px off.
+   *
+   * A ref rather than state: the animation reads it once when it starts, and
+   * re-rendering the stage on drop would be pointless work.
    */
-  const releasePoints = useRef(new Map<string, { x: number; y: number }>());
+  const releaseOffsets = useRef(new Map<string, { dx: number; dy: number }>());
 
   const handleDrop = useCallback(
     (payload: DragPayload, zoneId: string, point: { x: number; y: number }) => {
       // Only an arrival into a bag animates; dragging out to the rail does not.
       if (zoneId !== RAIL_ZONE) {
-        releasePoints.current.set(`${payload.kind}:${payload.id}`, point);
+        const rect = stageEl.current?.getBoundingClientRect();
+        if (rect) {
+          releaseOffsets.current.set(`${payload.kind}:${payload.id}`, {
+            dx: point.x - (rect.left + rect.width / 2),
+            dy: point.y - (rect.top + rect.height / 2),
+          });
+        }
       }
       onDrop(payload, zoneId);
     },
@@ -283,7 +297,8 @@ export function PackMode({
         <BagStage
           bag={bag}
           contents={contents}
-          releasePoints={releasePoints}
+          stageEl={stageEl}
+          releaseOffsets={releaseOffsets}
           onAdjustSize={onAdjustSize}
           onSetDailyWear={onSetDailyWear}
         />
@@ -579,14 +594,17 @@ function RailRow({
 function BagStage({
   bag,
   contents,
-  releasePoints,
+  stageEl,
+  releaseOffsets,
   onAdjustSize,
   onSetDailyWear,
 }: {
   bag: PackBag;
   contents: PackCandidate[];
-  /** Release point per content key, written by PackMode's drop handler. */
-  releasePoints: MutableRefObject<Map<string, { x: number; y: number }>>;
+  /** Shared with PackMode so a drop can be measured against the stage. */
+  stageEl: MutableRefObject<HTMLDivElement | null>;
+  /** Release offset from the stage centre, per content key. */
+  releaseOffsets: MutableRefObject<Map<string, { dx: number; dy: number }>>;
   onAdjustSize: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
   onSetDailyWear: (itemId: string, dailyWear: boolean | null) => void;
 }) {
@@ -594,7 +612,6 @@ function BagStage({
   const [adjusting, setAdjusting] = useState<PackCandidate | null>(null);
   const reduceMotion = useReducedMotion();
   const { ref: dropRef, isOver, incoming } = useDropZone(bag.id);
-  const stage = useRef<HTMLDivElement | null>(null);
   const planetRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [box, setBox] = useState({ width: 0, height: 0 });
   /** Animation clock, kept across content changes so the system never resets. */
@@ -617,14 +634,14 @@ function BagStage({
   // Keep both refs: one for the drop-zone registry, one to measure the stage.
   const setStage = useCallback(
     (el: HTMLDivElement | null) => {
-      stage.current = el;
+      stageEl.current = el;
       dropRef(el);
     },
-    [dropRef],
+    [dropRef, stageEl],
   );
 
   useEffect(() => {
-    const el = stage.current;
+    const el = stageEl.current;
     if (!el) return;
     const measure = () => setBox({ width: el.clientWidth, height: el.clientHeight });
     measure();
@@ -672,25 +689,15 @@ function BagStage({
       const orbit = orbits[i];
       if (!orbit) continue;
 
-      // Client coordinates from the drop, expressed as offsets from the centre
-      // of the stage, which is what the orbit system measures from.
-      const released = releasePoints.current.get(key);
-      // Measured now rather than from the ResizeObserver box, which tracks size
-      // but not page position — and the offset has to be from the stage's centre
-      // on screen at the moment of the drop.
-      const rect = stage.current?.getBoundingClientRect();
-      const start =
-        released && rect
-          ? captureStartFromPoint(
-              orbit,
-              released.x - (rect.left + rect.width / 2),
-              released.y - (rect.top + rect.height / 2),
-            )
-          : // No release point — an auto-pack, or a drop we did not see. Fall
-            // back to arriving from outside on the orbit's own angle.
-            { turns: orbit.offset, radiusScale: 2 };
+      // Already an offset from the stage centre, converted at release time.
+      const released = releaseOffsets.current.get(key);
+      const start = released
+        ? captureStartFromPoint(orbit, released.dx, released.dy)
+        : // No release offset — an auto-pack, or a drop we did not see. Arrive
+          // from outside on the orbit's own angle.
+          { turns: orbit.offset, radiusScale: 2 };
       captures.current.set(key, { elapsed: 0, start });
-      releasePoints.current.delete(key);
+      releaseOffsets.current.delete(key);
     }
     // Forget removed items so an unpack/repack starts a fresh capture.
     seenKeys.current = new Set(keys);
