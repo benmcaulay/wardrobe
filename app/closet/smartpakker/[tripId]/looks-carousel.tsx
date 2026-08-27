@@ -24,6 +24,7 @@ import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { Close } from "@/components/icons";
 import { useCutout } from "@/lib/use-cutout";
+import { itemTileTransformSuffix, type ItemTileMeta } from "@/lib/item-tile-meta";
 import {
   carouselRadius,
   carouselSlot,
@@ -73,7 +74,14 @@ export type LookDay = {
   rewear: boolean;
   /** "Beach", "Formal event"… when the day belongs to an activity. */
   activity?: string | null;
-  pieces: { id: string; category: string; imagePath: string; name: string }[];
+  pieces: {
+    id: string;
+    category: string;
+    imagePath: string;
+    name: string;
+    /** Flip and zoom saved on the item, applied so looks match the closet. */
+    tile?: ItemTileMeta;
+  }[];
 };
 
 export function LooksCarousel({
@@ -490,6 +498,7 @@ function LookSlide({ day, prefs }: { day: LookDay; prefs: LookLayoutPrefs }) {
             piece={piece}
             imagePath={byId.get(piece.id)?.imagePath}
             name={byId.get(piece.id)?.name ?? ""}
+            tile={byId.get(piece.id)?.tile}
           />
         ))}
       </span>
@@ -502,10 +511,12 @@ function LookPieceImage({
   piece,
   imagePath,
   name,
+  tile,
 }: {
   piece: PlacedPiece;
   imagePath: string | undefined;
   name: string;
+  tile?: ItemTileMeta;
 }) {
   const cutout = useCutout(imagePath);
   if (!cutout) return null;
@@ -524,7 +535,9 @@ function LookPieceImage({
         width: PIECE_SIZE,
         height: PIECE_SIZE,
         zIndex: piece.z,
-        transform: `translate(-50%, -50%) scale(${piece.scale})`,
+        // The look's own placement, then the item's saved framing, composed in
+        // that order so a flip mirrors the garment rather than its position.
+        transform: `translate(-50%, -50%) scale(${piece.scale})${itemTileTransformSuffix(tile)}`,
       }}
       className="pointer-events-none select-none object-contain"
     />

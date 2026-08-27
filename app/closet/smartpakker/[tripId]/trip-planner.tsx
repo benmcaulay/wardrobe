@@ -45,6 +45,7 @@ import { PLANE_FLIGHT_MS } from "@/lib/packing/planner-view";
 import { SpaceTile } from "@/components/space-tile";
 import { thumbnailUrl } from "@/lib/image-paths";
 import { easeOutExpo } from "@/lib/ui-motion";
+import { type ItemTileMeta } from "@/lib/item-tile-meta";
 import { CapacityMeter } from "./capacity-meter";
 import { CollapsibleSection, PanelStateProvider, usePanels } from "./collapsible-section";
 import { LooksCarousel, type LookDay } from "./looks-carousel";
@@ -85,6 +86,8 @@ export type PlannerItem = {
   id: string;
   name: string;
   imagePath: string;
+  /** How the item's thumbnail is framed — flip and zoom, saved on the item. */
+  tile: ItemTileMeta;
   category: string;
   /** Matched against the activity needs in lib/packing/requirements.ts. */
   subcategory: string | null;
@@ -552,6 +555,7 @@ export function TripPlanner({
         id: item.id,
         name: item.name,
         imagePath: item.imagePath,
+        tile: item.tile,
         group: BUCKET_LABELS[item.bucket],
         volumeLiters: est?.volumeLiters ?? item.volumeLiters,
         weightGrams: est?.weightGrams ?? item.weightGrams,
@@ -695,6 +699,7 @@ export function TripPlanner({
               category: (i as PlannerItem).category,
               imagePath: (i as PlannerItem).imagePath,
               name: (i as PlannerItem).name,
+              tile: (i as PlannerItem).tile,
             })),
         };
       }),

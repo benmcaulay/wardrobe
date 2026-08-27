@@ -22,6 +22,7 @@
 
 import { useEffect, useRef } from "react";
 import { thumbnailUrl } from "@/lib/image-paths";
+import { itemTileImageTransform, type ItemTileMeta } from "@/lib/item-tile-meta";
 import { useCutout } from "@/lib/use-cutout";
 import { FLY_IN_DURATION_MS, flyInFrame, flyInProgress } from "@/lib/packing/fly-in";
 
@@ -31,6 +32,8 @@ export type FlyIn = {
   /** Client coordinates of the release. */
   release: { x: number; y: number };
   imagePath: string | null;
+  /** The item's saved flip/zoom, so the flight matches the landed piece. */
+  tile?: ItemTileMeta;
   /** Size to draw, matched to the orbiting pieces. */
   size: number;
 };
@@ -103,7 +106,12 @@ export function FlyInLayer({
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" className="h-full w-full object-contain drop-shadow-lg" />
+        <img
+          src={src}
+          alt=""
+          style={flight.tile ? { transform: itemTileImageTransform(flight.tile) } : undefined}
+          className="h-full w-full object-contain drop-shadow-lg"
+        />
       ) : (
         <div className="h-full w-full rounded-full bg-ink/20" />
       )}

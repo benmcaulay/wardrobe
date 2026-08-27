@@ -26,6 +26,7 @@ import { GearIcon } from "@/components/gear-icon";
 import { Close, Search } from "@/components/icons";
 import { PlaneRoute } from "@/components/plane-route";
 import { thumbnailUrl } from "@/lib/image-paths";
+import { itemTileImageTransform, type ItemTileMeta } from "@/lib/item-tile-meta";
 import { useCutout } from "@/lib/use-cutout";
 import { formatVolume, formatWeight } from "@/lib/packing/estimate";
 import { occasionLabel, type OccasionKind } from "@/lib/packing/occasion";
@@ -54,11 +55,19 @@ import {
  */
 export const RAIL_ZONE = "__rail__";
 
+/** No flip, no zoom — for gear, which has no photo to frame. */
+const IDENTITY_TILE: ItemTileMeta = { mirror: false, thumbZoom: 1 };
+
 /** How long an arriving piece takes to surface in its orbit after landing. */
 const REVEAL_FADE_MS = 260;
 
 /** Anything you can put in a bag, garment or gear, flattened for the rail. */
 export type PackCandidate = {
+  /**
+   * Thumbnail framing saved on the item — a flip or a zoom set in the item
+   * editor. Optional because gear has no photo to frame.
+   */
+  tile?: ItemTileMeta;
   kind: "item" | "gear";
   id: string;
   name: string;
@@ -176,12 +185,14 @@ export function PackMode({
           key: `${payload.kind}:${payload.id}`,
           release: point,
           imagePath: payload.imagePath ?? null,
+          // Framed in flight too, so the piece doesn't flip on landing.
+          tile: candidates.find((c) => c.kind === payload.kind && c.id === payload.id)?.tile,
           size: ITEM_SIZE,
         });
       }
       onDrop(payload, zoneId);
     },
-    [onDrop],
+    [onDrop, candidates],
   );
 
   const groups = useMemo(() => {
@@ -493,6 +504,7 @@ function RailRow({
             src={thumbnailUrl(candidate.imagePath)}
             alt=""
             draggable={false}
+            style={{ transform: itemTileImageTransform(candidate.tile ?? IDENTITY_TILE) }}
             className="pointer-events-none h-full w-full object-cover"
           />
         ) : (
@@ -968,6 +980,9 @@ function Planet({
             src={cutout}
             alt={entry.name}
             draggable={false}
+            // Same framing the closet grid applies, so a piece you flipped or
+            // zoomed looks the same here as where you edited it.
+            style={{ transform: itemTileImageTransform(entry.tile ?? IDENTITY_TILE) }}
             className="pointer-events-none h-full w-full object-contain drop-shadow-sm"
           />
         ) : (

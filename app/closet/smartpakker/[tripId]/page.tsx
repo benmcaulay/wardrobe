@@ -1,3 +1,4 @@
+import { readItemTileMeta } from "@/lib/item-tile-meta";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -58,6 +59,11 @@ export default async function TripPage({ params }: { params: { tripId: string } 
         colors: true,
         originalImagePath: true,
         ghostImagePath: true,
+        // Thumbnail framing, so a flip or zoom saved on the item shows up here
+        // too rather than only in the closet grid.
+        ghostViews: true,
+        originalMirror: true,
+        originalThumbZoom: true,
         weightGrams: true,
         volumeLiters: true,
         priceCents: true,
@@ -95,6 +101,9 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       id: r.id,
       name: r.name,
       imagePath: r.ghostImagePath ?? r.originalImagePath,
+      // Resolved with the same helper the closet grid and the outfit canvas use,
+      // so all three agree on how a piece is framed.
+      tile: readItemTileMeta(r),
       category: r.category,
       bucket: bucketFor(r),
       colors: parseColors(r.colors),

@@ -41,6 +41,23 @@ export function readItemTileMeta(item: {
   };
 }
 
+/**
+ * The same framing as a *suffix*, for elements that already have a transform.
+ *
+ * Separate from `itemTileImageTransform` because that function's unframed
+ * answer is the keyword `none`, which is only legal as an entire transform —
+ * appending it to a list of functions invalidates the whole declaration and
+ * silently drops the positioning it was appended to. This returns "" instead,
+ * so `translate(...) scale(...)${suffix}` is always valid.
+ */
+export function itemTileTransformSuffix(
+  meta: Pick<ItemTileMeta, "thumbZoom" | "mirror"> | null | undefined,
+): string {
+  if (!meta) return "";
+  const t = itemTileImageTransform(meta);
+  return t === "none" ? "" : ` ${t}`;
+}
+
 /** CSS transform for closet tiles and outfit canvas pieces (matches item editor). */
 export function itemTileImageTransform(meta: Pick<ItemTileMeta, "thumbZoom" | "mirror">): string {
   const parts: string[] = [];
