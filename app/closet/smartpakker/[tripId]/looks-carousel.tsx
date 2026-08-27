@@ -130,7 +130,20 @@ export function LooksCarousel({
    * to nudge by a known amount. A drag is a direct grip — the ring turns by how
    * far you moved and stops when you let go.
    */
-  const drag = useRef<{ pointerId: number; lastX: number; moved: boolean } | null>(null);
+  const drag = useRef<{
+    pointerId: number;
+    lastX: number;
+    moved: boolean;
+    /**
+     * Which look the press started on, or null for the backdrop.
+     *
+     * Read from the pointerdown target and remembered, because the ring
+     * captures the pointer: from that moment every later event for this pointer
+     * retargets to the ring, so a slide's own pointerup never fires and the
+     * press target is the only record of what was actually pressed.
+     */
+    downIndex: number | null;
+  } | null>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
 
   const measure = useCallback((el: HTMLDivElement | null) => {
@@ -312,7 +325,14 @@ export function LooksCarousel({
           // Grab the ring. Captured so the drag survives the pointer leaving
           // the element, and guarded because setPointerCapture throws for a
           // pointer id the element never saw.
-          drag.current = { pointerId: e.pointerId, lastX: e.clientX, moved: false };
+          const slide = (e.target as Element | null)?.closest?.("[data-look-index]");
+          const attr = slide?.getAttribute("data-look-index");
+          drag.current = {
+            pointerId: e.pointerId,
+            lastX: e.clientX,
+            moved: false,
+            downIndex: attr == null ? null : Number.parseInt(attr, 10),
+          };
           try {
             e.currentTarget.setPointerCapture(e.pointerId);
           } catch {
@@ -333,7 +353,7 @@ export function LooksCarousel({
           phase.current = wrapPhase(phase.current - dx / DRAG_PX_PER_TURN);
           target.current = null;
         }}
-        onPointerUp={(e) => {
+        onPointerUp={() => {
           const live = drag.current;
           drag.current = null;
           if (!live) return;
@@ -343,9 +363,13 @@ export function LooksCarousel({
             spinTo(frontIndex(phase.current, count));
             return;
           }
-          // A tap on the backdrop — not on a slide, whose own handler stops
-          // propagation — means "stop focusing".
-          setFocused(null);
+          // A tap. On a look it focuses that look; on the backdrop it lets go.
+          if (live.downIndex != null && Number.isFinite(live.downIndex)) {
+            spinTo(live.downIndex);
+            setFocused(live.downIndex);
+          } else {
+            setFocused(null);
+          }
         }}
         onPointerCancel={() => {
           drag.current = null;
@@ -372,15 +396,15 @@ export function LooksCarousel({
           >
             <button
               type="button"
-              onPointerUp={(e) => {
-                // Let a drag that happens to end over a slide stay a drag.
-                if (drag.current?.moved) return;
-                e.stopPropagation();
-                spinTo(i);
-                setFocused(i);
-              }}
-              onClick={() => {
-                // Keyboard activation, which sends no pointer events.
+              data-look-index={i}
+              onClick={(e) => {
+                /*
+                 * Keyboard only. A mouse click is already handled on the ring
+                 * from the pointerdown target, and `detail` distinguishes the
+                 * two: it counts clicks for a real pointer and is 0 when the
+                 * click came from Enter or Space.
+                 */
+                if (e.detail !== 0) return;
                 spinTo(i);
                 setFocused(i);
               }}
@@ -485,6 +509,7 @@ function LookPieceImage({
 }) {
   const cutout = useCutout(imagePath);
   if (!cutout) return null;
+
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
