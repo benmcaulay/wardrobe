@@ -31,6 +31,9 @@ import { formatVolume, formatWeight } from "@/lib/packing/estimate";
 import { occasionLabel, type OccasionKind } from "@/lib/packing/occasion";
 import {
   BAG_Z,
+  CAPTURE_DURATION_MS,
+  captureProgress,
+  captureSlot,
   orbitRadii,
   phaseAt,
   planetOrbits,
@@ -571,6 +574,18 @@ function BagStage({
   const elapsed = useRef(0);
   const lastFrame = useRef<number | null>(null);
   const hovering = useRef(false);
+  /**
+   * Items mid-capture, keyed by content key, each holding how long its arrival
+   * animation has been running.
+   *
+   * A ref rather than state: this changes every frame, and re-rendering the
+   * whole stage 60 times a second to move some transforms would be wasteful —
+   * the rAF loop already writes styles directly for exactly that reason. A
+   * `Map` keyed by content rather than by index because packing or unpacking
+   * anything reshuffles the indices, and a capture must follow its own item.
+   */
+  const captures = useRef(new Map<string, number>());
+  const seenKeys = useRef<Set<string> | null>(null);
 
   // Keep both refs: one for the drop-zone registry, one to measure the stage.
   const setStage = useCallback(
@@ -613,6 +628,29 @@ function BagStage({
   }, [keySignature, box.width, box.height]);
 
   /**
+   * Start a capture for every key that has just appeared.
+   *
+   * The first render is deliberately exempt: on opening Pack mode everything
+   * already in the bag would otherwise fly in at once, which reads as a glitch
+   * rather than as an arrival. Only genuinely new items are captured.
+   */
+  useEffect(() => {
+    const keys = keySignature ? keySignature.split("|") : [];
+    if (seenKeys.current === null) {
+      seenKeys.current = new Set(keys);
+      return;
+    }
+    for (const key of keys) {
+      if (!seenKeys.current.has(key)) captures.current.set(key, 0);
+    }
+    // Forget removed items so an unpack/repack starts a fresh capture.
+    seenKeys.current = new Set(keys);
+    for (const key of [...captures.current.keys()]) {
+      if (!keys.includes(key)) captures.current.delete(key);
+    }
+  }, [keySignature]);
+
+  /**
    * One rAF loop writes every planet's transform.
    *
    * The clock lives in a ref, not a local. This effect re-runs whenever the
@@ -639,7 +677,25 @@ function BagStage({
       for (let i = 0; i < orbits.length; i += 1) {
         const node = planetRefs.current[i];
         if (!node) continue;
-        const slot = planetSlot(orbits[i], phase);
+        // A capturing item flies its arrival trajectory; everyone else holds
+        // their steady orbit. The trajectory ends exactly on the steady slot,
+        // so the switch-over is invisible.
+        const key = contentKeys[i];
+        const captureElapsed = key === undefined ? undefined : captures.current.get(key);
+        let slot;
+        if (captureElapsed !== undefined && !reduceMotion) {
+          const next = captureElapsed + dt;
+          if (next >= CAPTURE_DURATION_MS) {
+            captures.current.delete(key!);
+            slot = planetSlot(orbits[i], phase);
+          } else {
+            captures.current.set(key!, next);
+            slot = captureSlot(orbits[i], captureProgress(next), phase);
+          }
+        } else {
+          if (captureElapsed !== undefined) captures.current.delete(key!);
+          slot = planetSlot(orbits[i], phase);
+        }
         node.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${slot.y.toFixed(1)}px, 0) scale(${slot.scale.toFixed(3)})`;
         // Hovering brightens the system without stopping it.
         node.style.opacity = String(lift ? Math.min(1, slot.opacity + 0.15) : slot.opacity);
