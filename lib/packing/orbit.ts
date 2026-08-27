@@ -174,191 +174,131 @@ export function orbitRadii(box: {
 // -----------------------------------------------------------------------------
 
 /**
- * A new item does not simply appear in its orbit — it gets captured.
+ * A dropped item spirals into its orbit from wherever it was released.
  *
- * Three phases, in order:
+ * It starts at the release point — the actual pointer position, converted into
+ * this system's coordinates — circles twice while closing on the ring, and is
+ * done. No pass through the bag, no separate merge: two turns and it is running
+ * its orbit.
  *
- *  1. **Two full circles**, tightening. Exactly 2.000 revolutions at a constant
- *     angular rate, with the radius shrinking the whole way, so you can watch it
- *     come round twice and see each pass sit closer in than the last.
- *  2. **Through the pack.** The radius collapses to exactly zero at the centre
- *     and opens out the far side, sweeping a further half turn — so it exits
- *     opposite where it went in rather than doubling back.
- *  3. **Merge.** A final half turn, decelerating, easing onto the ring it will
- *     keep. Still curved: the path is the same ellipse throughout, only its
- *     radius changes, so the item never travels in a straight line.
+ * Starting from the drop point is the part that makes it read as *this* item
+ * arriving rather than a generic flourish, and it is why the start is a
+ * parameter instead of a constant. The previous version began at a fixed 2.2x
+ * radius on the ellipse, so a piece released near the bag visibly teleported
+ * outward before starting its approach.
  *
- * The whole thing is expressed as two multipliers on the steady orbit — an angle
- * offset and a radius scale — both of which reach identity at `progress === 1`.
- * That is the property everything rests on: the last frame of the capture is
- * *exactly* `planetSlot(orbit, phase)`, so handing off to the steady rAF loop
- * cannot jump. Anything animated in its own coordinate space would need a fudge
- * factor to line up, and would drift whenever the orbit geometry changed.
- *
- * Pure and deterministic, like the rest of this module, so the trajectory can be
- * asserted frame by frame in a test rather than eyeballed in a browser.
+ * Still expressed so the last frame is exactly `planetSlot(orbit, phase)`: the
+ * angle offset unwinds to zero and the radius multiplier reaches one, so the
+ * handoff to the steady rAF loop cannot jump.
  */
 
-/** Full revolutions completed on approach. Two, exactly, and countable. */
+/** Full revolutions on the way in. */
 export const APPROACH_TURNS = 2;
-/** Swept while passing through the pack — half a turn puts the exit opposite. */
-const THROUGH_TURNS = 0.5;
-/** Swept while easing onto the ring. */
-const MERGE_TURNS = 0.5;
-/** Total sweep, which is also how far behind its final angle the item starts. */
-const TOTAL_TURNS = APPROACH_TURNS + THROUGH_TURNS + MERGE_TURNS;
+
+/** Two seconds — one second per revolution. */
+export const CAPTURE_DURATION_MS = 2_000;
+
+/** Below this the release point is treated as the centre and the angle kept. */
+const MIN_START_RADIUS_SCALE = 0.04;
 
 /**
- * Phase boundaries in progress.
+ * Where the item was released, in the orbit system's own terms.
  *
- * The approach owns most of the timeline because it owns most of the motion —
- * two of the three turns. Splitting the time evenly would make the circles race
- * and the merge crawl.
+ * `turns` is the angle around the ellipse; `radiusScale` is how far out it sits
+ * as a multiple of this orbit's radius, so 1 is already on the ring.
  */
-const APPROACH_END = 0.62;
-const THROUGH_END = 0.8;
-
-/** How far out the item starts, as a multiple of its final orbit radius. */
-const ENTRY_RADIUS_SCALE = 2.2;
-/** Radius at the moment it starts pushing through — just inside the ring. */
-const APPROACH_END_RADIUS_SCALE = 0.92;
-/** Overshoot on the way out, so the merge reads as elastic rather than linear. */
-const EXIT_RADIUS_SCALE = 1.15;
-/** Scale while passing through the pack — small enough to read as "inside". */
-const SWALLOWED_SCALE = 0.12;
-
-/**
- * Long enough to actually watch two revolutions. At the old 2.6s the circles
- * were a blur, which is the complaint this rework answers.
- */
-export const CAPTURE_DURATION_MS = 3_800;
+export type CaptureStart = { turns: number; radiusScale: number };
 
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 
-/** Linear map of `t` from [a,b] to [0,1], clamped outside. */
-function span(t: number, a: number, b: number): number {
-  if (b <= a) return 1;
-  return clamp01((t - a) / (b - a));
-}
-
-function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
-
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
 /**
- * Turns swept since the start of the capture.
+ * Convert a release point — offsets from the system's centre, in px — into a
+ * start on this orbit.
  *
- * The approach is deliberately **linear**: constant angular rate is what makes
- * two revolutions legible as two revolutions. Easing it would smear the loops
- * into each other and you would not be able to count them, which was the whole
- * problem with the previous version.
+ * Inverts `planetSlot`'s parametrisation: x = sin(θ)·radiusX·k and
+ * y = -cos(θ)·radiusY·k, so dividing out the radii recovers θ and k. Dividing
+ * by the radii rather than using the raw offsets matters because the orbit is a
+ * squashed ellipse — treating it as a circle would start the item at the wrong
+ * angle and make the first loop lurch to correct.
  */
-export function captureTurnsSwept(progress: number): number {
-  const p = clamp01(progress);
-  if (p < APPROACH_END) {
-    return APPROACH_TURNS * span(p, 0, APPROACH_END);
-  }
-  if (p < THROUGH_END) {
-    // Eased, so the pass through the centre accelerates in and out of it.
-    return APPROACH_TURNS + THROUGH_TURNS * easeInOutCubic(span(p, APPROACH_END, THROUGH_END));
-  }
-  return (
-    APPROACH_TURNS +
-    THROUGH_TURNS +
-    MERGE_TURNS * easeOutCubic(span(p, THROUGH_END, 1))
-  );
+export function captureStartFromPoint(
+  orbit: PlanetOrbit,
+  dx: number,
+  dy: number,
+): CaptureStart {
+  const nx = orbit.radiusX > 0 ? dx / orbit.radiusX : 0;
+  const ny = orbit.radiusY > 0 ? dy / orbit.radiusY : 0;
+  const radiusScale = Math.hypot(nx, ny);
+  // atan2(sin, cos) with cos = -ny, matching y = -cos(θ)·radiusY·k.
+  const turns = Math.atan2(nx, -ny) / (Math.PI * 2);
+  return {
+    turns: Number.isFinite(turns) ? turns : 0,
+    radiusScale: Number.isFinite(radiusScale) ? radiusScale : 1,
+  };
+}
+
+/** Steady angle of an orbit at a given phase, in turns. */
+function steadyTurns(orbit: PlanetOrbit, phase: number): number {
+  return phase * orbit.speed + orbit.offset;
 }
 
 /**
- * Extra angle, in turns, added to the steady orbit. Starts a full `TOTAL_TURNS`
- * behind and unwinds to exactly zero, so the item lands on its true orbit angle.
- */
-export function captureAngleOffset(progress: number): number {
-  return captureTurnsSwept(progress) - TOTAL_TURNS;
-}
-
-/**
- * Radius multiplier over the capture.
+ * Total turns the item sweeps: two, adjusted to land exactly on the orbit angle.
  *
- * Monotonically decreasing through the whole approach — that is what "getting
- * progressively closer" means, and it has to hold across both revolutions
- * rather than only on average.
+ * The item has to arrive at whatever angle the steady orbit is at when the
+ * capture ends, and the drop point is wherever the user let go — so the sweep is
+ * two turns plus the fraction needed to close that gap. Choosing the multiple
+ * nearest two keeps the correction inside half a turn, so it always reads as two
+ * circles rather than as one and a half or two and a half.
  */
-export function captureRadiusScale(progress: number): number {
-  const p = clamp01(progress);
-
-  if (p < APPROACH_END) {
-    // Linear, deliberately. Easing this front-loads the tightening: with an
-    // ease-out the radius was already at ~1.03 a third of the way in, so the
-    // first loop did nearly all the closing and the second ran at a flat
-    // radius — monotonic on paper, but it does not *look* like it is still
-    // coming closer. Linear spends the same shrink on each revolution, so both
-    // loops visibly tighten.
-    return (
-      ENTRY_RADIUS_SCALE +
-      (APPROACH_END_RADIUS_SCALE - ENTRY_RADIUS_SCALE) * span(p, 0, APPROACH_END)
-    );
-  }
-
-  if (p < THROUGH_END) {
-    // Through the pack: down to exactly 0 at the halfway point of this phase,
-    // then out the far side. Two mirrored eases meeting at the centre.
-    const t = span(p, APPROACH_END, THROUGH_END);
-    if (t < 0.5) {
-      return APPROACH_END_RADIUS_SCALE * (1 - easeInOutCubic(t * 2));
-    }
-    return EXIT_RADIUS_SCALE * easeInOutCubic((t - 0.5) * 2);
-  }
-
-  const k = easeInOutCubic(span(p, THROUGH_END, 1));
-  return EXIT_RADIUS_SCALE + (1 - EXIT_RADIUS_SCALE) * k;
+export function captureSweepTurns(
+  orbit: PlanetOrbit,
+  start: CaptureStart,
+  endPhase: number,
+): number {
+  const gap = steadyTurns(orbit, endPhase) - start.turns;
+  // Shift `gap` by whole turns until it is as close to APPROACH_TURNS as
+  // possible.
+  return gap + Math.round(APPROACH_TURNS - gap);
 }
 
 /**
- * Where a capturing item sits. Same shape as `planetSlot`, so the component
- * writes identical transforms either way.
+ * Where a capturing item sits.
  *
- * While inside the pack the item is pushed behind it and dimmed, which is what
- * makes the pass read as *through* rather than *across*.
+ * Angle advances linearly: a constant rate is what makes two revolutions
+ * legible as two. Radius closes linearly too, so each loop tightens by the same
+ * amount — easing it front-loads the shrink and the second loop then runs at a
+ * flat radius, which does not read as still coming closer.
  */
 export function captureSlot(
   orbit: PlanetOrbit,
   progress: number,
-  phase = 0,
+  start: CaptureStart,
+  endPhase = 0,
 ): OrbitSlot {
   const p = clamp01(progress);
-  const angle =
-    (phase * orbit.speed + orbit.offset + captureAngleOffset(p)) * Math.PI * 2;
-  const radiusScale = captureRadiusScale(p);
+  const sweep = captureSweepTurns(orbit, start, endPhase);
+
+  const turns = start.turns + sweep * p;
+  const angle = turns * Math.PI * 2;
+
+  // A release almost exactly on the centre has no meaningful angle, so treat it
+  // as starting on the ring's own angle instead of snapping to atan2(0,0).
+  const startRadius = Math.max(start.radiusScale, MIN_START_RADIUS_SCALE);
+  const radiusScale = startRadius + (1 - startRadius) * p;
 
   const depth = -Math.cos(angle);
   const t = (depth + 1) / 2;
 
-  // How buried the item is: 1 at the centre of the pack, 0 once clear of it.
-  const buried = 1 - Math.min(1, radiusScale / 0.45);
-  const steadyScale = SCALE_BACK + (SCALE_FRONT - SCALE_BACK) * t;
-  const steadyOpacity = OPACITY_BACK + (OPACITY_FRONT - OPACITY_BACK) * t;
-
-  // Going in passes behind the pack, coming out passes in front, regardless of
-  // which half of the ellipse the angle happens to land on.
-  const throughMidpoint = APPROACH_END + (THROUGH_END - APPROACH_END) / 2;
-  const exiting = p >= throughMidpoint;
-  const zIndex =
-    buried > 0.05 ? (exiting ? BAG_Z + 60 : BAG_Z - 60) : BAG_Z + Math.round(depth * 50);
-
   return {
     x: Math.sin(angle) * orbit.radiusX * radiusScale,
     y: depth * orbit.radiusY * radiusScale,
-    scale: steadyScale * (1 - buried) + SWALLOWED_SCALE * buried,
-    opacity: steadyOpacity * (1 - buried * 0.75),
-    zIndex,
+    scale: SCALE_BACK + (SCALE_FRONT - SCALE_BACK) * t,
+    opacity: OPACITY_BACK + (OPACITY_FRONT - OPACITY_BACK) * t,
+    zIndex: BAG_Z + Math.round(depth * 50),
     inFront: depth >= 0,
   };
 }

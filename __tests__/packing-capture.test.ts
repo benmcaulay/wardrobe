@@ -1,213 +1,183 @@
 import { describe, expect, it } from "vitest";
 import {
   APPROACH_TURNS,
-  BAG_Z,
   CAPTURE_DURATION_MS,
-  captureAngleOffset,
   captureProgress,
-  captureRadiusScale,
   captureSlot,
-  captureTurnsSwept,
+  captureStartFromPoint,
+  captureSweepTurns,
   orbitFor,
   planetSlot,
 } from "@/lib/packing/orbit";
 
 const ORBIT = orbitFor("item:capture-test", { maxRadiusX: 200, maxRadiusY: 68 });
 
-/** Samples across the whole capture, for scanning the trajectory. */
-function trajectory(steps = 400, phase = 0) {
+/** Start on the ring itself, for the cases that do not care about the drop. */
+const ON_RING = { turns: ORBIT.offset, radiusScale: 1 };
+
+function trajectory(start = ON_RING, steps = 400, endPhase = 0) {
   return Array.from({ length: steps + 1 }, (_, i) => {
     const p = i / steps;
-    return { p, slot: captureSlot(ORBIT, p, phase) };
+    return { p, slot: captureSlot(ORBIT, p, start, endPhase) };
   });
 }
 
-describe("the two approach circles", () => {
+describe("captureStartFromPoint", () => {
   /**
-   * The point of the rework. The previous version swept 2.5 turns with easing
-   * applied across the whole capture, so the loops smeared together and you
-   * could not see two of them. Two exact revolutions, at a constant rate.
+   * The whole point of the rework: the animation begins where the piece was
+   * released. Previously it began at a fixed radius on the ellipse, so a piece
+   * dropped near the bag teleported outward before starting its approach.
    */
-  it("completes exactly two revolutions before pushing through", () => {
-    const atDiveStart = captureTurnsSwept(0.62);
-    expect(atDiveStart).toBeCloseTo(APPROACH_TURNS, 6);
+  it("starts exactly at the release point", () => {
+    for (const [dx, dy] of [
+      [120, -40],
+      [-80, 30],
+      [0, -68],
+      [200, 0],
+      [-15, -7],
+    ] as const) {
+      const start = captureStartFromPoint(ORBIT, dx, dy);
+      const first = captureSlot(ORBIT, 0, start);
+      expect(first.x).toBeCloseTo(dx, 6);
+      expect(first.y).toBeCloseTo(dy, 6);
+    }
+  });
+
+  /**
+   * The orbit is a squashed ellipse, so the angle has to be derived in the
+   * orbit's own normalised space. Treating it as a circle would start the item
+   * at the wrong angle and make the first loop lurch to correct.
+   */
+  it("accounts for the ellipse rather than treating it as a circle", () => {
+    // A point straight out to the side is a quarter turn round; straight up is
+    // the top of the ellipse regardless of how squashed it is vertically.
+    const side = captureStartFromPoint(ORBIT, ORBIT.radiusX, 0);
+    expect(side.radiusScale).toBeCloseTo(1, 6);
+    expect(side.turns).toBeCloseTo(0.25, 6);
+
+    const top = captureStartFromPoint(ORBIT, 0, -ORBIT.radiusY);
+    expect(top.radiusScale).toBeCloseTo(1, 6);
+    expect(Math.abs(top.turns)).toBeCloseTo(0, 6);
+  });
+
+  it("reports how far out the release was, in ring multiples", () => {
+    expect(captureStartFromPoint(ORBIT, ORBIT.radiusX * 2, 0).radiusScale).toBeCloseTo(2, 6);
+    expect(captureStartFromPoint(ORBIT, ORBIT.radiusX / 2, 0).radiusScale).toBeCloseTo(0.5, 6);
+  });
+
+  it("survives a release on the exact centre", () => {
+    const start = captureStartFromPoint(ORBIT, 0, 0);
+    expect(Number.isFinite(start.turns)).toBe(true);
+    expect(start.radiusScale).toBe(0);
+    // And the slot it produces is still finite rather than NaN.
+    const slot = captureSlot(ORBIT, 0, start);
+    expect(Number.isFinite(slot.x)).toBe(true);
+    expect(Number.isFinite(slot.y)).toBe(true);
+  });
+});
+
+describe("two circles, then done", () => {
+  it("sweeps about two turns from any release point", () => {
+    for (const [dx, dy] of [
+      [120, -40],
+      [-300, 90],
+      [10, 5],
+      [-200, -60],
+    ] as const) {
+      const start = captureStartFromPoint(ORBIT, dx, dy);
+      const sweep = captureSweepTurns(ORBIT, start, 0);
+      // Two turns plus the fraction needed to land on the orbit angle, which is
+      // always within half a turn either way.
+      expect(Math.abs(sweep - APPROACH_TURNS)).toBeLessThanOrEqual(0.5 + 1e-9);
+    }
+  });
+
+  it("is two turns, not three or one", () => {
     expect(APPROACH_TURNS).toBe(2);
   });
 
-  it("sweeps the approach at a constant rate, so the circles are countable", () => {
-    // Equal slices of approach progress must cover equal angle.
-    const quarter = captureTurnsSwept(0.62 * 0.25);
-    const half = captureTurnsSwept(0.62 * 0.5);
-    const threeQuarters = captureTurnsSwept(0.62 * 0.75);
-    expect(quarter).toBeCloseTo(0.5, 6);
-    expect(half).toBeCloseTo(1, 6);
-    expect(threeQuarters).toBeCloseTo(1.5, 6);
+  it("advances at a constant rate, so the circles are countable", () => {
+    const start = captureStartFromPoint(ORBIT, 150, -50);
+    const sweep = captureSweepTurns(ORBIT, start, 0);
+    // Equal slices of progress cover equal angle.
+    const angleAt = (p: number) => start.turns + sweep * p;
+    const d1 = angleAt(0.25) - angleAt(0);
+    const d2 = angleAt(0.5) - angleAt(0.25);
+    const d3 = angleAt(1) - angleAt(0.75);
+    expect(d2).toBeCloseTo(d1, 9);
+    expect(d3).toBeCloseTo(d1, 9);
   });
 
-  it("crosses each of the two full turns exactly once", () => {
-    const crossings = [1, 2].map((turn) => {
-      let count = 0;
-      let prev = captureTurnsSwept(0);
-      for (let i = 1; i <= 2000; i++) {
-        const cur = captureTurnsSwept(i / 2000);
-        if (prev < turn && cur >= turn) count++;
-        prev = cur;
-      }
-      return count;
-    });
-    expect(crossings).toEqual([1, 1]);
-  });
-
-  /**
-   * "Progressively closer" has to hold across both loops, not merely on
-   * average — otherwise the second pass could sit further out than the first.
-   */
-  it("tightens monotonically for the whole approach", () => {
-    let prev = Infinity;
-    for (let i = 0; i <= 620; i++) {
-      const r = captureRadiusScale((i / 1000));
-      expect(r).toBeLessThanOrEqual(prev + 1e-9);
-      prev = r;
-    }
-  });
-
-  /**
-   * Each revolution must close in by the same amount. An eased approach is
-   * monotonic but front-loads the shrink — the first version had the radius
-   * down to ~1.03 a third of the way in, leaving the second loop running at a
-   * flat radius, which does not read as "still getting closer".
-   */
-  it("spends the same shrink on each of the two revolutions", () => {
-    const start = captureRadiusScale(0);
-    const afterFirst = captureRadiusScale(0.31);
-    const afterSecond = captureRadiusScale(0.6199);
-    const firstLoop = start - afterFirst;
-    const secondLoop = afterFirst - afterSecond;
+  it("closes on the ring by the same amount each loop", () => {
+    const start = captureStartFromPoint(ORBIT, ORBIT.radiusX * 2, 0);
+    const dist = (p: number) => {
+      const s = captureSlot(ORBIT, p, start);
+      // Radius multiple, recovered from the slot.
+      return Math.hypot(s.x / ORBIT.radiusX, s.y / ORBIT.radiusY);
+    };
+    const firstLoop = dist(0) - dist(0.5);
+    const secondLoop = dist(0.5) - dist(1);
     expect(firstLoop).toBeGreaterThan(0.2);
-    expect(secondLoop).toBeCloseTo(firstLoop, 2);
+    expect(secondLoop).toBeCloseTo(firstLoop, 6);
   });
 
-  it("starts outside the ring and reaches it by the dive", () => {
-    expect(captureRadiusScale(0)).toBeGreaterThan(1.5);
-    expect(captureRadiusScale(0.619)).toBeLessThan(1);
-  });
-});
-
-describe("pushing through the pack", () => {
-  it("passes through exactly zero radius — through, not across", () => {
-    const samples = trajectory(2000).map((s) => captureRadiusScale(s.p));
-    expect(Math.min(...samples)).toBeLessThan(0.01);
-  });
-
-  it("reaches the centre of the pack", () => {
+  it("never passes through the pack — that phase is gone", () => {
+    // Released on the ring, it should stay on the ring the whole way, so the
+    // distance from centre never collapses.
     const closest = Math.min(
-      ...trajectory(2000).map((s) => Math.hypot(s.slot.x, s.slot.y)),
+      ...trajectory(ON_RING, 800).map((s) => Math.hypot(s.slot.x / ORBIT.radiusX, s.slot.y / ORBIT.radiusY)),
     );
-    expect(closest).toBeLessThan(2);
-  });
-
-  it("shrinks to almost nothing while inside", () => {
-    expect(Math.min(...trajectory(800).map((s) => s.slot.scale))).toBeLessThan(0.2);
-  });
-
-  it("emerges on the opposite side from where it entered", () => {
-    // Half a turn is swept through the pass, so the x sign must flip between
-    // the last approach frame and the first fully-emerged one.
-    const before = captureSlot(ORBIT, 0.61);
-    const after = captureSlot(ORBIT, 0.81);
-    expect(Math.sign(before.x)).not.toBe(Math.sign(after.x));
-  });
-
-  it("passes behind the pack going in and in front coming out", () => {
-    const buried = trajectory(2000).filter((s) => s.slot.scale < 0.3);
-    expect(buried.length).toBeGreaterThan(0);
-    const midpoint = 0.62 + (0.8 - 0.62) / 2;
-    expect(buried.filter((s) => s.p < midpoint).every((s) => s.slot.zIndex < BAG_Z)).toBe(true);
-    expect(buried.filter((s) => s.p >= midpoint).every((s) => s.slot.zIndex > BAG_Z)).toBe(true);
-  });
-});
-
-describe("merging with the ring", () => {
-  it("keeps curving after the pass — never a straight line", () => {
-    // Angle must keep advancing through the merge, not hold while the radius
-    // settles: a fixed angle with a changing radius is a radial straight line.
-    const a = captureTurnsSwept(0.82);
-    const b = captureTurnsSwept(0.9);
-    const c = captureTurnsSwept(0.98);
-    expect(b).toBeGreaterThan(a);
-    expect(c).toBeGreaterThan(b);
-  });
-
-  it("overshoots then eases back, so the settle is elastic", () => {
-    const peak = Math.max(
-      ...trajectory(2000).filter((s) => s.p > 0.78 && s.p < 0.95).map((s) => captureRadiusScale(s.p)),
-    );
-    expect(peak).toBeGreaterThan(1);
-    expect(captureRadiusScale(1)).toBeCloseTo(1, 6);
+    expect(closest).toBeCloseTo(1, 6);
   });
 
   /**
-   * The property the whole design rests on: the final capture frame is the
-   * steady-orbit frame. If these diverged, every arrival would end with a
-   * visible snap as the rAF loop took over.
+   * The property everything rests on: the final capture frame is the
+   * steady-orbit frame, so the handoff to the rAF loop cannot jump.
    */
-  it("ends exactly on the steady orbit slot, for any phase", () => {
+  it("ends exactly on the steady orbit slot, for any phase and any release", () => {
     for (const phase of [0, 0.13, 0.5, 0.77, 0.99]) {
-      const captured = captureSlot(ORBIT, 1, phase);
-      const steady = planetSlot(ORBIT, phase);
-      expect(captured.x).toBeCloseTo(steady.x, 6);
-      expect(captured.y).toBeCloseTo(steady.y, 6);
-      expect(captured.scale).toBeCloseTo(steady.scale, 6);
-      expect(captured.opacity).toBeCloseTo(steady.opacity, 6);
-      expect(captured.zIndex).toBe(steady.zIndex);
+      for (const [dx, dy] of [
+        [120, -40],
+        [-260, 70],
+        [3, -2],
+      ] as const) {
+        const start = captureStartFromPoint(ORBIT, dx, dy);
+        const captured = captureSlot(ORBIT, 1, start, phase);
+        const steady = planetSlot(ORBIT, phase);
+        expect(captured.x).toBeCloseTo(steady.x, 6);
+        expect(captured.y).toBeCloseTo(steady.y, 6);
+        expect(captured.scale).toBeCloseTo(steady.scale, 6);
+        expect(captured.opacity).toBeCloseTo(steady.opacity, 6);
+        expect(captured.zIndex).toBe(steady.zIndex);
+      }
     }
   });
 
-  it("unwinds its angle offset to exactly zero", () => {
-    expect(captureAngleOffset(1)).toBeCloseTo(0, 6);
-    expect(Math.abs(captureAngleOffset(0))).toBeCloseTo(3, 6);
-  });
-});
-
-describe("the sweep as a whole", () => {
-  it("only ever advances — it never doubles back", () => {
-    let prev = -Infinity;
-    for (let i = 0; i <= 2000; i++) {
-      const swept = captureTurnsSwept(i / 2000);
-      expect(swept).toBeGreaterThanOrEqual(prev - 1e-9);
-      prev = swept;
-    }
-  });
-
-  it("is clamped outside 0..1", () => {
-    expect(captureRadiusScale(-1)).toBe(captureRadiusScale(0));
-    expect(captureRadiusScale(2)).toBeCloseTo(captureRadiusScale(1), 6);
-    expect(captureTurnsSwept(-5)).toBe(0);
-  });
-
-  it("never leaves the stage: no NaN, bounded radius, valid opacity", () => {
-    for (const { slot } of trajectory(800)) {
+  it("stays finite and on-screen throughout", () => {
+    const start = captureStartFromPoint(ORBIT, -400, 120);
+    for (const { slot } of trajectory(start, 800)) {
       expect(Number.isFinite(slot.x)).toBe(true);
       expect(Number.isFinite(slot.y)).toBe(true);
-      expect(Number.isFinite(slot.scale)).toBe(true);
       expect(slot.opacity).toBeGreaterThanOrEqual(0);
       expect(slot.opacity).toBeLessThanOrEqual(1);
-      expect(Math.abs(slot.x)).toBeLessThanOrEqual(ORBIT.radiusX * 2.3);
+      // Radius only ever shrinks toward the ring, so it cannot exceed the start.
+      expect(Math.hypot(slot.x / ORBIT.radiusX, slot.y / ORBIT.radiusY)).toBeLessThanOrEqual(
+        start.radiusScale + 1e-9,
+      );
     }
   });
 });
 
 describe("captureProgress", () => {
-  it("maps elapsed time onto 0..1 and clamps", () => {
-    expect(captureProgress(0)).toBe(0);
-    expect(captureProgress(CAPTURE_DURATION_MS / 2)).toBeCloseTo(0.5, 6);
-    expect(captureProgress(CAPTURE_DURATION_MS)).toBe(1);
-    expect(captureProgress(CAPTURE_DURATION_MS * 10)).toBe(1);
+  it("runs for two seconds", () => {
+    expect(CAPTURE_DURATION_MS).toBe(2_000);
   });
 
-  it("is long enough to actually watch two revolutions", () => {
-    // Under about a second per revolution the loops stop being legible.
-    expect(CAPTURE_DURATION_MS / APPROACH_TURNS).toBeGreaterThan(1_000);
+  it("maps elapsed time onto 0..1 and clamps", () => {
+    expect(captureProgress(0)).toBe(0);
+    expect(captureProgress(1_000)).toBeCloseTo(0.5, 6);
+    expect(captureProgress(2_000)).toBe(1);
+    expect(captureProgress(20_000)).toBe(1);
   });
 
   it("treats nonsense input as finished rather than animating forever", () => {

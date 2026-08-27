@@ -79,7 +79,12 @@ export function PackingDragProvider({
   children,
 }: {
   /** Called with the payload and the zone it landed on. Same-zone drops are filtered out. */
-  onDrop: (payload: DragPayload, zoneId: string) => void;
+  /**
+   * `point` is where the pointer was released, in client coordinates. The
+   * arrival animation starts there, so a piece dropped near the bag does not
+   * teleport outward before beginning its approach.
+   */
+  onDrop: (payload: DragPayload, zoneId: string, point: { x: number; y: number }) => void;
   children: ReactNode;
 }) {
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -181,10 +186,12 @@ export function PackingDragProvider({
       const live = dragRef.current;
       pending.current = null;
       if (!live) return;
-      const { payload, overZoneId } = live;
+      const { payload, overZoneId, x, y } = live;
       setDragBoth(null);
       // Dropping something back where it came from isn't a move.
-      if (overZoneId && overZoneId !== payload.fromZoneId) onDropRef.current(payload, overZoneId);
+      if (overZoneId && overZoneId !== payload.fromZoneId) {
+        onDropRef.current(payload, overZoneId, { x, y });
+      }
     }
 
     function onCancel() {

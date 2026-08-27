@@ -18,7 +18,7 @@
  * make the drag interaction stutter for no benefit.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { BagArt } from "@/components/bag-art";
@@ -34,10 +34,12 @@ import {
   CAPTURE_DURATION_MS,
   captureProgress,
   captureSlot,
+  captureStartFromPoint,
   orbitRadii,
   phaseAt,
   planetOrbits,
   planetSlot,
+  type CaptureStart,
   type PlanetOrbit,
 } from "@/lib/packing/orbit";
 import { easeOutExpo } from "@/lib/ui-motion";
@@ -149,6 +151,27 @@ export function PackMode({
   const bag = bags.find((b) => b.id === activeBagId) ?? bags[0];
   const contents = bag ? contentsOf(bag.id) : [];
 
+  /**
+   * Where each piece was released, in client coordinates, keyed by content key.
+   *
+   * A ref rather than state: the arrival animation reads it once when it starts
+   * and re-rendering on drop would be pointless work. Written here because this
+   * is where the drag layer reports the release, read in BagStage where the
+   * orbit lives.
+   */
+  const releasePoints = useRef(new Map<string, { x: number; y: number }>());
+
+  const handleDrop = useCallback(
+    (payload: DragPayload, zoneId: string, point: { x: number; y: number }) => {
+      // Only an arrival into a bag animates; dragging out to the rail does not.
+      if (zoneId !== RAIL_ZONE) {
+        releasePoints.current.set(`${payload.kind}:${payload.id}`, point);
+      }
+      onDrop(payload, zoneId);
+    },
+    [onDrop],
+  );
+
   const groups = useMemo(() => {
     const seen: string[] = [];
     for (const c of candidates) if (!seen.includes(c.group)) seen.push(c.group);
@@ -173,7 +196,7 @@ export function PackMode({
      * used as zone ids directly — there is no longer a second set of bag
      * panels mounted elsewhere to collide with.
      */
-    <PackingDragProvider onDrop={onDrop}>
+    <PackingDragProvider onDrop={handleDrop}>
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -260,6 +283,7 @@ export function PackMode({
         <BagStage
           bag={bag}
           contents={contents}
+          releasePoints={releasePoints}
           onAdjustSize={onAdjustSize}
           onSetDailyWear={onSetDailyWear}
         />
@@ -555,11 +579,14 @@ function RailRow({
 function BagStage({
   bag,
   contents,
+  releasePoints,
   onAdjustSize,
   onSetDailyWear,
 }: {
   bag: PackBag;
   contents: PackCandidate[];
+  /** Release point per content key, written by PackMode's drop handler. */
+  releasePoints: MutableRefObject<Map<string, { x: number; y: number }>>;
   onAdjustSize: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
   onSetDailyWear: (itemId: string, dailyWear: boolean | null) => void;
 }) {
@@ -584,7 +611,7 @@ function BagStage({
    * `Map` keyed by content rather than by index because packing or unpacking
    * anything reshuffles the indices, and a capture must follow its own item.
    */
-  const captures = useRef(new Map<string, number>());
+  const captures = useRef(new Map<string, { elapsed: number; start: CaptureStart }>());
   const seenKeys = useRef<Set<string> | null>(null);
 
   // Keep both refs: one for the drop-zone registry, one to measure the stage.
@@ -640,8 +667,30 @@ function BagStage({
       seenKeys.current = new Set(keys);
       return;
     }
-    for (const key of keys) {
-      if (!seenKeys.current.has(key)) captures.current.set(key, 0);
+    for (const [i, key] of keys.entries()) {
+      if (seenKeys.current.has(key)) continue;
+      const orbit = orbits[i];
+      if (!orbit) continue;
+
+      // Client coordinates from the drop, expressed as offsets from the centre
+      // of the stage, which is what the orbit system measures from.
+      const released = releasePoints.current.get(key);
+      // Measured now rather than from the ResizeObserver box, which tracks size
+      // but not page position — and the offset has to be from the stage's centre
+      // on screen at the moment of the drop.
+      const rect = stage.current?.getBoundingClientRect();
+      const start =
+        released && rect
+          ? captureStartFromPoint(
+              orbit,
+              released.x - (rect.left + rect.width / 2),
+              released.y - (rect.top + rect.height / 2),
+            )
+          : // No release point — an auto-pack, or a drop we did not see. Fall
+            // back to arriving from outside on the orbit's own angle.
+            { turns: orbit.offset, radiusScale: 2 };
+      captures.current.set(key, { elapsed: 0, start });
+      releasePoints.current.delete(key);
     }
     // Forget removed items so an unpack/repack starts a fresh capture.
     seenKeys.current = new Set(keys);
@@ -681,19 +730,19 @@ function BagStage({
         // their steady orbit. The trajectory ends exactly on the steady slot,
         // so the switch-over is invisible.
         const key = contentKeys[i];
-        const captureElapsed = key === undefined ? undefined : captures.current.get(key);
+        const capture = key === undefined ? undefined : captures.current.get(key);
         let slot;
-        if (captureElapsed !== undefined && !reduceMotion) {
-          const next = captureElapsed + dt;
+        if (capture && !reduceMotion) {
+          const next = capture.elapsed + dt;
           if (next >= CAPTURE_DURATION_MS) {
             captures.current.delete(key!);
             slot = planetSlot(orbits[i], phase);
           } else {
-            captures.current.set(key!, next);
-            slot = captureSlot(orbits[i], captureProgress(next), phase);
+            capture.elapsed = next;
+            slot = captureSlot(orbits[i], captureProgress(next), capture.start, phase);
           }
         } else {
-          if (captureElapsed !== undefined) captures.current.delete(key!);
+          if (capture) captures.current.delete(key!);
           slot = planetSlot(orbits[i], phase);
         }
         node.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${slot.y.toFixed(1)}px, 0) scale(${slot.scale.toFixed(3)})`;
