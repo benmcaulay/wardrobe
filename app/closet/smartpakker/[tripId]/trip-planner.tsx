@@ -38,7 +38,7 @@ import { BAG_PANEL_PREFIX } from "@/lib/packing/panel-state";
 import { EMPTY_LOOK_PREFS, type LookLayoutPrefs } from "@/lib/packing/look";
 import { occasionForActivity, occasionLabel, type OccasionKind } from "@/lib/packing/occasion";
 import { getSilhouette } from "@/lib/packing/silhouettes";
-import { formatTripRange } from "@/lib/packing/trip-dates";
+import { formatTripRange, tripDayCount } from "@/lib/packing/trip-dates";
 import type { ClimateBand, ClimateSummary } from "@/lib/services/weather";
 import { formatTemperature, type TemperatureUnit } from "@/lib/temperature";
 import { PLANE_FLIGHT_MS } from "@/lib/packing/planner-view";
@@ -321,6 +321,19 @@ export function TripPlanner({
     });
   }
 
+  /**
+   * Take everything out of one bag at once.
+   *
+   * Garments and gear together, because "empty my bag" plainly means both and
+   * leaving the gear behind would look like a bug. Not destructive and not
+   * confirmed: the pieces go back to the rail, nothing is deleted, and
+   * auto-pack or a drag puts them back.
+   */
+  function emptyBag(bagId: string) {
+    setAssignments((prev) => ({ ...prev, [bagId]: [] }));
+    setGearAssignments((prev) => ({ ...prev, [bagId]: [] }));
+  }
+
   async function handleFetchClimate() {
     setLoadingClimate(true);
     const res = await fetchTripClimate(trip.id);
@@ -421,6 +434,12 @@ export function TripPlanner({
     [climate?.days, requirements],
   );
 
+  /** How many days the trip covers, from its own dates. */
+  const tripDays = useMemo(
+    () => tripDayCount(trip.startDate, trip.endDate),
+    [trip.startDate, trip.endDate],
+  );
+
   const dayPlan = useMemo(() => {
     // Occasion pieces are packed but never scheduled *by the rotation*: swim
     // trunks are a `bottom` like any other, so without this they turn up as the
@@ -472,12 +491,16 @@ export function TripPlanner({
     const cold = climate ? ["cool", "cold"].includes(climate.band) || climate.rainChance >= 0.4 : false;
     return planDailyOutfits({
       packed,
-      days: climate?.days ?? 0,
+      // The trip's dates know how long it is; the forecast is only needed to
+      // decide *what* to wear. Taking the length from `climate` meant an
+      // unpinned destination produced a zero-day plan, which disabled the
+      // Day-by-day panel and blamed it on unpacked clothes.
+      days: climate?.days ?? tripDays,
       includeOuterwear: cold,
       wearMultiplier: wearMultiplier(requirements),
       occasionByDay,
     });
-  }, [items, bagOfItem, climate, requirements, activityByDay]);
+  }, [items, bagOfItem, climate, requirements, activityByDay, tripDays]);
 
   /**
    * Everything dropped in Pack mode lands here, garment or gear. The rail is a
@@ -723,7 +746,9 @@ export function TripPlanner({
           onClick={() => setLooksOpen(true)}
           summary={
             dayPlan.length === 0
-              ? "Pack some clothes first"
+              ? tripDays === 0
+                ? "Set the trip dates first"
+                : "Pack some clothes first"
               : `${completeDayCount(dayPlan)} of ${dayPlan.length} days dressed${
                   distinctOutfitCount(dayPlan) > 0
                     ? ` · ${distinctOutfitCount(dayPlan)} distinct ${
@@ -936,6 +961,7 @@ export function TripPlanner({
           onAdjustSize={saveOverride}
           onSetDailyWear={setDailyWear}
           onAutoPack={handleAutoPack}
+          onEmptyBag={emptyBag}
           autoPacking={packing}
           flightId={flightId}
           flying={flying}

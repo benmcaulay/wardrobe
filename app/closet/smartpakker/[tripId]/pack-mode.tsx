@@ -31,17 +31,13 @@ import { formatVolume, formatWeight } from "@/lib/packing/estimate";
 import { occasionLabel, type OccasionKind } from "@/lib/packing/occasion";
 import {
   BAG_Z,
-  CAPTURE_DURATION_MS,
-  captureProgress,
-  captureSlot,
-  captureStartFromPoint,
   orbitRadii,
   phaseAt,
   planetOrbits,
   planetSlot,
-  type CaptureStart,
   type PlanetOrbit,
 } from "@/lib/packing/orbit";
+import { FlyInLayer, type FlyIn } from "./fly-in-layer";
 import { easeOutExpo } from "@/lib/ui-motion";
 import { CapacityMeter } from "./capacity-meter";
 import {
@@ -100,6 +96,7 @@ export function PackMode({
   onAdjustSize,
   onSetDailyWear,
   onAutoPack,
+  onEmptyBag,
   autoPacking,
   flightId,
   flying,
@@ -121,6 +118,7 @@ export function PackMode({
   onSetDailyWear: (itemId: string, dailyWear: boolean | null) => void;
   /** Fill every bag automatically. Lives here because this is where the bags are. */
   onAutoPack: () => void;
+  onEmptyBag: (bagId: string) => void;
   autoPacking: boolean;
   /** Bumped per press so a second press restarts the plane. */
   flightId: number;
@@ -151,35 +149,32 @@ export function PackMode({
   const bag = bags.find((b) => b.id === activeBagId) ?? bags[0];
   const contents = bag ? contentsOf(bag.id) : [];
 
-  /** The orbit stage element, so a drop can be measured against it. */
-  const stageEl = useRef<HTMLDivElement | null>(null);
+  /** The pack graphic, which the dropped piece flies into. */
+  const packEl = useRef<HTMLDivElement | null>(null);
 
   /**
-   * Where each piece was released, as an offset from the centre of the orbit
-   * stage, keyed by content key.
+   * The piece currently flying in, if any.
    *
-   * Stored as an **offset**, converted here at the moment of release, rather
-   * than as client coordinates converted later. Packing a piece removes its row
-   * from the rail above, so the list shrinks and everything below it shifts up —
-   * measuring the stage after that re-render puts the release point and the
-   * stage centre in different frames, and the arrival starts ~32px off.
-   *
-   * A ref rather than state: the animation reads it once when it starts, and
-   * re-rendering the stage on drop would be pointless work.
+   * State rather than a ref because the overlay has to mount to be animated —
+   * but it is set once per drop, not per frame, so it costs one render.
    */
-  const releaseOffsets = useRef(new Map<string, { dx: number; dy: number }>());
+  const [flight, setFlight] = useState<FlyIn | null>(null);
+  const clearFlight = useCallback((key: string) => {
+    setFlight((current) => (current?.key === key ? null : current));
+  }, []);
 
   const handleDrop = useCallback(
     (payload: DragPayload, zoneId: string, point: { x: number; y: number }) => {
-      // Only an arrival into a bag animates; dragging out to the rail does not.
+      // Start the flight here, synchronously, before the server request goes
+      // out. This is the whole point of the overlay: the piece leaves the
+      // pointer on the next frame rather than after the round trip.
       if (zoneId !== RAIL_ZONE) {
-        const rect = stageEl.current?.getBoundingClientRect();
-        if (rect) {
-          releaseOffsets.current.set(`${payload.kind}:${payload.id}`, {
-            dx: point.x - (rect.left + rect.width / 2),
-            dy: point.y - (rect.top + rect.height / 2),
-          });
-        }
+        setFlight({
+          key: `${payload.kind}:${payload.id}`,
+          release: point,
+          imagePath: payload.imagePath ?? null,
+          size: ITEM_SIZE,
+        });
       }
       onDrop(payload, zoneId);
     },
@@ -257,6 +252,17 @@ export function PackMode({
         >
           {autoPacking ? "Packing…" : "Auto-pack my bags"}
         </button>
+        {/* Sits next to auto-pack because it is the same kind of control — one
+            click that changes the whole bag — and disabled when there is
+            nothing to empty, so it never looks like it did nothing. */}
+        <button
+          type="button"
+          onClick={() => onEmptyBag(bag.id)}
+          disabled={contents.length === 0}
+          className="rounded-full border border-ink/15 px-3.5 py-1.5 text-xs tracking-wide transition hover:bg-paper-warm disabled:opacity-40"
+        >
+          Empty my bag
+        </button>
         <PlaneRoute key={flightId} flying={flying} />
         <button
           type="button"
@@ -297,11 +303,11 @@ export function PackMode({
         <BagStage
           bag={bag}
           contents={contents}
-          stageEl={stageEl}
-          releaseOffsets={releaseOffsets}
+          packEl={packEl}
           onAdjustSize={onAdjustSize}
           onSetDailyWear={onSetDailyWear}
         />
+        <FlyInLayer flight={flight} targetRef={packEl} onDone={clearFlight} />
       </div>
     </motion.div>
     </PackingDragProvider>,
@@ -594,17 +600,14 @@ function RailRow({
 function BagStage({
   bag,
   contents,
-  stageEl,
-  releaseOffsets,
+  packEl,
   onAdjustSize,
   onSetDailyWear,
 }: {
   bag: PackBag;
   contents: PackCandidate[];
-  /** Shared with PackMode so a drop can be measured against the stage. */
-  stageEl: MutableRefObject<HTMLDivElement | null>;
-  /** Release offset from the stage centre, per content key. */
-  releaseOffsets: MutableRefObject<Map<string, { dx: number; dy: number }>>;
+  /** Shared with PackMode: the pack graphic a dropped piece flies into. */
+  packEl: MutableRefObject<HTMLDivElement | null>;
   onAdjustSize: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
   onSetDailyWear: (itemId: string, dailyWear: boolean | null) => void;
 }) {
@@ -612,36 +615,24 @@ function BagStage({
   const [adjusting, setAdjusting] = useState<PackCandidate | null>(null);
   const reduceMotion = useReducedMotion();
   const { ref: dropRef, isOver, incoming } = useDropZone(bag.id);
+  const stage = useRef<HTMLDivElement | null>(null);
   const planetRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [box, setBox] = useState({ width: 0, height: 0 });
   /** Animation clock, kept across content changes so the system never resets. */
   const elapsed = useRef(0);
   const lastFrame = useRef<number | null>(null);
   const hovering = useRef(false);
-  /**
-   * Items mid-capture, keyed by content key, each holding how long its arrival
-   * animation has been running.
-   *
-   * A ref rather than state: this changes every frame, and re-rendering the
-   * whole stage 60 times a second to move some transforms would be wasteful —
-   * the rAF loop already writes styles directly for exactly that reason. A
-   * `Map` keyed by content rather than by index because packing or unpacking
-   * anything reshuffles the indices, and a capture must follow its own item.
-   */
-  const captures = useRef(new Map<string, { elapsed: number; start: CaptureStart }>());
-  const seenKeys = useRef<Set<string> | null>(null);
-
   // Keep both refs: one for the drop-zone registry, one to measure the stage.
   const setStage = useCallback(
     (el: HTMLDivElement | null) => {
-      stageEl.current = el;
+      stage.current = el;
       dropRef(el);
     },
-    [dropRef, stageEl],
+    [dropRef],
   );
 
   useEffect(() => {
-    const el = stageEl.current;
+    const el = stage.current;
     if (!el) return;
     const measure = () => setBox({ width: el.clientWidth, height: el.clientHeight });
     measure();
@@ -672,41 +663,6 @@ function BagStage({
   }, [keySignature, box.width, box.height]);
 
   /**
-   * Start a capture for every key that has just appeared.
-   *
-   * The first render is deliberately exempt: on opening Pack mode everything
-   * already in the bag would otherwise fly in at once, which reads as a glitch
-   * rather than as an arrival. Only genuinely new items are captured.
-   */
-  useEffect(() => {
-    const keys = keySignature ? keySignature.split("|") : [];
-    if (seenKeys.current === null) {
-      seenKeys.current = new Set(keys);
-      return;
-    }
-    for (const [i, key] of keys.entries()) {
-      if (seenKeys.current.has(key)) continue;
-      const orbit = orbits[i];
-      if (!orbit) continue;
-
-      // Already an offset from the stage centre, converted at release time.
-      const released = releaseOffsets.current.get(key);
-      const start = released
-        ? captureStartFromPoint(orbit, released.dx, released.dy)
-        : // No release offset — an auto-pack, or a drop we did not see. Arrive
-          // from outside on the orbit's own angle.
-          { turns: orbit.offset, radiusScale: 2 };
-      captures.current.set(key, { elapsed: 0, start });
-      releaseOffsets.current.delete(key);
-    }
-    // Forget removed items so an unpack/repack starts a fresh capture.
-    seenKeys.current = new Set(keys);
-    for (const key of [...captures.current.keys()]) {
-      if (!keys.includes(key)) captures.current.delete(key);
-    }
-  }, [keySignature]);
-
-  /**
    * One rAF loop writes every planet's transform.
    *
    * The clock lives in a ref, not a local. This effect re-runs whenever the
@@ -733,25 +689,10 @@ function BagStage({
       for (let i = 0; i < orbits.length; i += 1) {
         const node = planetRefs.current[i];
         if (!node) continue;
-        // A capturing item flies its arrival trajectory; everyone else holds
-        // their steady orbit. The trajectory ends exactly on the steady slot,
-        // so the switch-over is invisible.
-        const key = contentKeys[i];
-        const capture = key === undefined ? undefined : captures.current.get(key);
-        let slot;
-        if (capture && !reduceMotion) {
-          const next = capture.elapsed + dt;
-          if (next >= CAPTURE_DURATION_MS) {
-            captures.current.delete(key!);
-            slot = planetSlot(orbits[i], phase);
-          } else {
-            capture.elapsed = next;
-            slot = captureSlot(orbits[i], captureProgress(next), capture.start, phase);
-          }
-        } else {
-          if (capture) captures.current.delete(key!);
-          slot = planetSlot(orbits[i], phase);
-        }
+        // Arrivals are handled by FlyInLayer, which flies the piece in from the
+        // pointer in viewport space. Planets themselves only ever hold their
+        // steady orbit, which is why this loop has no special cases left.
+        const slot = planetSlot(orbits[i], phase);
         node.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${slot.y.toFixed(1)}px, 0) scale(${slot.scale.toFixed(3)})`;
         // Hovering brightens the system without stopping it.
         node.style.opacity = String(lift ? Math.min(1, slot.opacity + 0.15) : slot.opacity);
@@ -806,8 +747,12 @@ function BagStage({
           ))}
         </svg>
 
-        {/* The bag itself. */}
-        <div className="relative flex flex-col items-center" style={{ zIndex: BAG_Z }}>
+        {/* The bag itself, and the point a dropped piece flies into. */}
+        <div
+          ref={packEl}
+          className="relative flex flex-col items-center"
+          style={{ zIndex: BAG_Z }}
+        >
           {/* The bag's own photo gets the same treatment as the items — an
               uploaded pack shot is usually on the same white or black sweep,
               and once the orbit is cut out the bag is the only opaque

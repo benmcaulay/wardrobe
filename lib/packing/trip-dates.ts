@@ -42,3 +42,25 @@ export function formatTripRange(start: string | Date, end: string | Date): strin
       : { month: "short", day: "numeric" },
   )}`;
 }
+
+/**
+ * Nights the trip covers, counted inclusively as days you need to dress.
+ *
+ * The day plan used to take its length from the weather forecast
+ * (`climate.days`), which meant a trip with no pinned destination reported zero
+ * days — and the Day-by-day panel disabled itself with "Pack some clothes
+ * first", blaming the wrong thing entirely. The trip's own dates always know how
+ * long it is, whether or not anyone has fetched a forecast.
+ */
+export function tripDayCount(start: string | Date, end: string | Date): number {
+  const from = new Date(start);
+  const to = new Date(end);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 0;
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  // Normalise to UTC midnights so a DST boundary inside the range cannot round
+  // a whole day off the count.
+  const fromDay = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  const toDay = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+  if (toDay < fromDay) return 0;
+  return Math.round((toDay - fromDay) / MS_PER_DAY) + 1;
+}
