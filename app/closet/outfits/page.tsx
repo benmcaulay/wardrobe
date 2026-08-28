@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
+import { getCategoriesListFromPrefs } from "@/lib/categories";
+import { getCategoryParentsFromPrefs } from "@/lib/category-tree";
 import { readItemTileMeta } from "@/lib/item-tile-meta";
 import { parseColors, parseStylePrefs } from "@/lib/json";
 import { sanitizeCategoryRules } from "@/lib/outfit-random";
@@ -87,6 +89,8 @@ export default async function OutfitsPage({
 
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const colorOptions = getColorsListFromPrefs(prefs);
+  const categoryList = getCategoriesListFromPrefs(prefs);
+  const categoryParents = getCategoryParentsFromPrefs(prefs);
   const outfitSlotDefaults = sanitizeOutfitSlotDefaults(prefs.outfitSlotDefaults);
   const outfitLayerOrder = sanitizeLayerOrder(prefs.outfitLayerOrder);
   const outfitVisualLayers = sanitizeVisualLayers(prefs.outfitVisualLayers);
@@ -144,6 +148,8 @@ export default async function OutfitsPage({
         }
         returnLabel={searchParams?.returnLabel ?? "Back"}
         items={closetItems}
+        categoryList={categoryList}
+        categoryParents={categoryParents}
         colorOptions={colorOptions}
         initialOutfits={savedOutfits}
         outfitSlotDefaults={outfitSlotDefaults}

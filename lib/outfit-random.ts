@@ -8,6 +8,17 @@ export type OutfitPickItem = {
   id: string;
   category: string;
   colors: Color[];
+  /**
+   * The item's category and every category above it — `["t shirt", "shirt",
+   * "top"]` — when the caller knows the nesting (lib/category-tree.ts).
+   *
+   * A rule for a parent category is meant to accept anything filed beneath it,
+   * and this is where that happens. Widening the item rather than the rule is
+   * deliberate: rule and slot *signatures* stay exactly as declared, so the
+   * saved positions, sizes and layer order the slot machinery keys off them are
+   * untouched. Absent means "no nesting known", which is the old behaviour.
+   */
+  categoryPath?: string[];
   // Attributes the Layer 1 scorer reads (lib/outfit/compatibility.ts). All
   // optional: callers that only build slot assignments, and the tests that
   // predate scoring, keep working unchanged and simply get uniform sampling.
@@ -19,7 +30,10 @@ export type OutfitPickItem = {
 };
 
 export type CategoryRule = {
-  /** OR list — item matches if its category equals any entry (exact, case-insensitive). */
+  /**
+   * OR list — an item matches if any entry equals its category, or a category
+   * the item is nested under (see `OutfitPickItem.categoryPath`).
+   */
   categories: string[];
   count: number;
 };
@@ -78,8 +92,10 @@ export function formatCategoryList(categories: readonly string[]): string {
 export function itemMatchesCategories(item: OutfitPickItem, categories: readonly string[]): boolean {
   if (isNoneCategoryStored(item.category)) return false;
   if (categories.length === 0) return false;
-  const itemKey = normalizeCategoryName(item.category);
-  return categories.some((c) => normalizeCategoryName(c) === itemKey);
+  const itemKeys = (item.categoryPath?.length ? item.categoryPath : [item.category])
+    .map(normalizeCategoryName)
+    .filter(Boolean);
+  return categories.some((c) => itemKeys.includes(normalizeCategoryName(c)));
 }
 
 /** Expand rules into one slot descriptor per required piece. */

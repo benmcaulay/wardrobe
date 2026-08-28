@@ -184,6 +184,41 @@ export function descendantKeys(
   return out;
 }
 
+/**
+ * A category and everything above it: `[self, parent, grandparent, …]`.
+ *
+ * This is how nesting reaches the outfit generator. Rather than widening a
+ * *rule* ("shirt" also means "t shirt"), which would change the category
+ * signatures the slot machinery keys every saved position and size off, the
+ * *item* is widened: a piece filed under "t shirt" counts as a t shirt, a
+ * shirt, and a top. Same matches, no effect on layout.
+ *
+ * Labels come from `list` where they exist, so the result reads in the user's
+ * own casing; a category not in the list still returns itself, since an item
+ * can be filed under a label the list has since lost.
+ */
+export function categoryAncestryPath(
+  category: string,
+  parents: CategoryParents | null | undefined,
+  list: readonly string[],
+): string[] {
+  const self = (category ?? "").trim();
+  const key = normalizeCategoryName(self);
+  if (!key) return [];
+  const clean = sanitizeCategoryParents(parents, list);
+  const label = (k: string) => list.find((c) => normalizeCategoryName(c) === k) ?? k;
+
+  const out = [list.find((c) => normalizeCategoryName(c) === key) ?? self];
+  const seen = new Set<string>([key]);
+  let cursor: string | undefined = clean[key];
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    out.push(label(cursor));
+    cursor = clean[cursor];
+  }
+  return out;
+}
+
 /** True when `maybeAncestor` is at or above `key`. Guards against cycles. */
 export function isAncestorOf(
   maybeAncestor: string,

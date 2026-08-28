@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { decode, type Color, type Season } from "@/lib/json";
 import { wornOnFromLocalDate, wornOnToISODate } from "@/lib/wear/rollup";
 import { isNoneCategoryStored, normalizeCategoryName } from "@/lib/categories";
@@ -44,6 +44,13 @@ import {
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
 import { assignSeedPieces, seedRulesForPieces } from "@/lib/outfit/seed-look";
+import {
+  buildCategoryTree,
+  categoryAncestryPath,
+  descendantKeys,
+  flattenCategoryTree,
+  type CategoryParents,
+} from "@/lib/category-tree";
 import {
   SPIN_MODES,
   SPIN_MODE_LABELS,
@@ -101,6 +108,14 @@ type Props = {
    */
   initialPieceIds?: string[];
   /**
+   * The user's own category list and its nesting. Needed as well as `items`
+   * because a parent category can be a useful rule while holding no pieces of
+   * its own — every shirt might be filed under "t shirt" or "flannel" — and a
+   * chip row derived from items alone could never offer it.
+   */
+  categoryList: string[];
+  categoryParents: CategoryParents;
+  /**
    * Bumped whenever something elsewhere on the page taught the model. A smart
    * spin reads a client-side copy of the affinity map, so it needs to know when
    * that copy is stale — otherwise you could train for ten minutes and keep
@@ -149,6 +164,8 @@ export function RandomOutfitBuilder({
   initialAutoPopulateRules,
   initialStartupRules,
   initialPieceIds,
+  categoryList,
+  categoryParents,
   signalsNonce,
   rulesFooter,
   footer,
@@ -160,6 +177,8 @@ export function RandomOutfitBuilder({
       items.map((i) => ({
         id: i.id,
         category: i.category,
+        // What makes a rule for "shirt" accept a piece filed under "t shirt".
+        categoryPath: categoryAncestryPath(i.category, categoryParents, categoryList),
         colors: i.colors,
         subcategory: i.subcategory,
         name: i.name,
@@ -167,7 +186,7 @@ export function RandomOutfitBuilder({
         pattern: i.pattern,
         season: decode<Season[]>(i.season, []),
       })),
-    [items],
+    [items, categoryParents, categoryList],
   );
 
   /**
@@ -457,16 +476,51 @@ export function RandomOutfitBuilder({
     })();
   }, [seedKey, seedPieces, slots, itemsById]);
 
-  const categoryOptions = useMemo(() => {
-    const labels = new Map<string, string>();
+  /**
+   * The chip row, in tree order.
+   *
+   * Two changes from the flat list it replaces, both consequences of nesting:
+   *
+   *  - Order is the tree's, not alphabetical, so a category sits immediately
+   *    after its parent. The row scrolls sideways and cannot indent, so `depth`
+   *    only drives a "↳" marker — locality is what carries the structure here.
+   *  - A category is offered when its *subtree* holds pieces, not just itself.
+   *    That is the whole point of a parent rule: "shirt" is worth asking for
+   *    even when every shirt is filed under "t shirt" or "flannel". The old
+   *    rule — offer a category only if something is filed directly under it —
+   *    would hide exactly the categories nesting makes useful.
+   *
+   * Categories an item claims that the list has since lost are appended flat,
+   * as before, so a rule can still be written for them.
+   */
+  const categoryRows = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const item of items) {
       if (isNoneCategoryStored(item.category)) continue;
       const key = normalizeCategoryName(item.category);
-      if (!key || labels.has(key)) continue;
-      labels.set(key, item.category.trim());
+      if (!key) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    return [...labels.values()].sort((a, b) => a.localeCompare(b));
-  }, [items]);
+
+    const rows: { name: string; depth: number; nested: number }[] = [];
+    const listed = new Set<string>();
+    for (const row of flattenCategoryTree(buildCategoryTree(categoryList, categoryParents))) {
+      listed.add(row.key);
+      const nested = descendantKeys(row.key, categoryParents, categoryList);
+      const inSubtree =
+        (counts.get(row.key) ?? 0) + nested.reduce((n, k) => n + (counts.get(k) ?? 0), 0);
+      if (inSubtree === 0) continue;
+      rows.push({ name: row.name, depth: row.depth, nested: nested.length });
+    }
+
+    const orphans = [...counts.keys()].filter((key) => !listed.has(key));
+    const labelFor = (key: string) =>
+      items.find((i) => normalizeCategoryName(i.category) === key)?.category.trim() ?? key;
+    for (const key of orphans.sort((a, b) => a.localeCompare(b))) {
+      rows.push({ name: labelFor(key), depth: 0, nested: 0 });
+    }
+    return rows;
+  }, [items, categoryList, categoryParents]);
 
   const colorNameOptions = useMemo(() => {
     const fromItems = [
@@ -478,6 +532,21 @@ export function RandomOutfitBuilder({
     }
     return merged.sort((a, b) => a.localeCompare(b));
   }, [items, colorOptions]);
+
+  /**
+   * The matching view of an item: its own category plus the ones above it. Used
+   * wherever a slot's categories are checked against a piece, so a slot for
+   * "shirt" accepts a t shirt in the sidebar exactly as a spin would.
+   */
+  const pickItemFor = useCallback(
+    (item: RandomOutfitItem) => ({
+      id: item.id,
+      category: item.category,
+      categoryPath: categoryAncestryPath(item.category, categoryParents, categoryList),
+      colors: item.colors,
+    }),
+    [categoryParents, categoryList],
+  );
 
   const slotInputs = useMemo(
     () =>
@@ -506,12 +575,9 @@ export function RandomOutfitBuilder({
   const assignableItems = useMemo(() => {
     if (!selected) return items;
     return items.filter((item) =>
-      itemMatchesCategories(
-        { id: item.id, category: item.category, colors: item.colors },
-        selected.categories,
-      ),
+      itemMatchesCategories(pickItemFor(item), selected.categories),
     );
-  }, [items, selected]);
+  }, [items, selected, pickItemFor]);
 
   // Front-page-style text search over the closet list (name/brand/color/etc.).
   const searchedAssignable = useMemo(() => {
@@ -546,14 +612,7 @@ export function RandomOutfitBuilder({
 
   async function assignItemToSlot(item: RandomOutfitItem) {
     if (!selected) return;
-    if (
-      !itemMatchesCategories(
-        { id: item.id, category: item.category, colors: item.colors },
-        selected.categories,
-      )
-    ) {
-      return;
-    }
+    if (!itemMatchesCategories(pickItemFor(item), selected.categories)) return;
     await ensurePieceUrl(item);
     setSlots((prev) =>
       prev.map((s) =>
@@ -1231,7 +1290,7 @@ export function RandomOutfitBuilder({
             multiples.
           </p>
 
-          {categoryOptions.length === 0 ? (
+          {categoryRows.length === 0 ? (
             <p className="text-sm text-ink-muted/80 italic">
               Your closet has no categorized pieces yet.
             </p>
@@ -1239,13 +1298,42 @@ export function RandomOutfitBuilder({
             // Single row, scrolled: the number of categories is user-controlled,
             // so any fixed-width assumption eventually wraps.
             <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {categoryOptions.map((cat) => {
+              {categoryRows.map((row) => {
+                const cat = row.name;
                 const key = normalizeCategoryName(cat);
                 const rule = categoryRules.find((r) =>
                   r.categories.some((c) => normalizeCategoryName(c) === key),
                 );
                 const active = !!rule;
                 const locked = !!rule && !(rule.categories.length === 1 && rule.count === 1);
+                /*
+                 * Already satisfiable by a rule further up the tree: a rule for
+                 * "shirt" will happily take this t shirt. Marked rather than
+                 * disabled — asking for a shirt *and* a t shirt is two pieces,
+                 * which is a reasonable thing to want.
+                 */
+                const coveredBy = !active
+                  ? categoryAncestryPath(cat, categoryParents, categoryList)
+                      .slice(1)
+                      .find((ancestor) =>
+                        categoryRules.some((r) =>
+                          r.categories.some(
+                            (c) => normalizeCategoryName(c) === normalizeCategoryName(ancestor),
+                          ),
+                        ),
+                      )
+                  : undefined;
+                const title = locked
+                  ? "Managed in multi-select below"
+                  : [
+                      coveredBy ? `Already covered by the ${coveredBy} rule` : null,
+                      row.nested > 0
+                        ? `Includes ${row.nested} nested ${row.nested === 1 ? "category" : "categories"}`
+                        : null,
+                      "Tap to include · drag into a layer",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
                 return (
                   <button
                     key={cat}
@@ -1255,14 +1343,24 @@ export function RandomOutfitBuilder({
                     onDragEnd={() => setDragCategory(null)}
                     onClick={() => toggleSimpleCategory(cat)}
                     disabled={locked}
-                    title={locked ? "Managed in multi-select below" : "Tap to include · drag into a layer"}
+                    title={title}
                     className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
                       active
                         ? "bg-ink text-paper border-ink"
-                        : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
+                        : coveredBy
+                          ? "bg-paper border-ink/30 border-dashed text-ink"
+                          : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
                     } ${locked ? "opacity-60" : ""}`}
                   >
+                    {row.depth > 0 && (
+                      <span aria-hidden className="mr-1 opacity-50">
+                        ↳
+                      </span>
+                    )}
                     {cat}
+                    {row.nested > 0 ? (
+                      <span className="ml-1 opacity-60 normal-case">+{row.nested}</span>
+                    ) : null}
                     {rule && rule.count > 1 ? ` ×${rule.count}` : ""}
                   </button>
                 );
@@ -1300,15 +1398,15 @@ export function RandomOutfitBuilder({
                 Pick categories to combine (matches any — “or”), then how many.
               </div>
               <div className="flex gap-1.5 overflow-x-auto pb-1">
-                {categoryOptions
-                  .filter((cat) => {
-                    const key = normalizeCategoryName(cat);
+                {categoryRows
+                  .filter(({ name }) => {
+                    const key = normalizeCategoryName(name);
                     const claimed = categoryRules.some((r) =>
                       r.categories.some((c) => normalizeCategoryName(c) === key),
                     );
                     return !claimed;
                   })
-                  .map((cat) => {
+                  .map(({ name: cat, depth }) => {
                     const on = draftCats.some(
                       (c) => normalizeCategoryName(c) === normalizeCategoryName(cat),
                     );
@@ -1317,12 +1415,17 @@ export function RandomOutfitBuilder({
                         key={cat}
                         type="button"
                         onClick={() => toggleDraftCategory(cat)}
-                        className={`rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize ${
+                        className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize ${
                           on
                             ? "bg-accent text-white border-accent"
                             : "bg-white border-ink/10 text-ink-muted hover:border-ink/25"
                         }`}
                       >
+                        {depth > 0 && (
+                          <span aria-hidden className="mr-1 opacity-50">
+                            ↳
+                          </span>
+                        )}
                         {cat}
                       </button>
                     );

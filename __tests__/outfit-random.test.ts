@@ -59,6 +59,63 @@ describe("outfit-random", () => {
     expect(pickRandomOutfit(items, slots, [])).toBeNull();
   });
 
+  /**
+   * The declared exception to the rule above. "shirt" is not a "top" by name —
+   * no synonym table — but it *is* one when the user has nested it there, and
+   * the generator's rule chips promise exactly that.
+   */
+  describe("nested categories", () => {
+    // As lib/category-tree.ts builds it: self first, then ancestors.
+    const tee = {
+      id: "tee",
+      category: "t shirt",
+      categoryPath: ["t shirt", "shirt", "top"],
+      colors: [],
+    };
+
+    it("matches a rule for any category the item is nested under", () => {
+      expect(itemMatchesCategories(tee, ["t shirt"])).toBe(true);
+      expect(itemMatchesCategories(tee, ["shirt"])).toBe(true);
+      expect(itemMatchesCategories(tee, ["top"])).toBe(true);
+    });
+
+    it("does not match sideways or downward", () => {
+      expect(itemMatchesCategories(tee, ["bottom"])).toBe(false);
+      expect(itemMatchesCategories(tee, ["flannel"])).toBe(false);
+    });
+
+    it("fills a parent's slot with a piece filed under the child", () => {
+      const slots = [{ id: "s1", categories: ["top"] }];
+      const result = pickRandomOutfit([tee], slots, []);
+      expect(result?.get("s1")).toBe("tee");
+    });
+
+    it("still refuses a piece with no category, path or not", () => {
+      const none = { id: "n", category: "None", categoryPath: ["None", "top"], colors: [] };
+      expect(itemMatchesCategories(none, ["top"])).toBe(false);
+    });
+
+    it("falls back to the plain category when no path is given", () => {
+      const flat = { id: "f", category: "t shirt", colors: [] };
+      expect(itemMatchesCategories(flat, ["t shirt"])).toBe(true);
+      expect(itemMatchesCategories(flat, ["top"])).toBe(false);
+    });
+
+    it("counts one piece once, so two nested slots need two pieces", () => {
+      // A rule for "shirt" plus a rule for "t shirt" is two garments, not one
+      // garment matched twice.
+      const slots = [
+        { id: "parent", categories: ["shirt"] },
+        { id: "child", categories: ["t shirt"] },
+      ];
+      expect(pickRandomOutfit([tee], slots, [])).toBeNull();
+      const second = { ...tee, id: "tee2" };
+      const result = pickRandomOutfit([tee, second], slots, []);
+      expect(result).not.toBeNull();
+      expect(new Set([result!.get("parent"), result!.get("child")]).size).toBe(2);
+    });
+  });
+
   it("respects color rules using primary color only", () => {
     const items = [
       { id: "r1", category: "top", colors: [{ hex: "#f00", name: "red" }] },

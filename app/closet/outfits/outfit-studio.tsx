@@ -20,6 +20,7 @@ import { WeatherCard, useDailyWeather } from "./weather-card";
 import { PendingWearsCard } from "./pending-wears";
 import { StyleRulesPanel } from "./style-rules-panel";
 import type { Color } from "@/lib/json";
+import type { CategoryParents } from "@/lib/category-tree";
 import type { OutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
 import type { CategoryRule } from "@/lib/outfit-random";
 import type { TemperatureUnit } from "@/lib/temperature";
@@ -60,6 +61,9 @@ const TAB_BLURB: Record<Tab, string> = {
 
 type Props = HandoffProps & {
   items: RandomOutfitItem[];
+  /** The user's category list and its nesting, for the generator's rule chips. */
+  categoryList: string[];
+  categoryParents: CategoryParents;
   colorOptions: Color[];
   initialOutfits: SavedOutfit[];
   outfitSlotDefaults: OutfitSlotDefaults;
@@ -81,6 +85,8 @@ export function OutfitStudio({
   returnTo = null,
   returnLabel = "Back",
   items,
+  categoryList,
+  categoryParents,
   colorOptions,
   initialOutfits,
   outfitSlotDefaults,
@@ -179,6 +185,8 @@ export function OutfitStudio({
           initialAutoPopulateRules={outfitAutoPopulateRules}
           initialStartupRules={outfitStartupRules}
           initialPieceIds={initialPieceIds}
+          categoryList={categoryList}
+          categoryParents={categoryParents}
           signalsNonce={signalsNonce}
           rulesFooter={<WeatherCard weather={weather} temperatureUnit={temperatureUnit} />}
           footer={

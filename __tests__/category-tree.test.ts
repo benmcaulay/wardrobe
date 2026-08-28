@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCategoryTree,
+  categoryAncestryPath,
   searchCategoryOptionRows,
   toggleCategoryOptionRow,
   type CategoryOptionRow,
@@ -89,6 +90,30 @@ describe("descendantKeys", () => {
 
   it("is empty for a leaf", () => {
     expect(descendantKeys("t shirt", PARENTS, LIST)).toEqual([]);
+  });
+});
+
+describe("categoryAncestryPath", () => {
+  it("returns the category first, then everything above it", () => {
+    expect(categoryAncestryPath("t shirt", PARENTS, LIST)).toEqual(["t shirt", "shirt", "top"]);
+  });
+
+  it("is just the category itself at the root", () => {
+    expect(categoryAncestryPath("shoes", PARENTS, LIST)).toEqual(["shoes"]);
+  });
+
+  it("returns list casing, so the path reads as the user wrote it", () => {
+    const list = ["Top", "Shirt"];
+    expect(categoryAncestryPath("shirt", { shirt: "top" }, list)).toEqual(["Shirt", "Top"]);
+  });
+
+  /** An item can be filed under a label the list has since lost. */
+  it("keeps a category the list no longer has", () => {
+    expect(categoryAncestryPath("blouse", PARENTS, LIST)).toEqual(["blouse"]);
+  });
+
+  it("is empty for no category", () => {
+    expect(categoryAncestryPath("  ", PARENTS, LIST)).toEqual([]);
   });
 });
 
