@@ -7,10 +7,12 @@ import { isNoneCategoryStored, normalizeCategoryName } from "@/lib/categories";
 import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
   categoryListSignature,
+  categoryRulesEqual,
   diagnoseOutfitFill,
   formatCategoryList,
   itemMatchesCategories,
   pickRandomOutfit,
+  pruneCategoryRules,
   type CategoryRule,
   type ColorRule,
   type OutfitFillIssue,
@@ -477,6 +479,23 @@ export function RandomOutfitBuilder({
   }, [seedKey, seedPieces, slots, itemsById]);
 
   /**
+   * Forget rules for categories that no longer exist.
+   *
+   * Belt to the server's braces: removing a category now prunes the saved
+   * startup rules, but rules saved before that fix — or a category removed in
+   * another tab — would still arrive here and put an unfillable slot on the
+   * canvas. Categories that only items carry count as known, since a rule for
+   * one still finds pieces.
+   */
+  useEffect(() => {
+    const known = [...categoryList, ...items.map((i) => i.category)];
+    setCategoryRules((prev) => {
+      const pruned = pruneCategoryRules(prev, known);
+      return categoryRulesEqual(prev, pruned) ? prev : pruned;
+    });
+  }, [categoryList, items]);
+
+  /**
    * The chip row, in tree order.
    *
    * Two changes from the flat list it replaces, both consequences of nesting:
@@ -676,9 +695,29 @@ export function RandomOutfitBuilder({
     setColorRules((prev) => prev.filter((_, i) => i !== index));
   }
 
+  /**
+   * Take a slot off the canvas.
+   *
+   * Has to remove the *rule* as well, not just the slot. Slots are derived from
+   * the category rules by the sync effect above, so dropping one on its own
+   * lasted until the next time that effect ran — the slot came straight back,
+   * and the button read as broken. One slot is one unit of a rule's count, so
+   * this decrements it and removes the rule when the last one goes.
+   */
   function removeSlot(id: string) {
+    const slot = slotsRef.current.find((s) => s.id === id);
     setSlots((prev) => prev.filter((s) => s.id !== id));
     if (selectedSlotId === id) setSelectedSlotId(null);
+    if (!slot) return;
+    const signature = categoryListSignature(slot.categories);
+    setCategoryRules((prev) => {
+      const index = prev.findIndex((r) => categoryListSignature(r.categories) === signature);
+      if (index < 0) return prev;
+      const rule = prev[index]!;
+      if (rule.count <= 1) return prev.filter((_, i) => i !== index);
+      return prev.map((r, i) => (i === index ? { ...r, count: r.count - 1 } : r));
+    });
+    setSpinError(null);
   }
 
   async function spin() {

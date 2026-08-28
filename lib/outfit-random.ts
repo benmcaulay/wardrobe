@@ -98,6 +98,49 @@ export function itemMatchesCategories(item: OutfitPickItem, categories: readonly
   return categories.some((c) => itemKeys.includes(normalizeCategoryName(c)));
 }
 
+/**
+ * Drop categories a rule names that no longer exist.
+ *
+ * Rules are stored by category *name*, so deleting a category in Settings left
+ * a rule behind — and a rule is what creates a slot, so the canvas kept an
+ * empty slot for a category the closet no longer had, with "Need 1 top piece
+ * but only 0 in your closet" and no way to act on it. A rule whose whole OR
+ * list is gone is dropped with it.
+ *
+ * `known` is matched case-insensitively and should include categories that only
+ * items carry, not just the ones in the user's list: a piece filed under a
+ * label the list has lost is still findable, so a rule for it still works.
+ */
+export function pruneCategoryRules(
+  rules: readonly CategoryRule[],
+  known: readonly string[],
+): CategoryRule[] {
+  const allowed = new Set(known.map(normalizeCategoryName).filter(Boolean));
+  const out: CategoryRule[] = [];
+  for (const rule of rules) {
+    const categories = rule.categories.filter((c) => allowed.has(normalizeCategoryName(c)));
+    if (categories.length === 0) continue;
+    out.push(categories.length === rule.categories.length ? rule : { ...rule, categories });
+  }
+  return out;
+}
+
+/** True when the two rule lists differ — cheap enough to compare as text. */
+export function categoryRulesEqual(
+  a: readonly CategoryRule[],
+  b: readonly CategoryRule[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((rule, i) => {
+    const other = b[i]!;
+    return (
+      rule.count === other.count &&
+      rule.categories.length === other.categories.length &&
+      rule.categories.every((c, j) => normalizeCategoryName(c) === normalizeCategoryName(other.categories[j]!))
+    );
+  });
+}
+
 /** Expand rules into one slot descriptor per required piece. */
 export function expandCategoryRules(
   rules: CategoryRule[],

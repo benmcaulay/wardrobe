@@ -11,6 +11,8 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { decode, encode, type GarmentKindChoice, type StylePrefs } from "@/lib/json";
 import { migrateClosetGroupOrderCategory } from "@/lib/closet-group-order";
+import { pruneCategoryRules, sanitizeCategoryRules } from "@/lib/outfit-random";
+import { sanitizeVisualLayers } from "@/lib/outfit-slot-defaults";
 import {
   addCategoryUnder,
   moveCategory,
@@ -94,6 +96,30 @@ export async function removeWardrobeCategory(
   );
   clean.categoriesList = sanitizeCategoryList(nextList);
   clean.categoryParents = sanitizeCategoryParents(promoted, clean.categoriesList);
+  /*
+   * Anything else that stores this category by *name* has to let go of it too.
+   *
+   * A startup rule is the one that bit: a rule creates a slot, so a rule for a
+   * deleted category left an empty slot on the outfit canvas complaining "Need
+   * 1 top piece but only 0 in your closet", with nothing on that page able to
+   * clear it. Visual layers are the same shape of problem, one screen over.
+   *
+   * The signature-keyed maps (slot defaults, combo layouts, layer arrangements)
+   * are deliberately left alone: a stale key is inert, and it means a category
+   * re-added under the same name comes back with its layout intact.
+   */
+  const remaining = clean.categoriesList;
+  if (prefs.outfitStartupRules) {
+    clean.outfitStartupRules = pruneCategoryRules(
+      sanitizeCategoryRules(prefs.outfitStartupRules),
+      remaining,
+    );
+  }
+  if (prefs.outfitVisualLayers) {
+    clean.outfitVisualLayers = sanitizeVisualLayers(prefs.outfitVisualLayers)
+      .map((layer) => layer.filter((c) => normalizeCategoryName(c) !== removedKey))
+      .filter((layer) => layer.length > 0);
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.user.update({
