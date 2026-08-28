@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs, isNoneCategoryStored, NONE_CATEGORY, normalizeCategoryName } from "@/lib/categories";
+import {
+  buildCategoryTree,
+  descendantKeys,
+  flattenCategoryTree,
+  getCategoryParentsFromPrefs,
+} from "@/lib/category-tree";
 import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseColors, parseStringArray, parseStylePrefs } from "@/lib/json";
@@ -116,18 +122,37 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
     ),
   ].sort((a, b) => a.localeCompare(b));
 
+  /*
+   * The filter's rows, in tree order.
+   *
+   * `depth` and `descendants` are what let the control indent the list and let
+   * picking a parent pick everything beneath it — filtering by "shirt" has to
+   * find the pieces filed under "t shirt", or nesting is a decorative indent.
+   *
+   * Resolved here rather than in the client because the nesting lives in prefs,
+   * which this page already reads.
+   */
+  const categoryParents = getCategoryParentsFromPrefs(prefs);
+  const categoryRows = flattenCategoryTree(
+    buildCategoryTree(preferredCategories, categoryParents),
+  );
   const categoryFilterOptions: FilterOptions["categories"] = [];
   const seenFilter = new Set<string>();
-  function pushCatFilter(value: string, label: string) {
+  function pushCatFilter(value: string, label: string, depth = 0, descendants: string[] = []) {
     if (seenFilter.has(value)) return;
     seenFilter.add(value);
-    categoryFilterOptions.push({ value, label });
+    categoryFilterOptions.push({ value, label, depth, descendants });
   }
   if (hasUncategorized) {
     pushCatFilter(FILTER_CATEGORY_NONE, NONE_CATEGORY);
   }
-  for (const c of preferredCategories) {
-    pushCatFilter(c, c);
+  for (const row of categoryRows) {
+    // Descendant *values* — the filter matches items by label, so the subtree
+    // is expressed in the same terms as the rows themselves.
+    const descendants = descendantKeys(row.key, categoryParents, preferredCategories).map(
+      (key) => preferredCategories.find((c) => normalizeCategoryName(c) === key) ?? key,
+    );
+    pushCatFilter(row.name, row.name, row.depth, descendants);
   }
   for (const u of usedNonEmpty) {
     if (!preferredCategories.some((p) => normalizeCategoryName(p) === normalizeCategoryName(u))) {

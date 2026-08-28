@@ -15,8 +15,17 @@ import { SHARED_OWNER_FILTER } from "@/lib/owners";
 import { parseMultiFilterParam, serializeMultiFilterParam } from "@/lib/closet-filter-params";
 import { isFilterVisible, type ClosetFilterKey } from "@/lib/closet-filter-visibility";
 import { setDefaultClosetSort } from "@/lib/actions/preferences";
+import {
+  searchCategoryOptionRows,
+  toggleCategoryOptionRow,
+  type CategoryOptionRow,
+} from "@/lib/category-tree";
 
-export type CategoryFilterOption = { value: string; label: string };
+/**
+ * A row of the category filter. `depth` and `descendants` are what make it a
+ * tree rather than a list: see lib/category-tree.ts.
+ */
+export type CategoryFilterOption = CategoryOptionRow;
 
 export type OwnerFilterOption = { value: string; label: string };
 
@@ -232,8 +241,7 @@ export function ClosetFilters({
           />
         )}
         {shows("category") && (
-          <MultiSelectFilter
-            label="Category"
+          <CategoryTreeFilter
             selected={filters.categories}
             options={options.categories}
             onChange={(categories) => patch({ categories })}
@@ -464,6 +472,168 @@ function SortDirectionArrow({ reversed, className }: { reversed: boolean; classN
     >
       <path d="M4 6l4 4 4-4" />
     </svg>
+  );
+}
+
+/**
+ * The Category filter: a searchable tree.
+ *
+ * Different enough from `MultiSelectFilter` to be its own control rather than a
+ * flag on it. Two reasons, both structural:
+ *
+ *   - Rows are indented and stacked, not wrapped chips. A wrapped chip cloud
+ *     cannot show that "t shirt" is inside "shirt", which is the only reason
+ *     the nesting exists.
+ *   - Picking a parent picks its subtree, so one click on "shirt" filters to
+ *     every kind of shirt. Toggling is therefore over subtrees, not values.
+ *
+ * The search box appears once the list is long enough to need it — a closet with
+ * five categories does not, and an always-present input is one more thing in a
+ * popover that is mostly used by pointing.
+ */
+const CATEGORY_SEARCH_MIN_ROWS = 8;
+
+export function CategoryTreeFilter({
+  selected,
+  options,
+  onChange,
+  disabled,
+}: {
+  selected: string[];
+  options: CategoryFilterOption[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  // Cleared on close so reopening starts from the whole tree rather than from
+  // whatever was typed minutes ago.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const active = selected.length > 0;
+  const rows = searchCategoryOptionRows(options, query);
+  const showSearch = options.length >= CATEGORY_SEARCH_MIN_ROWS;
+  const summary = active
+    ? selected
+        .map((v) => options.find((o) => o.value === v)?.label ?? v)
+        .map((text) => text.charAt(0).toUpperCase() + text.slice(1))
+        .join(", ")
+    : "Category";
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className={`inline-flex items-center gap-1.5 max-w-[200px] rounded-full border px-3 py-1.5 pr-2 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed ${
+          active
+            ? "bg-ink text-paper border-ink"
+            : "bg-white border-ink/10 text-ink hover:border-ink/30"
+        }`}
+      >
+        <span className="truncate">{summary}</span>
+        {active && (
+          <span className="shrink-0 rounded-full bg-paper/20 px-1.5 text-[10px] tabular-nums">
+            {selected.length}
+          </span>
+        )}
+        <span className="text-[10px] shrink-0" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && !disabled && (
+        <div
+          role="listbox"
+          aria-label="Category filter"
+          aria-multiselectable
+          className="absolute z-30 top-full left-0 mt-1 w-[240px] max-w-[min(320px,calc(100vw-3rem))] rounded-xl border border-ink/10 bg-white p-2 shadow-lg"
+        >
+          {showSearch && (
+            <input
+              type="search"
+              value={query}
+              autoFocus
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search categories…"
+              aria-label="Search categories"
+              className="mb-2 w-full rounded-lg border border-ink/10 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
+          )}
+          <div className="max-h-[280px] overflow-y-auto">
+            {rows.length === 0 ? (
+              <p className="px-1 py-2 text-[11px] text-ink-muted">No category matches that.</p>
+            ) : (
+              rows.map((row) => {
+                const isOn = selected.includes(row.value);
+                return (
+                  <button
+                    key={row.value}
+                    type="button"
+                    role="option"
+                    aria-selected={isOn}
+                    onClick={() => onChange(toggleCategoryOptionRow(selected, row))}
+                    style={{ paddingLeft: 6 + Math.min(row.depth, 4) * 14 }}
+                    className={`flex w-full items-center gap-1.5 rounded-lg py-1 pr-2 text-left text-xs capitalize transition ${
+                      isOn ? "bg-ink text-paper" : "text-ink hover:bg-paper-warm"
+                    }`}
+                    title={
+                      row.descendants.length > 0
+                        ? `Includes ${row.descendants.length} nested ${
+                            row.descendants.length === 1 ? "category" : "categories"
+                          }`
+                        : undefined
+                    }
+                  >
+                    {/* Nesting cue for the indented rows, so depth is readable
+                        even when a parent is filtered out by a search. */}
+                    {row.depth > 0 && (
+                      <span aria-hidden className="text-[9px] opacity-50">
+                        ↳
+                      </span>
+                    )}
+                    <span className="truncate">{row.label}</span>
+                    {row.descendants.length > 0 && (
+                      <span
+                        className={`ml-auto shrink-0 text-[9px] tabular-nums ${
+                          isOn ? "text-paper/70" : "text-ink-muted"
+                        }`}
+                      >
+                        +{row.descendants.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {active && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="mt-2 text-[10px] text-ink-muted hover:text-ink underline underline-offset-2"
+            >
+              Clear category
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

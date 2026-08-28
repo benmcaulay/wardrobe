@@ -1,6 +1,7 @@
 import { currentGenerationCost } from "@/lib/ai-costs";
 import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs } from "@/lib/categories";
+import { getCategoryParentsFromPrefs } from "@/lib/category-tree";
 import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
@@ -17,6 +18,7 @@ export default async function AddItemPage() {
   });
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
+  const categoryParents = getCategoryParentsFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
   const ownersList = getOwnersFromPrefs(prefs);
   const colorOptions = getColorsListFromPrefs(prefs);
@@ -36,6 +38,7 @@ export default async function AddItemPage() {
         costLabel={currentGenerationCost("apparel").label}
         autoGenerateGhost={dbUser?.autoGenerateGhost ?? false}
         categories={categories}
+        categoryParents={categoryParents}
         styleTagsList={styleTagsList}
         ownersList={ownersList}
         colorOptions={colorOptions}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { canonicalCategoryChoice, getCategoriesListFromPrefs } from "@/lib/categories";
+import { getCategoryParentsFromPrefs } from "@/lib/category-tree";
 import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseColors, parseSeasons, parseStringArray, parseStylePrefs } from "@/lib/json";
@@ -32,6 +33,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
   const categoryGate = requireGhostCategory(item);
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = getCategoriesListFromPrefs(prefs);
+  const categoryParents = getCategoryParentsFromPrefs(prefs);
   const styleTagsList = getStyleTagsListFromPrefs(prefs);
   const ownersList = getOwnersFromPrefs(prefs);
   const colorOptions = getColorsListFromPrefs(prefs);
@@ -128,6 +130,7 @@ export default async function ItemDetailPage({ params }: { params: { itemId: str
             itemId={item.id}
             initial={initial}
             categories={categories}
+            categoryParents={categoryParents}
             styleTagsList={styleTagsList}
             ownersList={ownersList}
             colorOptions={colorOptions}

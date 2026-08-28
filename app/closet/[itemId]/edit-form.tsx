@@ -1,5 +1,6 @@
 "use client";
 
+import type { CategoryParents } from "@/lib/category-tree";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ItemFormFields } from "@/components/item-form-fields";
@@ -14,12 +15,21 @@ type Props = {
   itemId: string;
   initial: ItemFormValue;
   categories: string[];
+  categoryParents?: CategoryParents;
   styleTagsList: string[];
   ownersList: Owner[];
   colorOptions: Color[];
 };
 
-export function EditForm({ itemId, initial, categories, styleTagsList, ownersList, colorOptions }: Props) {
+export function EditForm({
+  itemId,
+  initial,
+  categories,
+  categoryParents,
+  styleTagsList,
+  ownersList,
+  colorOptions,
+}: Props) {
   const [value, setValue] = useState<ItemFormValue>(initial);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -122,6 +132,7 @@ export function EditForm({ itemId, initial, categories, styleTagsList, ownersLis
         value={value}
         onChange={(p) => setValue((v) => ({ ...v, ...p }))}
         categories={categories}
+        categoryParents={categoryParents}
         styleTags={styleTagsList}
         owners={ownersList}
         colorOptions={colorOptions}

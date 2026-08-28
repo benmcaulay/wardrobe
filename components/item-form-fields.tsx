@@ -5,6 +5,11 @@ import type { ItemFormValue, Season } from "@/lib/types";
 import { CATEGORIES, SEASONS } from "@/lib/types";
 import type { Owner } from "@/lib/json";
 import { NONE_CATEGORY, normalizeCategoryName } from "@/lib/categories";
+import {
+  buildCategoryTree,
+  flattenCategoryTree,
+  type CategoryParents,
+} from "@/lib/category-tree";
 import { DEFAULT_OWNERS } from "@/lib/owners";
 import { COMMON_STYLE_TAGS, FAVORITE_COLOR_OPTIONS, normalizeStyleTagName } from "@/lib/preferences";
 
@@ -13,6 +18,12 @@ type Props = {
   onChange: (patch: Partial<ItemFormValue>) => void;
   disabled?: boolean;
   categories?: string[];
+  /**
+   * Category nesting, if the caller has it. Only affects how the options are
+   * *drawn* — a nested category is still stored as its own plain label, so the
+   * value written to the item is unchanged whether this is passed or not.
+   */
+  categoryParents?: CategoryParents;
   /** Ordered style-tag chips (from Settings); defaults to built-ins when omitted. */
   styleTags?: string[];
   /** Owner roster chips (from Settings); defaults to the Me/Her seed when omitted. */
@@ -26,6 +37,7 @@ export function ItemFormFields({
   onChange,
   disabled,
   categories = CATEGORIES,
+  categoryParents,
   styleTags = [...COMMON_STYLE_TAGS],
   owners = DEFAULT_OWNERS,
   colorOptions = FAVORITE_COLOR_OPTIONS,
@@ -63,6 +75,13 @@ export function ItemFormFields({
     const match = categoryOptions.find((o) => normalizeCategoryName(o) === key);
     return match ?? raw;
   }, [categoryOptions, value.category]);
+
+  // Drawn as a tree when the caller knows the nesting, and as the flat list it
+  // always was when it doesn't.
+  const categoryRows = useMemo(
+    () => flattenCategoryTree(buildCategoryTree(categoryOptions, categoryParents)),
+    [categoryOptions, categoryParents],
+  );
 
   const tagChips = useMemo(() => {
     const base = styleTags.length > 0 ? styleTags : [...COMMON_STYLE_TAGS];
@@ -143,9 +162,14 @@ export function ItemFormFields({
             className={inputCls}
           >
             <option value={NONE_CATEGORY}>{NONE_CATEGORY}</option>
-            {categoryOptions.map((c) => (
-              <option key={normalizeCategoryName(c)} value={c}>
-                {c}
+            {/*
+              Indented with figure spaces rather than nested <optgroup>s: an
+              optgroup is one level deep and, more to the point, not selectable —
+              a parent category has to stay pickable.
+            */}
+            {categoryRows.map((row) => (
+              <option key={row.key} value={row.name}>
+                {row.depth > 0 ? `${"\u2007".repeat(row.depth * 2)}↳ ${row.name}` : row.name}
               </option>
             ))}
           </select>

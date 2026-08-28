@@ -21,6 +21,7 @@ import {
   isNoneCategoryStored,
   suggestCategoryFromItem,
 } from "@/lib/categories";
+import type { CategoryParents } from "@/lib/category-tree";
 import { enqueueGhostPreview, getGhostJobStatus } from "@/lib/actions/ghost-mannequin";
 import { mapItemToGhost, requireGhostCategory } from "@/lib/services/ghost-mannequin-shared";
 import { IMAGE_UPLOAD_ACCEPT } from "@/lib/image-upload-accept";
@@ -92,6 +93,7 @@ type Props = {
   costLabel: string;
   autoGenerateGhost: boolean;
   categories: string[];
+  categoryParents?: CategoryParents;
   styleTagsList: string[];
   ownersList: Owner[];
   colorOptions: Color[];
@@ -169,6 +171,7 @@ export function AddItemFlow({
   costLabel,
   autoGenerateGhost,
   categories,
+  categoryParents,
   styleTagsList,
   ownersList,
   colorOptions,
@@ -752,6 +755,7 @@ export function AddItemFlow({
           state={state}
           costLabel={costLabel}
           categories={categories}
+          categoryParents={categoryParents}
           styleTagsList={styleTagsList}
           ownersList={ownersList}
           colorOptions={colorOptions}
@@ -1403,6 +1407,7 @@ function ReadyView({
   costLabel,
   state,
   categories,
+  categoryParents,
   styleTagsList,
   ownersList,
   colorOptions,
@@ -1438,6 +1443,7 @@ function ReadyView({
 }: {
   state: ReadyState;
   categories: string[];
+  categoryParents?: CategoryParents;
   styleTagsList: string[];
   ownersList: Owner[];
   colorOptions: Color[];
@@ -1665,6 +1671,7 @@ function ReadyView({
           value={state.value}
           onChange={onChange}
           categories={categories}
+          categoryParents={categoryParents}
           styleTags={styleTagsList}
           owners={ownersList}
           colorOptions={colorOptions}
