@@ -356,9 +356,10 @@ export function LooksCarousel({
           const dx = e.clientX - live.lastX;
           if (Math.abs(dx) > 0) live.lastX = e.clientX;
           if (Math.abs(dx) >= DRAG_SLOP_PX) live.moved = true;
-          // Turn the ring by the distance dragged. Negated so the slide under
-          // the pointer follows the pointer rather than running from it.
-          phase.current = wrapPhase(phase.current - dx / DRAG_PX_PER_TURN);
+          // Turn the ring by the distance dragged, in the direction of the
+          // drag: pulling left brings the next day toward the front, the same
+          // way the arrow keys and a swipe on a photo roll read.
+          phase.current = wrapPhase(phase.current + dx / DRAG_PX_PER_TURN);
           target.current = null;
         }}
         onPointerUp={() => {
