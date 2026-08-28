@@ -1,7 +1,6 @@
 "use client";
 
 import type { StylePrefs } from "@/lib/json";
-import { getColorsListFromPrefs } from "@/lib/colors";
 import { SIZE_SLOTS, STYLE_OPTIONS } from "@/lib/preferences";
 
 type Props = {
@@ -12,20 +11,11 @@ type Props = {
 
 export function StylePrefsEditor({ value, onChange, disabled }: Props) {
   const styles = value.styles ?? [];
-  const favoriteColors = value.favoriteColors ?? [];
   const sizes = value.sizes ?? {};
-  const colorOptions = getColorsListFromPrefs(value);
 
   function toggleStyle(s: string) {
     const next = styles.includes(s) ? styles.filter((x) => x !== s) : [...styles, s];
     onChange({ ...value, styles: next });
-  }
-
-  function toggleColor(name: string) {
-    const next = favoriteColors.includes(name)
-      ? favoriteColors.filter((x) => x !== name)
-      : [...favoriteColors, name];
-    onChange({ ...value, favoriteColors: next });
   }
 
   function setSize(key: string, v: string) {
@@ -55,34 +45,6 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
                 } disabled:opacity-50`}
               >
                 {s}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section>
-        <h3 className="text-xs uppercase tracking-wide text-ink-muted mb-3">Favorite colors</h3>
-        <div className="flex flex-wrap gap-3">
-          {colorOptions.map((c) => {
-            const active = favoriteColors.includes(c.name);
-            return (
-              <button
-                key={c.name}
-                type="button"
-                onClick={() => toggleColor(c.name)}
-                disabled={disabled}
-                aria-pressed={active}
-                aria-label={c.name}
-                className={`flex flex-col items-center gap-1 transition disabled:opacity-50`}
-              >
-                <span
-                  className={`block w-10 h-10 rounded-full border transition ${
-                    active ? "ring-2 ring-offset-2 ring-accent border-transparent" : "border-ink/10"
-                  }`}
-                  style={{ backgroundColor: c.hex }}
-                />
-                <span className="text-[10px] uppercase tracking-wide text-ink-muted">{c.name}</span>
               </button>
             );
           })}

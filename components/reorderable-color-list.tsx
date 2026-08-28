@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Color } from "@/lib/json";
+import { isFavoriteColor } from "@/lib/colors";
 
 function reorderList<T>(list: T[], from: number, to: number): T[] {
   if (from === to) return list;
@@ -16,9 +17,19 @@ type Props = {
   onReorder: (next: Color[]) => void;
   onRemove?: (color: Color) => void;
   removeDisabled?: (color: Color) => boolean;
+  /** Normalised names of the favourited colours. Omit to hide the hearts. */
+  favorites?: readonly string[];
+  onToggleFavorite?: (color: Color, favorite: boolean) => void;
 };
 
-export function ReorderableColorList({ items, onReorder, onRemove, removeDisabled }: Props) {
+export function ReorderableColorList({
+  items,
+  onReorder,
+  onRemove,
+  removeDisabled,
+  favorites,
+  onToggleFavorite,
+}: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
 
@@ -82,6 +93,43 @@ export function ReorderableColorList({ items, onReorder, onRemove, removeDisable
             <span className="text-[11px] text-ink-muted/70 tabular-nums select-none">
               {color.hex}
             </span>
+            {favorites && onToggleFavorite && (
+              <button
+                type="button"
+                onClick={() => onToggleFavorite(color, !isFavoriteColor(favorites, color.name))}
+                aria-pressed={isFavoriteColor(favorites, color.name)}
+                aria-label={
+                  isFavoriteColor(favorites, color.name)
+                    ? `Remove ${color.name} from favorites`
+                    : `Add ${color.name} to favorites`
+                }
+                title={
+                  isFavoriteColor(favorites, color.name)
+                    ? "A favorite — click to unfavorite"
+                    : "Mark as a favorite"
+                }
+                className={`flex-shrink-0 grid place-items-center w-7 h-7 rounded-full transition ${
+                  isFavoriteColor(favorites, color.name)
+                    ? "text-accent hover:bg-accent/10"
+                    : "text-ink-muted/40 hover:text-ink-muted hover:bg-paper-warm"
+                }`}
+              >
+                {/* Filled when it's a favourite, outlined when it isn't — the
+                    same shape either way, so the row doesn't shift. */}
+                <svg
+                  viewBox="0 0 24 24"
+                  className="w-4 h-4"
+                  fill={isFavoriteColor(favorites, color.name) ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M12 20.2s-7.5-4.3-7.5-9.2a4.2 4.2 0 0 1 7.5-2.6 4.2 4.2 0 0 1 7.5 2.6c0 4.9-7.5 9.2-7.5 9.2z" />
+                </svg>
+              </button>
+            )}
             {onRemove && (
               <button
                 type="button"

@@ -36,10 +36,15 @@ export async function updateStylePrefs(prefs: StylePrefs): Promise<void> {
   // Category/tag/color lists are edited via dedicated wardrobe actions; the style
   // editor state often omits these keys, so we drop them here (keeping the existing
   // saved lists) to avoid wiping them on "Save preferences".
+  //
+  // `favoriteColors` joined them when the heart moved into the palette list: it
+  // now saves on the spot via setFavoriteColor, so a stale copy in this payload
+  // would undo every heart set since the page loaded.
   const {
     categoriesList: _drop,
     styleTagsList: _dropTags,
     colorsList: _dropColors,
+    favoriteColors: _dropFavorites,
     ...fromClient
   } = prefs;
   const merged: StylePrefs = { ...existing, ...fromClient };

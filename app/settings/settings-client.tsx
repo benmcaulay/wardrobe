@@ -41,6 +41,7 @@ import {
 } from "@/lib/actions/wardrobeStyleTags";
 import {
   addWardrobeColor,
+  setFavoriteColor,
   removeWardrobeColor,
   reorderWardrobeColors,
 } from "@/lib/actions/wardrobeColors";
@@ -58,6 +59,7 @@ import {
   normalizeCategoryName,
   type GarmentKind,
 } from "@/lib/categories";
+import { getFavoriteColorNames, toggleFavoriteColor } from "@/lib/colors";
 import type { GarmentKindChoice } from "@/lib/json";
 import type { Color, Owner, StylePrefs } from "@/lib/json";
 
@@ -135,6 +137,14 @@ export function SettingsClient({
   const [localTags, setLocalTags] = useState(styleTagsList);
   const [localOwners, setLocalOwners] = useState(ownersList);
   const [localColors, setLocalColors] = useState(colorList);
+  /**
+   * Favourited palette colours, by normalised name.
+   *
+   * Held apart from `prefs` on purpose: the heart saves on the spot, so folding
+   * it into the style-prefs form would light up "Save preferences" for a change
+   * that is already saved — and a stale copy in that payload would undo it.
+   */
+  const [favoriteColors, setFavoriteColors] = useState(() => getFavoriteColorNames(initialPrefs));
   const colorInputRef = useRef<HTMLInputElement>(null);
   const [, startCat] = useTransition();
   const [clearing, startClear] = useTransition();
@@ -216,6 +226,10 @@ export function SettingsClient({
   useEffect(() => {
     setLocalColors(colorList);
   }, [colorList]);
+
+  useEffect(() => {
+    setFavoriteColors(getFavoriteColorNames(initialPrefs));
+  }, [initialPrefs]);
 
   const dirty = JSON.stringify(prefs) !== JSON.stringify(initialPrefs);
 
@@ -465,6 +479,22 @@ export function SettingsClient({
       const res = await removeWardrobeColor(color.name);
       if (!res.ok) {
         setColorError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function handleToggleFavoriteColor(color: Color, favorite: boolean) {
+    setColorError(null);
+    // Drawn immediately — a heart that waits on a round trip feels broken —
+    // then reconciled from the server if it refuses.
+    setFavoriteColors((prev) => toggleFavoriteColor(prev, color.name));
+    startCat(async () => {
+      const res = await setFavoriteColor(color.name, favorite);
+      if (!res.ok) {
+        setColorError(res.error);
+        setFavoriteColors((prev) => toggleFavoriteColor(prev, color.name));
         return;
       }
       router.refresh();
@@ -768,7 +798,8 @@ export function SettingsClient({
         <p className="text-sm text-ink-muted">
           The palette shown when tagging pieces. Drag the ⋮⋮ handle to set the order used for the{" "}
           <span className="text-ink">Color</span> sort in your closet. Pick a swatch or use the
-          eyedropper to sample any color on screen, name it, then add it.
+          eyedropper to sample any color on screen, name it, then add it. Tap a heart to mark a
+          colour you favour — saved as you tap.
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <input
@@ -822,6 +853,8 @@ export function SettingsClient({
           onReorder={handleReorderColors}
           onRemove={handleDeleteColor}
           removeDisabled={() => localColors.length <= 1}
+          favorites={favoriteColors}
+          onToggleFavorite={handleToggleFavoriteColor}
         />
       </section>
 
