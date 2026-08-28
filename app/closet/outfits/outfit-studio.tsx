@@ -32,7 +32,13 @@ type Tab = "generate" | "compose" | "train";
 /** Params another surface can hand over — see app/closet/outfits/page.tsx. */
 type HandoffProps = {
   initialTab?: Tab;
-  /** Item ids to seed the composer with, e.g. the pieces of a trip look. */
+  /**
+   * Item ids to open the generator's canvas with, e.g. the pieces of a trip
+   * look. The generator rather than the manual composer because the generator
+   * *is* this page — the spin button, the slot layout, the saved sizes — and a
+   * handed-over look should land on the page the user knows, not a stripped
+   * version of it.
+   */
   initialPieceIds?: string[];
   /** Relative path back to wherever the user came from, or null. */
   returnTo?: string | null;
@@ -172,6 +178,7 @@ export function OutfitStudio({
           initialLayerArrangements={outfitLayerArrangements}
           initialAutoPopulateRules={outfitAutoPopulateRules}
           initialStartupRules={outfitStartupRules}
+          initialPieceIds={initialPieceIds}
           signalsNonce={signalsNonce}
           rulesFooter={<WeatherCard weather={weather} temperatureUnit={temperatureUnit} />}
           footer={
@@ -183,7 +190,6 @@ export function OutfitStudio({
           items={items}
           colorOptions={colorOptions}
           initialOutfits={initialOutfits}
-          initialPieceIds={initialPieceIds}
         />
       ) : (
         <StylistTrainer

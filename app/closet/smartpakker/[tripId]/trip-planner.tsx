@@ -1011,13 +1011,18 @@ export function TripPlanner({
           onClose={() => setLooksOpen(false)}
           onEditLook={(day) => {
             /*
-             * Hand the look to the outfit composer, and tell it how to get back.
+             * Hand the look to the Outfits page, and tell it how to get back.
+             *
+             * No `tab`: the look lands on the page's own default tab, the Smart
+             * Generator, with the outfit loaded onto its canvas. That is the
+             * point — the destination should be the Outfits page the user knows,
+             * with a way back added, not a different corner of it.
+             *
              * `returnTo` carries the trip URL plus the day, so the button on the
              * other side returns to this trip with the carousel reopened on the
              * same look rather than dropping the user on the trip page.
              */
             const params = new URLSearchParams({
-              tab: "compose",
               items: day.pieces.map((p) => p.id).join(","),
               returnTo: `/closet/smartpakker/${trip.id}?look=${day.day}`,
               returnLabel: `Back to ${trip.destination || "trip"}`,

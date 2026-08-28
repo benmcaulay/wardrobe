@@ -43,6 +43,7 @@ import {
   type ComboLayout,
   type OutfitSlotDefaults,
 } from "@/lib/outfit-slot-defaults";
+import { assignSeedPieces, seedRulesForPieces } from "@/lib/outfit/seed-look";
 import {
   SPIN_MODES,
   SPIN_MODE_LABELS,
@@ -93,6 +94,13 @@ type Props = {
   initialAutoPopulateRules: boolean;
   initialStartupRules: CategoryRule[];
   /**
+   * Item ids to open with on the canvas, when another surface handed a
+   * ready-made look over — the trip planner's "Edit this look". Replaces the
+   * startup rules for that visit: the point is to arrive looking at that
+   * outfit, not at that outfit plus whatever the rules would have added.
+   */
+  initialPieceIds?: string[];
+  /**
    * Bumped whenever something elsewhere on the page taught the model. A smart
    * spin reads a client-side copy of the affinity map, so it needs to know when
    * that copy is stale — otherwise you could train for ten minutes and keep
@@ -140,6 +148,7 @@ export function RandomOutfitBuilder({
   initialLayerArrangements,
   initialAutoPopulateRules,
   initialStartupRules,
+  initialPieceIds,
   signalsNonce,
   rulesFooter,
   footer,
@@ -161,8 +170,32 @@ export function RandomOutfitBuilder({
     [items],
   );
 
-  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>(
-    initialAutoPopulateRules ? initialStartupRules : [],
+  /**
+   * The handed-over look, resolved against the closet. Ids that no longer exist
+   * are dropped rather than blocking the rest of the look.
+   */
+  const seedPieces = useMemo(() => {
+    const ids = initialPieceIds ?? [];
+    if (ids.length === 0) return [] as RandomOutfitItem[];
+    const byId = new Map(items.map((i) => [i.id, i]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter((item): item is RandomOutfitItem => item !== undefined);
+  }, [initialPieceIds, items]);
+
+  /*
+   * Rules come from the look when there is one, and from the user's startup
+   * rules otherwise. Derived in the initial state rather than applied by an
+   * effect for a visible reason: an effect would render the startup canvas
+   * first and replace it a frame later, so arriving from a trip would flash
+   * somebody else's outfit.
+   */
+  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>(() =>
+    seedPieces.length > 0
+      ? seedRulesForPieces(seedPieces)
+      : initialAutoPopulateRules
+        ? initialStartupRules
+        : [],
   );
   const [autoPopulateRules, setAutoPopulateRules] = useState(initialAutoPopulateRules);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
@@ -376,6 +409,53 @@ export function RandomOutfitBuilder({
   }, [signalsNonce]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+
+  /**
+   * Put the handed-over garments into the slots their categories just created.
+   *
+   * Two steps rather than one because the slots do not exist yet at this
+   * point: the rules above are state, and the effect that turns rules into
+   * placed slots runs after that render. So this waits for them, fills them,
+   * and records the look it filled so it cannot run twice.
+   *
+   * The pieces arrive locked. You came here to adjust a specific outfit, and an
+   * unlocked piece is one the next spin replaces — losing the look you were
+   * sent to look at. One tap unlocks any of them.
+   */
+  const seedKey = seedPieces.map((p) => p.id).join(",");
+  const seededRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!seedKey || seededRef.current === seedKey) return;
+    if (slots.length === 0) return;
+    const assignment = assignSeedPieces(slots, seedPieces);
+    if (assignment.size === 0) return;
+    seededRef.current = seedKey;
+
+    setSlots((prev) =>
+      prev.map((slot) => {
+        const itemId = assignment.get(slot.id);
+        if (!itemId) return slot;
+        return { ...slot, itemId, mirror: itemsById.get(itemId)?.mirror ?? false, locked: true };
+      }),
+    );
+
+    // The background-removed images, resolved the same way a spin resolves
+    // them. Without this the canvas shows the raw photos until something else
+    // touches them.
+    void (async () => {
+      const updates: Record<string, string> = {};
+      for (const itemId of new Set(assignment.values())) {
+        const item = itemsById.get(itemId);
+        if (!item || processedImageUrlsRef.current[itemId]) continue;
+        const out = await resolveOutfitPieceDisplayUrl(item.imagePath);
+        if (out.startsWith("blob:")) urlRegistryRef.current.push(out);
+        updates[itemId] = out;
+      }
+      if (Object.keys(updates).length > 0) {
+        setProcessedImageUrls((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+  }, [seedKey, seedPieces, slots, itemsById]);
 
   const categoryOptions = useMemo(() => {
     const labels = new Map<string, string>();

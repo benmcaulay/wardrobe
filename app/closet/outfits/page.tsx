@@ -24,11 +24,15 @@ import type { RandomOutfitItem } from "./random-outfit-builder";
 export const dynamic = "force-dynamic";
 
 /**
- * `?tab`, `?items`, `?returnTo` and `?returnLabel` let another surface hand a
- * look over for arranging and get the user back afterwards — the trip planner's
- * "Edit this look" uses all four. Only relative paths are honoured for
- * `returnTo`: it ends up in an href, and accepting an absolute URL from a query
- * string is an open redirect.
+ * `?items`, `?returnTo` and `?returnLabel` let another surface hand a look over
+ * for arranging and get the user back afterwards — the trip planner's "Edit
+ * this look" uses all three. The look opens on the default tab, the Smart
+ * Generator, so it arrives on this page as the user knows it.
+ *
+ * `?tab` still selects a tab, for a link that wants one specifically.
+ *
+ * Only relative paths are honoured for `returnTo`: it ends up in an href, and
+ * accepting an absolute URL from a query string is an open redirect.
  */
 export default async function OutfitsPage({
   searchParams,
