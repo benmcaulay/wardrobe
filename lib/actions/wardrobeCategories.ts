@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { decode, encode, type GarmentKindChoice, type StylePrefs } from "@/lib/json";
 import { migrateClosetGroupOrderCategory } from "@/lib/closet-group-order";
 import {
+  addCategoryUnder,
   moveCategory,
   parentsAfterRemoval,
   parentsAfterRename,
@@ -29,6 +30,8 @@ function stripLegacyCategoryFields(prefs: StylePrefs): StylePrefs {
 
 export async function addWardrobeCategory(
   raw: string,
+  /** Nest the new category inside this one. Null/absent adds at the top level. */
+  parent?: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
   const name = normalizeCategoryName(raw);
@@ -39,20 +42,28 @@ export async function addWardrobeCategory(
     select: { stylePrefs: true },
   });
   const prefs = decode<StylePrefs>(dbUser?.stylePrefs, {});
-  const current = [...getCategoriesListFromPrefs(prefs)];
+  const current = getCategoriesListFromPrefs(prefs);
   if (current.some((c) => normalizeCategoryName(c) === name)) {
     return { ok: false, error: "That category already exists" };
   }
-  current.push(name);
+  const parentKey = normalizeCategoryName(parent ?? "");
+  if (parentKey && !current.some((c) => normalizeCategoryName(c) === parentKey)) {
+    // The selected parent was renamed or removed on another surface between
+    // selecting it and typing. Better to say so than to quietly add at the root.
+    return { ok: false, error: `“${parent}” is no longer one of your categories` };
+  }
+
+  const added = addCategoryUnder(current, prefs.categoryParents, name, parentKey || null);
+  if (!added.moved) return { ok: false, error: "Could not add that category" };
+
   const clean = stripLegacyCategoryFields(prefs);
-  clean.categoriesList = sanitizeCategoryList(current);
+  clean.categoriesList = sanitizeCategoryList(added.list);
+  clean.categoryParents = sanitizeCategoryParents(added.parents, clean.categoriesList);
   await prisma.user.update({
     where: { id: user.id },
     data: { stylePrefs: encode(clean) },
   });
-  revalidatePath("/settings");
-  revalidatePath("/closet");
-  revalidatePath("/closet/add");
+  revalidateCategorySurfaces();
   return { ok: true };
 }
 

@@ -124,6 +124,14 @@ export function SettingsClient({
   const [filterError, setFilterError] = useState<string | null>(null);
   const [localCategories, setLocalCategories] = useState(categoryList);
   const [localParents, setLocalParents] = useState(categoryParents);
+  /**
+   * The category the add field is pointed at, or null for the top level.
+   *
+   * Held here rather than in the tree editor because the field and the list are
+   * siblings: selecting a row is what re-aims the field, so one of them has to
+   * own it and the field is the thing that acts on it.
+   */
+  const [addUnder, setAddUnder] = useState<string | null>(null);
   const [localTags, setLocalTags] = useState(styleTagsList);
   const [localOwners, setLocalOwners] = useState(ownersList);
   const [localColors, setLocalColors] = useState(colorList);
@@ -181,6 +189,16 @@ export function SettingsClient({
 
   useEffect(() => {
     setLocalCategories(categoryList);
+  }, [categoryList]);
+
+  useEffect(() => {
+    // A rename or a removal elsewhere can retire the selected category; leaving
+    // it selected would aim the add field at something that is not there.
+    setAddUnder((current) => {
+      if (!current) return null;
+      const key = normalizeCategoryName(current);
+      return categoryList.find((c) => normalizeCategoryName(c) === key) ?? null;
+    });
   }, [categoryList]);
 
   useEffect(() => {
@@ -254,11 +272,13 @@ export function SettingsClient({
   function handleAddCategory() {
     setCatError(null);
     startCat(async () => {
-      const res = await addWardrobeCategory(newCategory);
+      const res = await addWardrobeCategory(newCategory, addUnder);
       if (!res.ok) {
         setCatError(res.error);
         return;
       }
+      // Selection survives the add, so several subcategories go in one after
+      // another without re-picking the parent each time.
       setNewCategory("");
       router.refresh();
     });
@@ -567,25 +587,49 @@ export function SettingsClient({
       <section className="space-y-4">
         <h3 className="text-xs uppercase tracking-wide text-ink-muted">Wardrobe categories</h3>
         <p className="text-sm text-ink-muted">
-          Categories are saved when you add, remove, rename (click a name), or move (drag the ⋮⋮
-          handle). Drop a category on the <span className="text-ink">left half</span> of another to
-          put it alongside, or on the <span className="text-ink">right half</span> to nest it
-          inside — so <span className="text-ink">t shirt</span> can live under{" "}
-          <span className="text-ink">shirt</span>, and filtering by the parent finds both.
-          Removing a category sets affected items to <span className="text-ink">None</span> and
-          lifts anything nested under it up a level. Renaming updates all items in that category.
+          Click a category to aim the field below at it — what you add then lands{" "}
+          <span className="text-ink">inside</span> it, so{" "}
+          <span className="text-ink">t shirt</span> can live under{" "}
+          <span className="text-ink">shirt</span> and filtering by the parent finds both. Click it
+          again to rename. You can also move a category by dragging the ⋮⋮ handle: drop it on the{" "}
+          <span className="text-ink">left half</span> of another to put it alongside, or the{" "}
+          <span className="text-ink">right half</span> to nest it inside. Removing a category sets
+          affected items to <span className="text-ink">None</span> and lifts anything nested under
+          it up a level.
         </p>
+        {addUnder && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+            <span>
+              New categories go inside{" "}
+              <span className="text-ink capitalize">{addUnder}</span>.
+            </span>
+            <button
+              type="button"
+              onClick={() => setAddUnder(null)}
+              className="underline underline-offset-2 hover:text-ink"
+            >
+              Add at the top level instead
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <input
             type="text"
             value={newCategory}
             onChange={(e) => setNewCategory(e.target.value)}
-            placeholder="e.g. hats"
+            placeholder={addUnder ? `Add subcategory to ${addUnder}` : "e.g. hats"}
+            aria-label={addUnder ? `Add subcategory to ${addUnder}` : "Add a category"}
             className="flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
                 handleAddCategory();
+              }
+              // Escape aims the field back at the top level without reaching
+              // for the mouse.
+              if (e.key === "Escape" && addUnder) {
+                e.preventDefault();
+                setAddUnder(null);
               }
             }}
           />
@@ -608,6 +652,8 @@ export function SettingsClient({
           onMove={handleMoveCategory}
           onRename={handleRenameCategory}
           onRemove={handleDeleteCategory}
+          selected={addUnder}
+          onSelect={setAddUnder}
         />
 
         <UnreadableCategories

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addCategoryUnder,
   buildCategoryTree,
   categoryAncestryPath,
   searchCategoryOptionRows,
@@ -223,6 +224,53 @@ describe("moveCategory", () => {
   it("returns a list in pre-order, so it can be stored as the display order", () => {
     const out = moveCategory(LIST, PARENTS, "bottom", "top", "child");
     expect(out.list).toEqual(categoryListFromTree(buildCategoryTree(out.list, out.parents)));
+  });
+});
+
+describe("addCategoryUnder", () => {
+  it("adds at the top level when no parent is given", () => {
+    const out = addCategoryUnder(LIST, PARENTS, "hat");
+    expect(out.moved).toBe(true);
+    expect(shape(out.list, out.parents)).toEqual([
+      "top",
+      "  shirt",
+      "    t shirt",
+      "bottom",
+      "shoes",
+      "hat",
+    ]);
+  });
+
+  it("adds inside the given parent, last among its children", () => {
+    const out = addCategoryUnder(LIST, PARENTS, "flannel", "shirt");
+    expect(out.parents.flannel).toBe("shirt");
+    expect(shape(out.list, out.parents)).toEqual([
+      "top",
+      "  shirt",
+      "    t shirt",
+      "    flannel",
+      "bottom",
+      "shoes",
+    ]);
+  });
+
+  it("keeps the typed label but matches the parent case-insensitively", () => {
+    const out = addCategoryUnder(LIST, PARENTS, "Flannel", " SHIRT ");
+    expect(out.moved).toBe(true);
+    expect(out.list).toContain("Flannel");
+    expect(out.parents.flannel).toBe("shirt");
+  });
+
+  it("refuses a blank name, a duplicate, and an unknown parent", () => {
+    expect(addCategoryUnder(LIST, PARENTS, "   ").moved).toBe(false);
+    expect(addCategoryUnder(LIST, PARENTS, "SHOES").moved).toBe(false);
+    expect(addCategoryUnder(LIST, PARENTS, "flannel", "blouse").moved).toBe(false);
+  });
+
+  it("leaves the list and the nesting untouched when it refuses", () => {
+    const out = addCategoryUnder(LIST, PARENTS, "shoes");
+    expect(out.list).toEqual(LIST);
+    expect(out.parents).toEqual(PARENTS);
   });
 });
 

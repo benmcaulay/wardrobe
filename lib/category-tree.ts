@@ -344,6 +344,38 @@ function orderTree(
 }
 
 /**
+ * Add a category, optionally inside another one.
+ *
+ * Separate from `moveCategory` because adding has its own refusals — a blank
+ * name, a name already taken, a parent that isn't there — and the settings page
+ * needs to tell those apart to say something useful. `moved` is false for all
+ * of them, with the list and map unchanged.
+ *
+ * A new child lands last among its siblings, the same place a dragged one does.
+ */
+export function addCategoryUnder(
+  list: readonly string[],
+  parents: CategoryParents | null | undefined,
+  rawName: string,
+  parentName?: string | null,
+): CategoryMove {
+  const clean = sanitizeCategoryParents(parents, list);
+  const unchanged: CategoryMove = { list: [...list], parents: clean, moved: false };
+
+  const name = (rawName ?? "").trim();
+  const key = normalizeCategoryName(name);
+  if (!key) return unchanged;
+  if (list.some((c) => normalizeCategoryName(c) === key)) return unchanged;
+
+  const parentKey = normalizeCategoryName(parentName ?? "");
+  if (parentName && !list.some((c) => normalizeCategoryName(c) === parentKey)) return unchanged;
+
+  const grown = [...list, name];
+  if (!parentKey) return { list: grown, parents: clean, moved: true };
+  return moveCategory(grown, clean, name, parentKey, "child");
+}
+
+/**
  * Promote a removed category's children to its own level.
  *
  * Without this, removing "shirt" would orphan "t shirt" — which sanitizing

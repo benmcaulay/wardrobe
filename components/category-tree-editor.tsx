@@ -21,6 +21,7 @@
  */
 
 import { useState } from "react";
+import { normalizeCategoryName } from "@/lib/categories";
 import {
   buildCategoryTree,
   flattenCategoryTree,
@@ -40,17 +41,48 @@ type Props = {
   onMove: (dragged: string, target: string, mode: CategoryDropMode) => void;
   onRename?: (oldName: string, newName: string) => void;
   onRemove?: (name: string) => void;
+  /**
+   * The selected category, if any — the one a new category will be added
+   * inside. Owned by the page, because the field doing the adding lives there.
+   */
+  selected?: string | null;
+  onSelect?: (name: string | null) => void;
 };
 
 type DropTarget = { key: string; mode: CategoryDropMode } | null;
 
-export function CategoryTreeEditor({ list, parents, onMove, onRename, onRemove }: Props) {
+export function CategoryTreeEditor({
+  list,
+  parents,
+  onMove,
+  onRename,
+  onRemove,
+  selected = null,
+  onSelect,
+}: Props) {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
   const rows = flattenCategoryTree(buildCategoryTree(list, parents));
+  const selectedKey = selected ? normalizeCategoryName(selected) : null;
+
+  /**
+   * A click selects; a click on the row that is already selected renames.
+   *
+   * Two things on one target, so the order matters: selecting is the cheap,
+   * reversible one and comes first. This also makes a double-click rename,
+   * which is what the gesture means in every file list, without a second
+   * handler racing the first.
+   */
+  function handleNameClick(row: { key: string; name: string }) {
+    if (selectedKey === row.key) {
+      startRename(row.key, row.name);
+      return;
+    }
+    onSelect?.(row.name);
+  }
   const lastRoot = [...rows].reverse().find((r) => r.depth === 0) ?? null;
 
   function endDrag() {
@@ -78,6 +110,7 @@ export function CategoryTreeEditor({ list, parents, onMove, onRename, onRemove }
         {rows.map((row) => {
           const isDragging = dragKey === row.key;
           const isEditing = editingKey === row.key;
+          const isSelected = selectedKey === row.key && !isEditing;
           const over = dropTarget?.key === row.key && dragKey !== null && dragKey !== row.key;
           const nesting = over && dropTarget?.mode === "child";
           const beside = over && dropTarget?.mode === "sibling";
@@ -108,7 +141,9 @@ export function CategoryTreeEditor({ list, parents, onMove, onRename, onRemove }
               }}
               className={`relative flex items-center gap-2 rounded-xl border bg-white px-2 py-2 transition ${
                 nesting ? "border-ink ring-1 ring-ink/20" : "border-ink/10"
-              } ${beside ? "border-t-2 border-t-ink" : ""} ${isDragging ? "opacity-40" : ""}`}
+              } ${beside ? "border-t-2 border-t-ink" : ""} ${isDragging ? "opacity-40" : ""} ${
+                isSelected ? "ring-2 ring-accent/50 border-accent/40" : ""
+              }`}
             >
               <button
                 type="button"
@@ -151,12 +186,14 @@ export function CategoryTreeEditor({ list, parents, onMove, onRename, onRemove }
               ) : (
                 <button
                   type="button"
-                  onClick={() => startRename(row.key, row.name)}
-                  disabled={!onRename}
-                  className={`text-sm flex-1 min-w-0 truncate text-left capitalize ${
-                    onRename ? "hover:text-ink cursor-text" : ""
-                  }`}
-                  title={onRename ? "Click to rename" : undefined}
+                  onClick={() => handleNameClick(row)}
+                  aria-pressed={isSelected}
+                  className="text-sm flex-1 min-w-0 truncate text-left capitalize hover:text-ink"
+                  title={
+                    isSelected
+                      ? "Click again to rename"
+                      : "Click to add subcategories inside this one"
+                  }
                 >
                   {row.name}
                 </button>
