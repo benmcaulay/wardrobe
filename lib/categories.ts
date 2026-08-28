@@ -255,24 +255,6 @@ export function canonicalCategoryChoice(
   return raw!.trim();
 }
 
-/**
- * Resolve a reassign destination to one of the user's own labels.
- *
- * Returns the label with the user's casing (so the closet groups by the same
- * string it displays), NONE_CATEGORY for the None bucket, or null when the
- * destination is not a category this user has — which the caller must treat as
- * a rejection rather than defaulting somewhere.
- */
-export function resolveReassignTarget(
-  target: string | null | undefined,
-  options: readonly string[],
-): string | null {
-  const wanted = normalizeCategoryName(target ?? "");
-  if (!wanted) return null;
-  if (wanted === normalizeCategoryName(NONE_CATEGORY)) return NONE_CATEGORY;
-  return options.find((o) => normalizeCategoryName(o) === wanted) ?? null;
-}
-
 /** Empty DB value or explicit None bucket (legacy `""` supported). */
 export function isNoneCategoryStored(value: string | undefined | null): boolean {
   const t = normalizeCategoryName(value ?? "");

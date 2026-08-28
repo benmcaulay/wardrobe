@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs } from "@/lib/categories";
+import { getCategoryParentsFromPrefs } from "@/lib/category-tree";
 import { getColorsListFromPrefs } from "@/lib/colors";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
@@ -18,6 +19,7 @@ export default async function SettingsPage() {
   });
   const initialPrefs = parseStylePrefs(dbUser?.stylePrefs);
   const categoryList = getCategoriesListFromPrefs(initialPrefs);
+  const categoryParents = getCategoryParentsFromPrefs(initialPrefs);
   const categoryShapes = initialPrefs.categoryShapes ?? {};
   const styleTagsList = getStyleTagsListFromPrefs(initialPrefs);
   const ownersList = getOwnersFromPrefs(initialPrefs);
@@ -80,6 +82,7 @@ export default async function SettingsPage() {
         <SettingsClient
           initialPrefs={initialPrefs}
           categoryList={categoryList}
+        categoryParents={categoryParents}
         categoryShapes={categoryShapes}
           styleTagsList={styleTagsList}
           ownersList={ownersList}

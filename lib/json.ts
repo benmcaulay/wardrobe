@@ -26,6 +26,15 @@ export type StylePrefs = {
   /** Ordered wardrobe category picker list (merged with defaults server-side only when absent). */
   categoriesList?: string[];
   /**
+   * Category nesting: normalised child name → normalised parent name.
+   *
+   * Kept beside the flat list rather than replacing it, and nothing on the items
+   * changes — an item's category is still one plain label. See
+   * lib/category-tree.ts for why, and for what happens to an edge whose
+   * category no longer exists.
+   */
+  categoryParents?: Record<string, string>;
+  /**
    * Explicit garment shape per category label, keyed by normalised name.
    *
    * The classifier infers shape from the label text, which cannot work for

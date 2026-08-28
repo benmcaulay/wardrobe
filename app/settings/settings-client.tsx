@@ -27,12 +27,13 @@ import {
 } from "@/lib/closet-filter-visibility";
 import {
   addWardrobeCategory,
+  moveWardrobeCategory,
   removeWardrobeCategory,
   renameWardrobeCategory,
-  reorderWardrobeCategories,
   setCategoryShape,
 } from "@/lib/actions/wardrobeCategories";
-import { CategoryReassignModal } from "@/components/category-reassign-modal";
+import { CategoryTreeEditor } from "@/components/category-tree-editor";
+import type { CategoryDropMode, CategoryParents } from "@/lib/category-tree";
 import {
   addWardrobeStyleTag,
   removeWardrobeStyleTag,
@@ -66,6 +67,8 @@ type EyeDropperConstructor = new () => { open: () => Promise<EyeDropperResult> }
 type Props = {
   initialPrefs: StylePrefs;
   categoryList: string[];
+  /** Category nesting — normalised child → parent. See lib/category-tree.ts. */
+  categoryParents: CategoryParents;
   categoryShapes: Record<string, string>;
   styleTagsList: string[];
   ownersList: Owner[];
@@ -88,6 +91,7 @@ const DELETE_CONFIRM_PHRASE = "delete my wardrobe";
 export function SettingsClient({
   initialPrefs,
   categoryList,
+  categoryParents,
   categoryShapes,
   styleTagsList,
   ownersList,
@@ -99,9 +103,7 @@ export function SettingsClient({
 }: Props) {
   const [prefs, setPrefs] = useState<StylePrefs>(initialPrefs);
   const [newCategory, setNewCategory] = useState("");
-  const [reassignOpen, setReassignOpen] = useState(false);
   const [shapes, setShapes] = useState<Record<string, string>>(categoryShapes);
-  const [reassignNote, setReassignNote] = useState<string | null>(null);
   const [newTag, setNewTag] = useState("");
   const [newOwner, setNewOwner] = useState("");
   const [newColorHex, setNewColorHex] = useState("#4a6fb0");
@@ -121,6 +123,7 @@ export function SettingsClient({
   );
   const [filterError, setFilterError] = useState<string | null>(null);
   const [localCategories, setLocalCategories] = useState(categoryList);
+  const [localParents, setLocalParents] = useState(categoryParents);
   const [localTags, setLocalTags] = useState(styleTagsList);
   const [localOwners, setLocalOwners] = useState(ownersList);
   const [localColors, setLocalColors] = useState(colorList);
@@ -179,6 +182,10 @@ export function SettingsClient({
   useEffect(() => {
     setLocalCategories(categoryList);
   }, [categoryList]);
+
+  useEffect(() => {
+    setLocalParents(categoryParents);
+  }, [categoryParents]);
 
   useEffect(() => {
     setLocalTags(styleTagsList);
@@ -275,16 +282,19 @@ export function SettingsClient({
     });
   }
 
-  function handleReorderCategories(next: string[]) {
-    setLocalCategories(next);
+  /**
+   * A drag in the category tree: beside another category, or inside it.
+   *
+   * Sent as the two names plus the intent rather than as a rebuilt list,
+   * because the rule that makes a move legal — nothing may end up inside its
+   * own descendant — belongs to the server. Nothing is applied optimistically
+   * for the same reason: the answer can be "no".
+   */
+  function handleMoveCategory(dragged: string, target: string, mode: CategoryDropMode) {
     setCatError(null);
     startCat(async () => {
-      const res = await reorderWardrobeCategories(next);
-      if (!res.ok) {
-        setCatError(res.error);
-        router.refresh();
-        return;
-      }
+      const res = await moveWardrobeCategory(dragged, target, mode);
+      if (!res.ok) setCatError(res.error);
       router.refresh();
     });
   }
@@ -557,9 +567,13 @@ export function SettingsClient({
       <section className="space-y-4">
         <h3 className="text-xs uppercase tracking-wide text-ink-muted">Wardrobe categories</h3>
         <p className="text-sm text-ink-muted">
-          Categories are saved when you add, remove, rename (click a name), or reorder (drag the ⋮⋮
-          handle). Removing a category sets affected items to <span className="text-ink">None</span>.
-          Renaming updates all items in that category.
+          Categories are saved when you add, remove, rename (click a name), or move (drag the ⋮⋮
+          handle). Drop a category on the <span className="text-ink">left half</span> of another to
+          put it alongside, or on the <span className="text-ink">right half</span> to nest it
+          inside — so <span className="text-ink">t shirt</span> can live under{" "}
+          <span className="text-ink">shirt</span>, and filtering by the parent finds both.
+          Removing a category sets affected items to <span className="text-ink">None</span> and
+          lifts anything nested under it up a level. Renaming updates all items in that category.
         </p>
         <div className="flex items-center gap-2">
           <input
@@ -588,9 +602,10 @@ export function SettingsClient({
             {catError}
           </p>
         )}
-        <ReorderableStringList
-          items={localCategories}
-          onReorder={handleReorderCategories}
+        <CategoryTreeEditor
+          list={localCategories}
+          parents={localParents}
+          onMove={handleMoveCategory}
           onRename={handleRenameCategory}
           onRemove={handleDeleteCategory}
         />
@@ -613,42 +628,7 @@ export function SettingsClient({
           }}
         />
 
-        {/* Splitting a category is neither a rename (which moves everything) nor
-            a per-item edit (which does not scale) — it needs a bulk picker. */}
-        <div className="rounded-xl border border-ink/10 bg-paper-warm p-4 space-y-2">
-          <p className="text-sm">
-            Added a category that overlaps an existing one?
-          </p>
-          <p className="text-xs text-ink-muted">
-            Adding <span className="text-ink">t shirt</span> when you already have{" "}
-            <span className="text-ink">shirt</span> leaves every piece where it was. Use this to
-            pick which ones move across — renaming would move all of them.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setReassignNote(null);
-              setReassignOpen(true);
-            }}
-            className="rounded-full bg-ink text-paper px-4 py-2 text-xs tracking-wide hover:bg-ink-soft transition"
-          >
-            Reassign pieces…
-          </button>
-          {reassignNote && <p className="text-xs text-ink-muted">{reassignNote}</p>}
-        </div>
       </section>
-
-      <CategoryReassignModal
-        open={reassignOpen}
-        categories={localCategories}
-        onClose={() => setReassignOpen(false)}
-        onMoved={(moved, target) => {
-          setReassignNote(
-            `Moved ${moved} ${moved === 1 ? "piece" : "pieces"} into ${target}.`,
-          );
-          router.refresh();
-        }}
-      />
 
       <section className="space-y-4">
         <h3 className="text-xs uppercase tracking-wide text-ink-muted">Owners</h3>
