@@ -47,6 +47,12 @@ import {
 } from "@/lib/outfit-slot-defaults";
 import { assignSeedPieces, seedRulesForPieces } from "@/lib/outfit/seed-look";
 import {
+  comboKeyForSlot,
+  comboLayoutForSlot,
+  slotIdentityCategories,
+  type AncestryOf,
+} from "@/lib/outfit/layout-identity";
+import {
   buildCategoryTree,
   categoryAncestryPath,
   descendantKeys,
@@ -218,6 +224,8 @@ export function RandomOutfitBuilder({
         ? initialStartupRules
         : [],
   );
+  const categoryRulesRef = useRef(categoryRules);
+  categoryRulesRef.current = categoryRules;
   const [autoPopulateRules, setAutoPopulateRules] = useState(initialAutoPopulateRules);
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
   const [multiSelect, setMultiSelect] = useState(false);
@@ -226,7 +234,50 @@ export function RandomOutfitBuilder({
   const [slots, setSlots] = useState<CanvasSlot[]>([]);
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
+  const itemsByIdRef = useRef<Map<string, RandomOutfitItem>>(new Map());
+
+  /**
+   * Read the category a piece is filed under. Stable across renders — the slot
+   * sync effect depends on it, and a fresh function every render would re-run
+   * that effect forever.
+   */
+  const itemCategoryOf = useCallback(
+    (itemId: string) => itemsByIdRef.current.get(itemId)?.category,
+    [],
+  );
+
+  /** A category and the categories above it, for the layout fallback chain. */
+  const ancestryOf = useCallback(
+    (category: string) => categoryAncestryPath(category, categoryParents, categoryList),
+    [categoryParents, categoryList],
+  );
+
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+
+  /**
+   * Re-apply the saved sizes and positions after the pieces in the slots change.
+   *
+   * Needed because a slot's remembered layout is keyed off the piece it holds
+   * (see `slotIdentityCategories`): swap a jacket for a hoodie and a different
+   * saved layout applies. Runs at the two moments a slot's piece changes — a
+   * spin and a tap in the closet list — rather than from an effect watching the
+   * slots, which would re-enter the sync on a value the sync itself rewrites.
+   */
+  const restampLayouts = useCallback(
+    (next: CanvasSlot[]) =>
+      syncSlotsWithRules(
+        next,
+        categoryRulesRef.current,
+        slotDefaultsRef.current,
+        layerOrderRef.current,
+        visualLayersRef.current.filter((l) => l.length > 0),
+        comboLayoutsRef.current,
+        arrangementsRef.current,
+        itemCategoryOf,
+        ancestryOf,
+      ),
+    [itemCategoryOf, ancestryOf],
+  );
   const [dragState, setDragState] = useState<{
     kind: "canvas";
     slotId: string;
@@ -269,6 +320,8 @@ export function RandomOutfitBuilder({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [slotDefaults, setSlotDefaults] = useState<OutfitSlotDefaults>(initialSlotDefaults);
+  const slotDefaultsRef = useRef(slotDefaults);
+  slotDefaultsRef.current = slotDefaults;
   const [processedImageUrls, setProcessedImageUrls] = useState<Record<string, string>>({});
   const processedImageUrlsRef = useRef(processedImageUrls);
   processedImageUrlsRef.current = processedImageUrls;
@@ -369,9 +422,11 @@ export function RandomOutfitBuilder({
         visualLayers.filter((l) => l.length > 0),
         comboLayoutsRef.current,
         arrangementsRef.current,
+        itemCategoryOf,
+        ancestryOf,
       ),
     );
-  }, [categoryRules, slotDefaults, visualLayers]);
+  }, [categoryRules, slotDefaults, visualLayers, itemCategoryOf, ancestryOf]);
 
   // Lock in the left→right order the first time a multi-piece combination is
   // shown. Later spins/loads reuse it; only a drag (below) rewrites it.
@@ -430,6 +485,7 @@ export function RandomOutfitBuilder({
   }, [signalsNonce]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  itemsByIdRef.current = itemsById;
 
   /**
    * Put the handed-over garments into the slots their categories just created.
@@ -586,9 +642,12 @@ export function RandomOutfitBuilder({
   const spinHint = fillIssue && fillIssue.kind !== "no_combo" ? formatFillIssue(fillIssue) : null;
   const activeLayers = visualLayers.filter((l) => l.length > 0);
   const selected = slots.find((s) => s.id === selectedSlotId) ?? null;
-  const selectedComboKey = selected ? comboKeyForSlot(selected, slots, activeLayers) : "";
+  const selectedComboKey = selected
+    ? comboKeyForSlot(selected, slots, activeLayers, itemCategoryOf, ancestryOf)
+    : "";
   const selectedScale = selected
-    ? comboLayouts[selectedComboKey]?.scale ?? builtinCategoryScale(selected.categories)
+    ? comboLayoutForSlot(selected, slots, activeLayers, itemCategoryOf, ancestryOf, comboLayouts)
+        ?.scale ?? builtinCategoryScale(slotIdentityCategories(selected, itemCategoryOf))
     : 1;
 
   const assignableItems = useMemo(() => {
@@ -634,10 +693,12 @@ export function RandomOutfitBuilder({
     if (!itemMatchesCategories(pickItemFor(item), selected.categories)) return;
     await ensurePieceUrl(item);
     setSlots((prev) =>
-      prev.map((s) =>
-        s.id === selected.id
-          ? { ...s, itemId: item.id, mirror: item.mirror, locked: false }
-          : s,
+      restampLayouts(
+        prev.map((s) =>
+          s.id === selected.id
+            ? { ...s, itemId: item.id, mirror: item.mirror, locked: false }
+            : s,
+        ),
       ),
     );
     setSpinError(null);
@@ -764,17 +825,19 @@ export function RandomOutfitBuilder({
         setProcessedImageUrls((prev) => ({ ...prev, ...urlUpdates }));
       }
       setSlots((prev) =>
-        prev.map((s) => {
-          if (s.locked && s.itemId) return s;
-          const nextId = assignment.get(s.id);
-          if (!nextId) return { ...s, itemId: undefined, mirror: undefined };
-          const item = itemsById.get(nextId);
-          return {
-            ...s,
-            itemId: nextId,
-            mirror: item?.mirror ?? false,
-          };
-        }),
+        restampLayouts(
+          prev.map((s) => {
+            if (s.locked && s.itemId) return s;
+            const nextId = assignment.get(s.id);
+            if (!nextId) return { ...s, itemId: undefined, mirror: undefined };
+            const item = itemsById.get(nextId);
+            return {
+              ...s,
+              itemId: nextId,
+              mirror: item?.mirror ?? false,
+            };
+          }),
+        ),
       );
     } finally {
       spinLockRef.current = false;
@@ -833,7 +896,11 @@ export function RandomOutfitBuilder({
     setComboLayouts((prev) => ({ ...prev, [comboKey]: { ...prev[comboKey], scale } }));
     const layers = visualLayersRef.current.filter((l) => l.length > 0);
     setSlots((prev) =>
-      prev.map((s) => (comboKeyForSlot(s, prev, layers) === comboKey ? { ...s, scale } : s)),
+      prev.map((s) =>
+        comboKeyForSlot(s, prev, layers, itemCategoryOf, ancestryOf) === comboKey
+          ? { ...s, scale }
+          : s,
+      ),
     );
   }
 
@@ -920,7 +987,7 @@ export function RandomOutfitBuilder({
     // Only remember a genuine drag, not a click that happened to select a slot.
     if (!slot || (Math.abs(slot.x - startX) < 2 && Math.abs(slot.y - startY) < 2)) return;
     const layers = visualLayersRef.current.filter((l) => l.length > 0);
-    const key = comboKeyForSlot(slot, slotsRef.current, layers);
+    const key = comboKeyForSlot(slot, slotsRef.current, layers, itemCategoryOf, ancestryOf);
     const pos = { x: slot.x, y: slot.y };
     setComboLayouts((prev) => ({ ...prev, [key]: { ...prev[key], ...pos } }));
     void saveOutfitComboLayout(key, pos);
@@ -1826,21 +1893,6 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 /** The combination key for a slot given every slot currently in the outfit. */
-function comboKeyForSlot(
-  slot: { categories: string[] },
-  allSlots: readonly { categories: string[] }[],
-  layers: string[][],
-): string {
-  const idx = layerIndexForCategories(slot.categories, layers);
-  const present =
-    idx < 0
-      ? [slot.categories[0] ?? ""]
-      : allSlots
-          .filter((s) => layerIndexForCategories(s.categories, layers) === idx)
-          .map((s) => s.categories[0] ?? "");
-  return combinationKey(slot.categories, present);
-}
-
 /** Left→right order of the categories placed in one visual layer, by their x. */
 function layerOrderFromSlots(
   slots: readonly CanvasSlot[],
@@ -1867,6 +1919,8 @@ function syncSlotsWithRules(
   visualLayers: string[][],
   comboLayouts: Record<string, ComboLayout>,
   arrangements: Record<string, string[]>,
+  itemCategoryOf: (itemId: string) => string | undefined,
+  ancestryOf: AncestryOf,
 ): CanvasSlot[] {
   const required: { categories: string[]; sig: string }[] = [];
   for (const rule of rules) {
@@ -1897,8 +1951,17 @@ function syncSlotsWithRules(
       // Reuse the existing slot's item/lock, but recompute its position from the
       // default so an unpinned piece reverts when the combination changes; a
       // saved combo layout re-pins it below.
+      //
+      // Resolved from the piece's own category, like the scale below and like
+      // the packing carousel (lib/packing/look.ts): where a jacket sits by
+      // default is a fact about jackets, not about the outerwear slot it filled.
       const existing = pool[used]!;
-      const layout = resolveSlotLayout(existing.categories, used, defaults, visualLayers);
+      const layout = resolveSlotLayout(
+        slotIdentityCategories(existing, itemCategoryOf),
+        used,
+        defaults,
+        visualLayers,
+      );
       synced.push({ ...existing, x: layout.x, y: layout.y });
     } else {
       const layout = resolveSlotLayout(req.categories, used, defaults, visualLayers);
@@ -1920,8 +1983,16 @@ function syncSlotsWithRules(
   // saved layout. A hand-placed piece is pinned and left out of the auto-spread.
   const pinnedIds = new Set<string>();
   const zStamped = synced.map((slot, i) => {
-    const layout = comboLayouts[comboKeyForSlot(slot, synced, visualLayers)];
-    const scale = layout?.scale ?? builtinCategoryScale(slot.categories);
+    const layout = comboLayoutForSlot(
+      slot,
+      synced,
+      visualLayers,
+      itemCategoryOf,
+      ancestryOf,
+      comboLayouts,
+    );
+    const scale =
+      layout?.scale ?? builtinCategoryScale(slotIdentityCategories(slot, itemCategoryOf));
     if (layout?.x != null && layout?.y != null) {
       pinnedIds.add(slot.id);
       return { ...slot, x: layout.x, y: layout.y, scale, z: i + 1 };
