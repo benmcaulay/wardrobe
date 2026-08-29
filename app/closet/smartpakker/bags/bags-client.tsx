@@ -152,7 +152,7 @@ function BagCard({
 }) {
   const silhouette = getSilhouette(bag.silhouette);
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl bg-white shadow-tile">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl bg-surface shadow-tile">
       <div className="flex h-40 items-center justify-center bg-paper-warm">
         {bag.imagePath ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -240,7 +240,7 @@ function BagForm({
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 rounded-2xl border border-ink/15 bg-white p-4 shadow-tile">
+    <div className="flex h-full flex-col gap-3 rounded-2xl border border-ink/15 bg-surface p-4 shadow-tile">
       <div>
         <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Name</label>
         <input
@@ -263,7 +263,7 @@ function BagForm({
               className={`rounded-full border px-2.5 py-1 text-xs transition ${
                 draft.silhouette === s.id
                   ? "border-ink bg-ink text-paper"
-                  : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                  : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
               }`}
             >
               {s.label}

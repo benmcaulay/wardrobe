@@ -48,7 +48,7 @@ export function PendingWearsCard({
   if (pending.length === 0) return null;
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-4">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-4">
       <h2 className="text-sm font-medium text-ink">Did you wear these?</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Spotted in your photos. Confirming turns a guess into a real record.

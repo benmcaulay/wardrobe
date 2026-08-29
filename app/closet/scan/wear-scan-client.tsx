@@ -108,7 +108,7 @@ export function WearScanClient({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-ink/10 bg-white p-4">
+      <div className="rounded-2xl border border-ink/10 bg-surface p-4">
         <p className="text-sm text-ink">
           Pick photos of yourself and I&rsquo;ll look for pieces you own.
         </p>
@@ -148,7 +148,7 @@ export function WearScanClient({
       ) : null}
 
       {phase === "done" ? (
-        <div className="rounded-2xl border border-ink/10 bg-white p-4">
+        <div className="rounded-2xl border border-ink/10 bg-surface p-4">
           {result && result.recorded > 0 ? (
             <>
               <p className="text-sm text-ink">

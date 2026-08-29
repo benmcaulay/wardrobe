@@ -98,17 +98,13 @@ describe("CLOSET_NAV", () => {
   });
 
   it("lands every destination on a route that exists", () => {
-    // Guards against a typo'd href shipping as a dead link.
-    const known = new Set([
-      "/closet",
-      "/closet/scan",
-      "/closet/try-on",
-      "/closet/outfits",
-      "/closet/smartpakker",
-      "/closet/sell",
-      "/closet/wishlist",
-      "/closet/share",
-    ]);
-    for (const entry of CLOSET_NAV) expect(known.has(entry.href)).toBe(true);
+    // Guards against a typo'd href shipping as a dead link. Reads the router
+    // rather than comparing against a hardcoded list, which had to be edited by
+    // hand every time a page was added and so only ever caught typos in
+    // entries somebody had already remembered to whitelist.
+    for (const entry of CLOSET_NAV) {
+      const page = path.join(process.cwd(), "app", entry.href, "page.tsx");
+      expect(fs.existsSync(page), `no page at app${entry.href}/page.tsx`).toBe(true);
+    }
   });
 });

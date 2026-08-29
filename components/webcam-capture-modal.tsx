@@ -269,7 +269,7 @@ export function WebcamCaptureModal({
         <div className="p-4 flex flex-wrap items-center gap-3 border-t border-ink/10 bg-paper-warm">
           {/* Self-timer segmented control */}
           <div
-            className="inline-flex items-center gap-1 rounded-full border border-ink/15 bg-white p-1"
+            className="inline-flex items-center gap-1 rounded-full border border-ink/15 bg-surface p-1"
             role="group"
             aria-label="Self-timer"
           >
@@ -295,7 +295,7 @@ export function WebcamCaptureModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full border border-ink/15 bg-white px-4 py-2 text-sm hover:bg-paper transition"
+              className="rounded-full border border-ink/15 bg-surface px-4 py-2 text-sm hover:bg-paper transition"
             >
               Cancel
             </button>

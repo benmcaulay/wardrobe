@@ -243,7 +243,7 @@ export function PackMode({
               className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
                 b.id === bag.id
                   ? "border-ink bg-ink text-paper"
-                  : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                  : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
               }`}
             >
               {b.name}
@@ -390,7 +390,7 @@ function Rail({
             value={query}
             onChange={(e) => onQuery(e.target.value)}
             placeholder="Search your closet…"
-            className="w-full rounded-xl border border-ink/15 bg-white py-2 pl-9 pr-3 text-sm focus:border-ink/40 focus:outline-none"
+            className="w-full rounded-xl border border-ink/15 bg-surface py-2 pl-9 pr-3 text-sm focus:border-ink/40 focus:outline-none"
           />
         </label>
         <div className="flex flex-wrap gap-1.5">
@@ -445,7 +445,7 @@ function FilterChip({
       onClick={onClick}
       aria-pressed={active}
       className={`rounded-full border px-3 py-1 text-[11px] transition ${
-        active ? "border-ink bg-ink text-paper" : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+        active ? "border-ink bg-ink text-paper" : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
       }`}
     >
       {children}
@@ -487,7 +487,7 @@ function RailRow({
 
   return (
     <li
-      className={`rounded-xl border border-ink/10 bg-white p-2 transition-opacity ${
+      className={`rounded-xl border border-ink/10 bg-surface p-2 transition-opacity ${
         handle.isDragging ? "opacity-40" : ""
       }`}
     >
@@ -539,7 +539,7 @@ function RailRow({
               value={grams}
               onChange={(e) => setGrams(e.target.value)}
               inputMode="numeric"
-              className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+              className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
             />
           </label>
           <label className="block">
@@ -548,7 +548,7 @@ function RailRow({
               value={liters}
               onChange={(e) => setLiters(e.target.value)}
               inputMode="decimal"
-              className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+              className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
             />
           </label>
           <button
@@ -602,7 +602,7 @@ function RailRow({
                   e.target.value === "auto" ? null : e.target.value === "yes",
                 )
               }
-              className="mt-0.5 w-full rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+              className="mt-0.5 w-full rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
             >
               <option value="auto">
                 Auto —{" "}
@@ -1066,7 +1066,7 @@ function PlanetAdjust({
                   value={grams}
                   onChange={(e) => setGrams(e.target.value)}
                   inputMode="numeric"
-                  className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+                  className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
                 />
               </label>
               <label className="block">
@@ -1077,7 +1077,7 @@ function PlanetAdjust({
                   value={liters}
                   onChange={(e) => setLiters(e.target.value)}
                   inputMode="decimal"
-                  className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+                  className="mt-0.5 w-20 rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
                 />
               </label>
               <button
@@ -1108,7 +1108,7 @@ function PlanetAdjust({
                     e.target.value === "auto" ? null : e.target.value === "yes",
                   )
                 }
-                className="mt-0.5 w-full rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+                className="mt-0.5 w-full rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
               >
                 <option value="auto">
                   Auto —{" "}

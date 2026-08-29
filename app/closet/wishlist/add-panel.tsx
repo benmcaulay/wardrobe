@@ -15,13 +15,19 @@ import {
 
 type Mode = "link" | "search";
 
-export function AddPanel() {
+export function AddPanel({ wantCategory }: { wantCategory?: string | null }) {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("link");
+  /*
+   * Arriving from an empty outfit slot means the shape is already known but the
+   * garment is not, so search-by-name is the only mode that can help — a link
+   * you don't have yet cannot be pasted. `useState` initialiser rather than an
+   * effect: the mode is right on first paint and never flips under the user.
+   */
+  const [mode, setMode] = useState<Mode>(wantCategory ? "search" : "link");
   const [priority, setPriority] = useState<number>(PRIORITY_WANT);
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-serif text-2xl">Add something you want</h2>
         <div className="flex rounded-full bg-paper-warm p-0.5 text-xs">
@@ -53,10 +59,28 @@ export function AddPanel() {
         ))}
       </div>
 
+      {/*
+        Phrased without an article on purpose. Categories are user-named and
+        arrive in every shape — "jacket", "jeans", "outerwear" — so "asked for a
+        {category}" produced "asked for a jeans". "A piece filed under X" is
+        grammatical whatever X turns out to be, and it also happens to be the
+        exact relationship being described.
+      */}
+      {wantCategory ? (
+        <p className="mt-3 rounded-xl bg-accent/15 px-3 py-2 text-xs text-ink">
+          An outfit rule wanted a piece filed under{" "}
+          <span className="lowercase">{wantCategory}</span>, and your closet had none.
+        </p>
+      ) : null}
+
       {mode === "link" ? (
         <LinkForm priority={priority} onAdded={() => router.refresh()} />
       ) : (
-        <SearchForm priority={priority} onAdded={() => router.refresh()} />
+        <SearchForm
+          priority={priority}
+          initialQuery={wantCategory ?? ""}
+          onAdded={() => router.refresh()}
+        />
       )}
     </section>
   );
@@ -76,7 +100,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={`rounded-full px-3 py-1 transition ${
-        active ? "bg-white text-ink shadow-tile" : "text-ink-muted hover:text-ink"
+        active ? "bg-surface text-ink shadow-tile" : "text-ink-muted hover:text-ink"
       }`}
     >
       {children}
@@ -167,10 +191,10 @@ function LinkForm({ priority, onAdded }: { priority: number; onAdded: () => void
             <img
               src={preview.imageUrl}
               alt=""
-              className="h-32 w-32 shrink-0 rounded-lg bg-white object-contain"
+              className="h-32 w-32 shrink-0 rounded-lg bg-surface object-contain"
             />
           ) : (
-            <div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-lg bg-white text-xs text-ink-muted">
+            <div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-lg bg-surface text-xs text-ink-muted">
               No photo
             </div>
           )}
@@ -246,8 +270,17 @@ function PriceSourceNote({ source }: { source: WishlistPreview["priceSource"] })
 
 /* ----------------------------------------------------------------- search */
 
-function SearchForm({ priority, onAdded }: { priority: number; onAdded: () => void }) {
-  const [query, setQuery] = useState("");
+function SearchForm({
+  priority,
+  onAdded,
+  initialQuery = "",
+}: {
+  priority: number;
+  onAdded: () => void;
+  /** Prefilled from ?want=, so the field opens with the shape already typed. */
+  initialQuery?: string;
+}) {
+  const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<ProductMatch[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [addingUrl, setAddingUrl] = useState<string | null>(null);
@@ -318,10 +351,10 @@ function SearchForm({ priority, onAdded }: { priority: number; onAdded: () => vo
                 <img
                   src={match.thumbnailUrl}
                   alt=""
-                  className="h-20 w-20 shrink-0 rounded-lg bg-white object-contain"
+                  className="h-20 w-20 shrink-0 rounded-lg bg-surface object-contain"
                 />
               ) : (
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-white text-[10px] text-ink-muted">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-surface text-[10px] text-ink-muted">
                   No photo
                 </div>
               )}

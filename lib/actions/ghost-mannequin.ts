@@ -4,9 +4,12 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { loadCategoryShapes } from "@/lib/server/category-shapes";
+import { promoteOnOriginalDelete } from "@/lib/ghost-view-promote";
 import { cutoutPathFor } from "@/lib/image-paths";
 import { encode } from "@/lib/json";
 import { deleteUpload, saveUpload, UploadError } from "@/lib/uploads";
+import { importListingImage } from "@/lib/server/import-product-image";
+import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import { deleteObject } from "@/lib/storage";
 import { checkAiQuota } from "@/lib/ai-guardrails";
 import { log } from "@/lib/log";
@@ -406,6 +409,85 @@ export async function deleteGhostViewFor(
   return { ok: true, nextPrimary };
 }
 
+export type DeleteOriginalPhotoResponse =
+  | { ok: true; originalImagePath: string; promotedFrom: string }
+  | { ok: false; error: string };
+
+/**
+ * Delete the original photo, promoting another image in its place.
+ *
+ * `WardrobeItem.originalImagePath` is non-null, so "delete the original" cannot
+ * mean clearing the column — an item always has a base photo. It means the
+ * *phone snap* goes away and a better image takes over that role. So the
+ * current thumbnail is promoted into `originalImagePath`, removed from
+ * `ghostViews` (otherwise it would render twice — once as Original and once as
+ * a view), and the old file is deleted from storage.
+ *
+ * Promoting the thumbnail specifically, rather than the first view, keeps this
+ * change invisible to everything downstream: the thumbnail is already what the
+ * closet grid shows and already what generation renders from (see
+ * runGenerateGhostViewFor), so afterwards both read the same bytes they did
+ * before. `ghostImagePath` becomes null, which is how "the original is the
+ * thumbnail" is spelled.
+ *
+ * Refused when there is nothing to promote. Deleting the only photo an item has
+ * would leave a garment with no image at all, which is a broken row rather than
+ * a tidy one.
+ */
+export async function deleteOriginalPhotoFor(
+  itemId: string,
+): Promise<DeleteOriginalPhotoResponse> {
+  const user = await requireUser();
+  const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
+  if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+
+  let views: Array<{ label: string; imagePath: string; mirror?: boolean; thumbZoom?: number }> = [];
+  try {
+    if (item.ghostViews) views = JSON.parse(item.ghostViews) as typeof views;
+  } catch {
+    return { ok: false, error: "Corrupt ghost views data" };
+  }
+  // The rearrangement itself is pure and tested — see lib/ghost-view-promote.ts.
+  const plan = promoteOnOriginalDelete({
+    originalImagePath: item.originalImagePath,
+    ghostImagePath: item.ghostImagePath,
+    views,
+  });
+  if (!plan.ok) {
+    return {
+      ok: false,
+      error:
+        plan.reason === "no-views"
+          ? "Add another picture first — an item can't be left with no photo."
+          : "That image is already the original.",
+    };
+  }
+  const { promoted, remaining } = plan;
+  const oldOriginal = item.originalImagePath;
+
+  await prisma.wardrobeItem.update({
+    where: { id: itemId },
+    data: {
+      originalImagePath: promoted.imagePath,
+      // Carried over so the promoted image keeps the framing it was given as a
+      // view; the original's own zoom/mirror belonged to the file being deleted.
+      originalThumbZoom: promoted.thumbZoom ?? 1,
+      originalMirror: promoted.mirror ?? false,
+      ghostViews: remaining.length ? encode(remaining) : null,
+      // Null = the original is the thumbnail, which it now is.
+      ghostImagePath: null,
+    },
+  });
+
+  // After the row is updated, so a storage failure cannot leave the item
+  // pointing at a file that is already gone.
+  await deleteUpload(oldOriginal).catch(() => undefined);
+
+  revalidatePath("/closet");
+  revalidatePath(`/closet/${itemId}`);
+  return { ok: true, originalImagePath: promoted.imagePath, promotedFrom: promoted.label };
+}
+
 export type AddExtraSourceImageResponse =
   | { ok: true; imagePath: string }
   | { ok: false; error: string };
@@ -477,6 +559,64 @@ export async function addManualGhostViewFor(
     throw err;
   }
 
+  const rawLabel = String(formData.get("label") ?? "").trim();
+  return appendGhostView(itemId, item.ghostViews, item.ghostImagePath, saved.originalImagePath, rawLabel);
+}
+
+/**
+ * Add a photo from a web listing as another view of an existing item.
+ *
+ * The counterpart to `addManualGhostViewFor` for the third source in the
+ * "Add another picture" chooser (components/photo-source-picker.tsx). Shares the
+ * import rule with the add flow via lib/server/import-product-image.ts, so a
+ * listing whose og:image is the site logo is rejected here for the same reason
+ * it is rejected there.
+ *
+ * Deliberately does not touch the item's fields. Picking a listing during the
+ * *add* flow pre-fills brand and price because the item does not exist yet;
+ * doing that to a saved garment would silently overwrite what the user already
+ * entered, and they asked for a picture.
+ */
+export async function addWebProductGhostViewFor(
+  itemId: string,
+  match: ProductMatch,
+  label?: string,
+): Promise<AddManualGhostViewResponse> {
+  const user = await requireUser();
+  const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
+  if (!item || item.userId !== user.id) return { ok: false, error: "Item not found" };
+
+  try {
+    const imported = await importListingImage(match, user.id);
+    if (!imported.ok) return { ok: false, error: imported.error };
+    return appendGhostView(
+      itemId,
+      item.ghostViews,
+      item.ghostImagePath,
+      imported.saved.originalImagePath,
+      label?.trim() ?? "",
+    );
+  } catch (err) {
+    if (err instanceof UploadError) return { ok: false, error: err.message };
+    return { ok: false, error: (err as Error).message ?? "Could not import that photo" };
+  }
+}
+
+/**
+ * Append one already-saved image to an item's catalog views.
+ *
+ * Shared by every source in the chooser, so an uploaded photo, a camera capture
+ * and a web import land in the same shape with the same fallback label and the
+ * same "first view also becomes the thumbnail" rule. Those three used to be one
+ * code path and a second one waiting to drift from it.
+ */
+async function appendGhostView(
+  itemId: string,
+  ghostViewsRaw: string | null,
+  currentGhostPath: string | null,
+  imagePath: string,
+  rawLabel: string,
+): Promise<AddManualGhostViewResponse> {
   let existingViews: Array<{
     label: string;
     imagePath: string;
@@ -484,34 +624,29 @@ export async function addManualGhostViewFor(
     thumbZoom?: number;
   }> = [];
   try {
-    if (item.ghostViews) existingViews = JSON.parse(item.ghostViews) as typeof existingViews;
+    if (ghostViewsRaw) existingViews = JSON.parse(ghostViewsRaw) as typeof existingViews;
   } catch {
     existingViews = [];
   }
 
-  const rawLabel = String(formData.get("label") ?? "").trim();
   const label =
-    rawLabel ||
-    (existingViews.length === 0 ? "View" : `View ${existingViews.length + 1}`);
-  const newView = {
-    label,
-    imagePath: saved.originalImagePath,
-    mirror: false,
-    thumbZoom: 1,
-  };
-  const updatedViews = [...existingViews, newView];
+    rawLabel || (existingViews.length === 0 ? "View" : `View ${existingViews.length + 1}`);
+  const updatedViews = [
+    ...existingViews,
+    { label, imagePath, mirror: false, thumbZoom: 1 },
+  ];
 
   await prisma.wardrobeItem.update({
     where: { id: itemId },
     data: {
       ghostViews: encode(updatedViews),
-      ghostImagePath: item.ghostImagePath ?? saved.originalImagePath,
+      ghostImagePath: currentGhostPath ?? imagePath,
     },
   });
 
   revalidatePath("/closet");
   revalidatePath(`/closet/${itemId}`);
-  return { ok: true, imagePath: saved.originalImagePath, label };
+  return { ok: true, imagePath, label };
 }
 
 /**

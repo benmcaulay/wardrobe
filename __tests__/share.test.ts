@@ -49,16 +49,18 @@ describe("share tokens", () => {
 });
 
 describe("share kinds", () => {
-  it("recognises only the three kinds", () => {
+  it("recognises only the known kinds", () => {
     for (const k of SHARE_KINDS) expect(isShareKind(k)).toBe(true);
     expect(isShareKind("closet")).toBe(false);
+    expect(isShareKind("Space")).toBe(false);
     expect(isShareKind("")).toBe(false);
   });
 
-  it("requires a target for items and outfits but not the wishlist", () => {
+  it("requires a target for row-level kinds and not for account-wide ones", () => {
     expect(kindRequiresTarget("item")).toBe(true);
     expect(kindRequiresTarget("outfit")).toBe(true);
     expect(kindRequiresTarget("wishlist")).toBe(false);
+    expect(kindRequiresTarget("space")).toBe(false);
   });
 
   it("gives every kind a label and a blurb", () => {
@@ -80,9 +82,12 @@ describe("normalizeShareTarget", () => {
     expect(normalizeShareTarget("outfit", undefined).ok).toBe(false);
   });
 
-  it("forces the wishlist target to null even if an id is passed", () => {
+  it("forces account-wide targets to null even if an id is passed", () => {
+    // A stray id stored against a targetless kind could later be resolved as a
+    // target, which is how a wishlist share starts leaking one specific item.
     expect(normalizeShareTarget("wishlist", "stray-id")).toEqual({ ok: true, targetId: null });
     expect(normalizeShareTarget("wishlist", null)).toEqual({ ok: true, targetId: null });
+    expect(normalizeShareTarget("space", "stray-id")).toEqual({ ok: true, targetId: null });
   });
 
   it("trims whitespace around an id", () => {

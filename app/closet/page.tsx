@@ -18,7 +18,10 @@ import {
   SHARED_OWNER_FILTER,
 } from "@/lib/owners";
 import { AddItemFab } from "@/components/add-item-fab";
+import { BrandMark } from "@/components/brand-mark";
+import { Wordmark } from "@/components/wordmark";
 import { ClosetFilteredView, type ClosetPageItem } from "@/components/closet-filtered-view";
+import { loadSpaceSnapshot } from "@/lib/server/space-ledger";
 import type { FilterOptions } from "@/components/closet-filters";
 import {
   FILTER_CATEGORY_NONE,
@@ -100,7 +103,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
   // into the filter menus. Every other surface (outfits, packing, try-on, sell,
   // share) already filtered them out; this was the one that didn't.
   const owned = { userId: user.id, isWishlist: false };
-  const [allItems, allForFacets, totalCount] = await Promise.all([
+  const [allItems, allForFacets, totalCount, space] = await Promise.all([
     prisma.wardrobeItem.findMany({
       where: owned,
       orderBy: { createdAt: "desc" },
@@ -110,6 +113,10 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       select: { category: true, brand: true, colors: true, styleTags: true },
     }),
     prisma.wardrobeItem.count({ where: owned }),
+    // Only `month.out.count` is used here, to size the wordmark's gap. Loaded
+    // through the same helper the Space page uses so the two surfaces can never
+    // disagree about the same month.
+    loadSpaceSnapshot(user.id),
   ]);
 
   const hasUncategorized = allForFacets.some((i) => isNoneCategoryStored(i.category));
@@ -247,6 +254,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
       owners: JSON.stringify(resolveItemOwnerIds(parseStringArray(item.owners), primaryOwnerId)),
       isWishlist: item.isWishlist,
       createdAt: item.createdAt,
+      lastWornAtMs: item.lastWornAt?.getTime() ?? null,
       imagePath: bestImage,
       thumbZoom: tileMeta.thumbZoom,
       mirror: tileMeta.mirror,
@@ -258,8 +266,23 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
     <main className="max-w-[1800px] mx-auto px-6 py-12">
       {/* Navigation lives in the drawer (app/closet/layout.tsx). The trigger is
           fixed to the top-right, so leave room for it. */}
-      <header className="mb-2 pr-28">
+      <header className="mb-room-tight pr-28">
         <h1 className="sr-only">Closet</h1>
+        {/* The mark and the name, with the gap sized by this month's
+            departures — see components/wordmark.tsx. The closet is the app's
+            landing surface, so this is the one place the brand is worth the
+            pixels. */}
+        <Link
+          href="/closet/space"
+          title="What came in, what went out"
+          className="inline-flex items-center gap-2.5 text-ink-muted transition hover:text-ink focus-visible:outline-none"
+        >
+          <BrandMark size={18} className="shrink-0" />
+          <Wordmark
+            piecesOut={space.month.out.count}
+            className="font-sans text-[11px] font-medium uppercase tracking-[0.2em]"
+          />
+        </Link>
       </header>
 
       {totalCount === 0 ? (
@@ -270,8 +293,9 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
           options={options}
           initialFilters={filtersForUi}
           sortOrders={sortOrders}
-        hiddenFilters={hiddenFilters}
+          hiddenFilters={hiddenFilters}
           totalCount={totalCount}
+          nowMs={space.nowMs}
         />
       )}
 

@@ -192,7 +192,7 @@ export function LogSaleSheet({
                 onChange={(e) => setPaste(e.target.value)}
                 rows={3}
                 placeholder="Paste it here and we'll fill in what we can — optional."
-                className="mt-1.5 w-full resize-y rounded-2xl border border-ink/15 bg-white px-3.5 py-2.5 text-sm placeholder:text-ink-muted/60 focus:border-ink/30"
+                className="mt-1.5 w-full resize-y rounded-2xl border border-ink/15 bg-surface px-3.5 py-2.5 text-sm placeholder:text-ink-muted/60 focus:border-ink/30"
               />
             </label>
 
@@ -227,7 +227,7 @@ export function LogSaleSheet({
               <select
                 value={itemId}
                 onChange={(e) => setItemId(e.target.value)}
-                className="mt-1.5 w-full rounded-2xl border border-ink/15 bg-white px-3.5 py-2.5 text-sm"
+                className="mt-1.5 w-full rounded-2xl border border-ink/15 bg-surface px-3.5 py-2.5 text-sm"
               >
                 <option value="">Pick a piece…</option>
                 {items.map((i) => (
@@ -260,7 +260,7 @@ export function LogSaleSheet({
                       className={`flex items-center rounded-full border px-3 py-2 transition ${
                         active
                           ? "border-ink bg-ink text-paper"
-                          : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                          : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
                       }`}
                     >
                       <MarketplaceMark platform={m.id} height={12} />
@@ -333,7 +333,7 @@ function Money({
   return (
     <label className="block">
       <span className="text-[11px] uppercase tracking-[0.09em] text-ink-muted">{label}</span>
-      <span className="mt-1.5 flex items-center rounded-2xl border border-ink/15 bg-white px-3 py-2.5">
+      <span className="mt-1.5 flex items-center rounded-2xl border border-ink/15 bg-surface px-3 py-2.5">
         <span className="text-sm text-ink-muted">$</span>
         <input
           type="text"

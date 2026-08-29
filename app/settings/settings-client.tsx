@@ -83,6 +83,18 @@ type Props = {
     billedGenerations: number;
     byModel: Array<{ model: string; generations: number; cost: string }>;
   };
+  /**
+   * Product searches. Separate from `spend` because it is a different provider
+   * on a different unit — SerpAPI bills per search, not per generated image —
+   * and folding the two into one figure would make neither legible.
+   */
+  searches: {
+    total: number;
+    billed: number;
+    cached: number;
+    /** Formatted, e.g. "$0.72". Null when no per-search price is configured. */
+    cost: string | null;
+  };
   autoGenerateGhost: boolean;
   purchasesEnabled: boolean;
 };
@@ -100,6 +112,7 @@ export function SettingsClient({
   colorList,
   credits,
   spend,
+  searches,
   autoGenerateGhost,
   purchasesEnabled,
 }: Props) {
@@ -562,6 +575,38 @@ export function SettingsClient({
             </p>
           )}
         </div>
+
+        {/*
+          Product searches, which used to be the one paid call in the app that
+          reported nothing anywhere. Counted rather than costed by default: the
+          per-search price depends on your SerpAPI plan, and printing a guessed
+          dollar figure is the thing this codebase refuses to do. Set
+          SERPAPI_COST_TENTH_CENTS and the total appears.
+        */}
+        <div className="pt-2 border-t border-ink/10">
+          <div className="flex items-baseline justify-between gap-4">
+            <p className="text-xs text-ink-muted">Product searches</p>
+            <p className="font-serif text-xl tracking-tight tabular-nums">
+              {searches.cost ?? searches.billed}
+            </p>
+          </div>
+          {searches.total === 0 ? (
+            <p className="mt-1 text-xs text-ink-muted">No searches yet.</p>
+          ) : (
+            <p className="mt-1 text-xs text-ink-muted">
+              {searches.billed} billed
+              {searches.cached > 0 && <> · {searches.cached} served from cache, free</>}
+              {searches.cost == null && (
+                <> · no per-search price set, so this is a count not a total</>
+              )}
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-ink-muted">
+            Searching charges per search, not per result — scrolling the results you
+            already have is free. Checking wishlist prices searches once per watched
+            item whose store page has no readable price.
+          </p>
+        </div>
         {purchasesEnabled ? (
           <div className="pt-2 border-t border-ink/10">
             <p className="text-xs text-ink-muted mb-2">Buy more credits</p>
@@ -649,7 +694,7 @@ export function SettingsClient({
             onChange={(e) => setNewCategory(e.target.value)}
             placeholder={addUnder ? `Add subcategory to ${addUnder}` : "e.g. hats"}
             aria-label={addUnder ? `Add subcategory to ${addUnder}` : "Add a category"}
-            className="flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            className="flex-1 rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -721,7 +766,7 @@ export function SettingsClient({
             value={newOwner}
             onChange={(e) => setNewOwner(e.target.value)}
             placeholder="e.g. Alex"
-            className="flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            className="flex-1 rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -763,7 +808,7 @@ export function SettingsClient({
             value={newTag}
             onChange={(e) => setNewTag(e.target.value)}
             placeholder="e.g. athleisure"
-            className="flex-1 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            className="flex-1 rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -808,7 +853,7 @@ export function SettingsClient({
             value={newColorHex}
             onChange={(e) => setNewColorHex(e.target.value)}
             aria-label="Pick a color"
-            className="h-9 w-12 shrink-0 rounded-lg border border-ink/10 bg-white p-0.5 cursor-pointer"
+            className="h-9 w-12 shrink-0 rounded-lg border border-ink/10 bg-surface p-0.5 cursor-pointer"
           />
           <button
             type="button"
@@ -827,7 +872,7 @@ export function SettingsClient({
             value={newColorName}
             onChange={(e) => setNewColorName(e.target.value)}
             placeholder="name (e.g. sage)"
-            className="flex-1 min-w-[8rem] rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+            className="flex-1 min-w-[8rem] rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -871,7 +916,7 @@ export function SettingsClient({
             const meta = CLOSET_FILTER_LABELS[key];
             return (
               <li key={key}>
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ink/10 bg-white px-3 py-2.5 transition hover:border-ink/25">
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ink/10 bg-surface px-3 py-2.5 transition hover:border-ink/25">
                   <input
                     type="checkbox"
                     checked={shown}
@@ -903,7 +948,7 @@ export function SettingsClient({
         <div
           role="radiogroup"
           aria-label="Temperature unit"
-          className="inline-flex rounded-full border border-ink/15 bg-white p-1"
+          className="inline-flex rounded-full border border-ink/15 bg-surface p-1"
         >
           {(["c", "f"] as const).map((unit) => {
             const active = tempUnit === unit;
@@ -930,7 +975,7 @@ export function SettingsClient({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-ink/10 bg-white p-5 space-y-3">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-5 space-y-3">
         <h3 className="text-xs uppercase tracking-wide text-ink-muted">Local backup</h3>
         <p className="text-sm text-ink-muted max-w-xl">
           Download a ZIP of every closet photo for this account (originals, thumbnails, extra shots,
@@ -1002,7 +1047,7 @@ export function SettingsClient({
             spellCheck={false}
             placeholder={DELETE_CONFIRM_PHRASE}
             aria-label={`Type "${DELETE_CONFIRM_PHRASE}" to confirm deletion`}
-            className="w-full rounded-full border border-red-200 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+            className="w-full rounded-full border border-red-200 bg-surface px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
           />
           <button
             type="button"
@@ -1050,7 +1095,7 @@ function UnreadableCategories({
   if (needing.length === 0 && assigned.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-ink/10 bg-white p-4 space-y-3">
+    <div className="rounded-xl border border-ink/10 bg-surface p-4 space-y-3">
       <div>
         <p className="text-sm">Category shapes</p>
         <p className="text-xs text-ink-muted mt-1">
@@ -1072,7 +1117,7 @@ function UnreadableCategories({
               <select
                 defaultValue=""
                 onChange={(e) => onChoose(cat, e.target.value)}
-                className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:outline-none focus:border-ink/40"
+                className="rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:outline-none focus:border-ink/40"
                 aria-label={`Shape for ${cat}`}
               >
                 <option value="">Choose a shape…</option>
@@ -1095,7 +1140,7 @@ function UnreadableCategories({
               <select
                 value={shapes[normalizeCategoryName(cat)] ?? ""}
                 onChange={(e) => onChoose(cat, e.target.value)}
-                className="rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:outline-none focus:border-ink/40"
+                className="rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:outline-none focus:border-ink/40"
                 aria-label={`Shape for ${cat}`}
               >
                 {SHAPE_CHOICES.map((c) => (

@@ -50,6 +50,30 @@ const config: Config = {
           DEFAULT: themeColor("--accent"),
           soft: themeColor("--accent-soft"),
         },
+        /*
+         * Raised surfaces — cards, tiles, sheets.
+         *
+         * Was 173 literal `bg-white`s. White is correct for paper mode and
+         * wrong for Space mode, where an unthemed card is a hole punched in a
+         * dark page, so the colour had to become a token before night mode
+         * could ship. Named `surface` rather than `card` because a good third
+         * of those call sites are not cards.
+         */
+        surface: themeColor("--surface"),
+      },
+      /*
+       * The whitespace scale (see the Room block in app/globals.css).
+       *
+       * Extends Tailwind's spacing rather than replacing it: `p-4` still
+       * means 1rem. These are for the deliberate empty parts of a screen —
+       * the band under a headline, the column nothing is allowed into — so
+       * that "generous margin" is a value with a name and not a habit.
+       */
+      spacing: {
+        "room-tight": "var(--room-tight)",
+        room: "var(--room)",
+        "room-loose": "var(--room-loose)",
+        "room-vast": "var(--room-vast)",
       },
       boxShadow: {
         tile: "0 1px 2px rgba(26,22,19,0.04), 0 4px 16px rgba(26,22,19,0.06)",

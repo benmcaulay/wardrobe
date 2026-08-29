@@ -29,6 +29,7 @@ export const CLOSET_NAV: readonly ClosetNavItem[] = [
   { href: "/closet/outfits", label: "Outfits", hint: "Spin, compose, and train your stylist", icon: "hanger" },
   { href: "/closet/smartpakker", label: "Trip packing", hint: "Pack for the weather", icon: "suitcase" },
   { href: "/closet/sell", label: "Sell", hint: "Earnings, listings, and closet health", icon: "tag" },
+  { href: "/closet/space", label: "Space", hint: "What came in, what went out", icon: "ruler" },
   { href: "/closet/wishlist", label: "Wishlist", hint: "What you want, and what it costs", icon: "heart" },
   { href: "/closet/share", label: "Share", hint: "Send a piece, a look, or your list", icon: "share" },
 ];

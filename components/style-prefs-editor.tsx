@@ -41,7 +41,7 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
                 className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs capitalize transition ${
                   active
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 } disabled:opacity-50`}
               >
                 {s}
@@ -62,7 +62,7 @@ export function StylePrefsEditor({ value, onChange, disabled }: Props) {
                 value={sizes[slot.key] ?? ""}
                 onChange={(e) => setSize(slot.key, e.target.value)}
                 disabled={disabled}
-                className="mt-1 w-full rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 disabled:bg-paper-warm"
+                className="mt-1 w-full rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 disabled:bg-paper-warm"
                 placeholder={slot.key === "shoe" ? "9" : "M"}
               />
             </label>

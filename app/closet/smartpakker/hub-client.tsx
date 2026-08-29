@@ -84,7 +84,7 @@ export function HubClient({
 
   return (
     <div className="space-y-12">
-      <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
         <h2 className="font-serif text-2xl">Plan a trip</h2>
         <p className="mt-1 text-sm text-ink-muted">
           We&apos;ll check the climate at your destination and pack your bags from your closet.
@@ -183,7 +183,7 @@ export function HubClient({
                       className={`rounded-full border px-3 py-1 text-xs transition ${
                         on
                           ? "border-ink bg-ink text-paper"
-                          : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                          : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
                       }`}
                     >
                       {bag.name} · {formatVolume(bag.volumeLiters)}
@@ -217,7 +217,7 @@ export function HubClient({
               <li key={trip.id} className="group relative">
                 <Link
                   href={`/closet/smartpakker/${trip.id}`}
-                  className="block rounded-2xl border border-ink/10 bg-white p-5 shadow-tile transition hover:border-ink/25"
+                  className="block rounded-2xl border border-ink/10 bg-surface p-5 shadow-tile transition hover:border-ink/25"
                 >
                   <div className="font-serif text-xl">{trip.name}</div>
                   <div className="mt-1 text-sm text-ink-muted">{trip.destination}</div>
@@ -235,7 +235,7 @@ export function HubClient({
                     const res = await deleteTrip(trip.id);
                     if (res.ok) setTrips((prev) => prev.filter((t) => t.id !== trip.id));
                   }}
-                  className="absolute right-3 top-3 rounded-full bg-white/80 px-2 py-1 text-[10px] text-rose-700 opacity-0 transition hover:bg-rose-50 group-hover:opacity-100"
+                  className="absolute right-3 top-3 rounded-full bg-surface/80 px-2 py-1 text-[10px] text-rose-700 opacity-0 transition hover:bg-rose-50 group-hover:opacity-100"
                 >
                   Delete
                 </button>

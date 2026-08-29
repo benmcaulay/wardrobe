@@ -6,12 +6,24 @@ import { parseStylePrefs } from "@/lib/json";
 import { computeBudgetSummary } from "@/lib/wishlist/budget";
 import { analyzeCloset } from "@/lib/wishlist/gaps";
 import { detectPriceDrop, parsePriceHistory } from "@/lib/wishlist/price-watch";
+import { countInCategory, replaceCandidates, type OwnedPiece } from "@/lib/space/replaces";
 import { WishlistClient, type BudgetView, type WishlistRow } from "./wishlist-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function WishlistPage() {
+type SearchParams = {
+  /**
+   * A category the user arrived wanting. Set by the "want one" link on an empty
+   * outfit slot (app/closet/outfits/random-outfit-builder.tsx), which is the
+   * most specific statement of a wardrobe gap the app ever gets to make — the
+   * rule already said what shape belongs there.
+   */
+  want?: string;
+};
+
+export default async function WishlistPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser();
+  const nowMs = Date.now();
 
   const [dbUser, budget, wishlistItems, purchasedItems, ownedItems, soldAgg] = await Promise.all([
     prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
@@ -26,7 +38,16 @@ export default async function WishlistPage() {
     }),
     prisma.wardrobeItem.findMany({
       where: { userId: user.id, isWishlist: false },
-      select: { category: true },
+      // Wider than the gap report needs, because the one-in-one-out panel
+      // shows the actual garments rather than a count (lib/space/replaces.ts).
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        lastWornAt: true,
+        originalImagePath: true,
+        ghostImagePath: true,
+      },
     }),
     prisma.saleListing.aggregate({
       where: { userId: user.id, status: "sold" },
@@ -38,6 +59,14 @@ export default async function WishlistPage() {
   const categories = getCategoriesListFromPrefs(prefs);
 
   const salesCents = budget?.fundedBySales ? (soldAgg._sum.soldPriceCents ?? 0) : 0;
+
+  const ownedPieces: OwnedPiece[] = ownedItems.map((i) => ({
+    id: i.id,
+    name: i.name,
+    category: displayCategory(i.category),
+    imagePath: i.ghostImagePath ?? i.originalImagePath,
+    lastWornAtMs: i.lastWornAt?.getTime() ?? null,
+  }));
 
   const gapReport = analyzeCloset({
     owned: ownedItems.map((i) => ({ category: displayCategory(i.category) })),
@@ -69,6 +98,18 @@ export default async function WishlistPage() {
 
   const rows = wishlistItems.map(toRow);
   const purchased = purchasedItems.map(toRow);
+
+  /*
+   * Resolved on the server, once per category actually on the list, rather than
+   * shipping every owned garment to the client so it can filter. A closet of a
+   * few thousand pieces is a payload; six thumbnails per row is not.
+   */
+  const replaces: Record<string, { candidates: ReturnType<typeof replaceCandidates>; total: number }> = {};
+  for (const category of new Set(rows.map((r) => r.category))) {
+    const total = countInCategory(ownedPieces, category);
+    if (total === 0) continue;
+    replaces[category] = { candidates: replaceCandidates(ownedPieces, category), total };
+  }
 
   const summary = computeBudgetSummary({
     potCents: budget?.amountCents ?? 0,
@@ -116,6 +157,9 @@ export default async function WishlistPage() {
         purchased={purchased}
         gaps={gapReport}
         categories={categories}
+        replaces={replaces}
+        wantCategory={searchParams.want?.trim() || null}
+        nowMs={nowMs}
       />
     </main>
   );

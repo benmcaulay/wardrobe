@@ -109,7 +109,7 @@ export function CollapsibleSection({
 
   return (
     <section
-      className={`rounded-2xl border border-ink/10 bg-white shadow-tile ${className ?? ""}`}
+      className={`rounded-2xl border border-ink/10 bg-surface shadow-tile ${className ?? ""}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 p-5">
         <button

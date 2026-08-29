@@ -11,6 +11,8 @@ import type { GapReport, ItemVerdict } from "@/lib/wishlist/gaps";
 import type { PriceDrop } from "@/lib/wishlist/price-watch";
 import { PRIORITY_OPTIONS, centsToInput, normalizePriority } from "@/lib/wishlist/priority";
 import { AddPanel } from "./add-panel";
+import { ReplacesPanel } from "./replaces-panel";
+import type { ReplaceCandidate } from "@/lib/space/replaces";
 import { BudgetMeter } from "./budget-meter";
 import {
   markPurchased,
@@ -49,6 +51,11 @@ export type WishlistRow = {
   verdict: ItemVerdict;
 };
 
+export type ReplacesByCategory = Record<
+  string,
+  { candidates: ReplaceCandidate[]; total: number }
+>;
+
 export function WishlistClient({
   budget,
   summary,
@@ -56,6 +63,9 @@ export function WishlistClient({
   purchased,
   gaps,
   categories,
+  replaces,
+  wantCategory,
+  nowMs,
 }: {
   budget: BudgetView | null;
   summary: BudgetSummary;
@@ -63,6 +73,12 @@ export function WishlistClient({
   purchased: WishlistRow[];
   gaps: GapReport;
   categories: string[];
+  /** Pieces already owned in each wishlisted category, for the replaces panel. */
+  replaces: ReplacesByCategory;
+  /** Category the user arrived wanting, from ?want= — prefills the add form. */
+  wantCategory: string | null;
+  /** Server clock, so wear ages render identically on both sides. */
+  nowMs: number;
 }) {
   const router = useRouter();
   const [checking, setChecking] = useState(false);
@@ -100,7 +116,7 @@ export function WishlistClient({
   return (
     <div className="space-y-12">
       <BudgetMeter budget={budget} summary={summary} />
-      <AddPanel />
+      <AddPanel wantCategory={wantCategory} />
 
       {drops.length > 0 ? <PriceDropBanner rows={drops} /> : null}
 
@@ -136,6 +152,8 @@ export function WishlistClient({
                   cumulativeCents={row.cumulativeCents}
                   affordable={!budget || row.affordable}
                   categories={categories}
+                  replaces={replaces[row.item.category]}
+                  nowMs={nowMs}
                 />
               </li>
             ))}
@@ -168,11 +186,16 @@ function WishlistCard({
   cumulativeCents,
   affordable,
   categories,
+  replaces,
+  nowMs,
 }: {
   row: WishlistRow;
   cumulativeCents: number;
   affordable: boolean;
   categories: string[];
+  /** Absent when nothing is filed under this category yet. */
+  replaces?: { candidates: ReplaceCandidate[]; total: number };
+  nowMs: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -193,7 +216,7 @@ function WishlistCard({
   return (
     <article
       className={`flex flex-wrap gap-4 rounded-2xl border p-4 transition sm:flex-nowrap ${
-        affordable ? "border-ink/10 bg-white shadow-tile" : "border-ink/10 bg-paper-warm opacity-75"
+        affordable ? "border-ink/10 bg-surface shadow-tile" : "border-ink/10 bg-paper-warm opacity-75"
       }`}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -201,7 +224,7 @@ function WishlistCard({
         src={thumbnailUrl(row.imagePath)}
         alt={row.name}
         loading="lazy"
-        className="h-28 w-28 shrink-0 rounded-xl bg-white object-cover"
+        className="h-28 w-28 shrink-0 rounded-xl bg-surface object-cover"
       />
 
       <div className="min-w-0 flex-1">
@@ -364,6 +387,15 @@ function WishlistCard({
             {busy === "remove" ? "Removing…" : "Remove"}
           </button>
         </div>
+
+        {replaces ? (
+          <ReplacesPanel
+            category={row.category}
+            candidates={replaces.candidates}
+            totalInCategory={replaces.total}
+            nowMs={nowMs}
+          />
+        ) : null}
       </div>
     </article>
   );
@@ -382,7 +414,7 @@ function PurchasedCard({ row }: { row: WishlistRow }) {
         src={thumbnailUrl(row.imagePath)}
         alt={row.name}
         loading="lazy"
-        className="h-16 w-16 shrink-0 rounded-lg bg-white object-cover"
+        className="h-16 w-16 shrink-0 rounded-lg bg-surface object-cover"
       />
       <div className="min-w-0 flex-1">
         <Link href={`/closet/${row.id}`} className="truncate font-medium hover:underline">
@@ -495,7 +527,7 @@ function GapPanel({ gaps }: { gaps: GapReport }) {
   const thin = gaps.gaps.filter((c) => c.owned > 0);
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
       <h2 className="font-serif text-2xl">Where the money should go</h2>
       <p className="mt-1 text-sm text-ink-muted">
         Measured against what you already own — not what&apos;s trending.

@@ -232,7 +232,7 @@ export function StylistTrainer({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-      <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-tile">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-5 shadow-tile">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-serif text-xl">Train your stylist</h2>
           <span className="text-xs text-ink-muted">
@@ -252,7 +252,7 @@ export function StylistTrainer({
               className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
                 mode === option
                   ? "border-ink bg-ink text-paper"
-                  : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                  : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
               }`}
             >
               {TRAINING_MODE_LABELS[option]}
@@ -425,7 +425,7 @@ function RateRound({
                     type="button"
                     disabled={busy}
                     onClick={() => onRate(outfit, false)}
-                    className="flex-1 rounded-full border border-ink/15 bg-white px-2 py-1 text-[11px] text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
+                    className="flex-1 rounded-full border border-ink/15 bg-surface px-2 py-1 text-[11px] text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
                   >
                     Dislike
                   </button>
@@ -447,7 +447,7 @@ function RateRound({
         type="button"
         disabled={busy}
         onClick={onNext}
-        className="mt-4 rounded-full border border-ink/15 bg-white px-4 py-1.5 text-xs text-ink transition hover:bg-paper-warm disabled:opacity-50"
+        className="mt-4 rounded-full border border-ink/15 bg-surface px-4 py-1.5 text-xs text-ink transition hover:bg-paper-warm disabled:opacity-50"
       >
         {allRated ? "Next round →" : "Skip the rest →"}
       </button>
@@ -559,7 +559,7 @@ function SwipeRound({
             opacity: flungTo ? 0 : 1,
             touchAction: "pan-y",
           }}
-          className="cursor-grab rounded-2xl border border-ink/10 bg-white p-3 shadow-tile active:cursor-grabbing"
+          className="cursor-grab rounded-2xl border border-ink/10 bg-surface p-3 shadow-tile active:cursor-grabbing"
         >
           <div className="flex gap-2">
             {outfit.items.map((item) => (
@@ -594,7 +594,7 @@ function SwipeRound({
           type="button"
           disabled={busy || !!flungTo}
           onClick={() => commit(false)}
-          className="flex-1 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
+          className="flex-1 rounded-full border border-ink/15 bg-surface px-4 py-2 text-sm text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
         >
           Nope
         </button>
@@ -684,7 +684,7 @@ function FocusPanel({
   const pinned = items.filter((item) => pinnedItemIds.includes(item.id));
 
   return (
-    <aside className="rounded-2xl border border-ink/10 bg-white p-4 shadow-tile">
+    <aside className="rounded-2xl border border-ink/10 bg-surface p-4 shadow-tile">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-serif text-lg">Focus</h3>
         {active > 0 ? (
@@ -808,7 +808,7 @@ function FilterChips({
               className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] transition ${
                 on
                   ? "border-ink bg-ink text-paper"
-                  : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                  : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
               }`}
             >
               {name}
@@ -886,7 +886,7 @@ function PieceRound({
                     type="button"
                     disabled={busy}
                     onClick={() => onRate(piece, false)}
-                    className="flex-1 rounded-full border border-ink/15 bg-white px-2 py-1 text-[11px] text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
+                    className="flex-1 rounded-full border border-ink/15 bg-surface px-2 py-1 text-[11px] text-ink-muted transition hover:bg-paper-warm disabled:opacity-50"
                   >
                     Pass
                   </button>
@@ -908,7 +908,7 @@ function PieceRound({
         type="button"
         disabled={busy}
         onClick={onNext}
-        className="mt-4 rounded-full border border-ink/15 bg-white px-4 py-1.5 text-xs text-ink transition hover:bg-paper-warm disabled:opacity-50"
+        className="mt-4 rounded-full border border-ink/15 bg-surface px-4 py-1.5 text-xs text-ink transition hover:bg-paper-warm disabled:opacity-50"
       >
         {allRated ? "Next pieces →" : "Skip the rest →"}
       </button>

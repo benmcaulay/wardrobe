@@ -20,6 +20,7 @@
 import { log } from "../log";
 import { parseBrandFromTitle } from "../shopping-parse";
 import { serpApiEnabled, serpApiGet } from "./serpapi-client";
+import { getCachedSearch, setCachedSearch } from "./product-search-cache";
 import { geminiJson, geminiTextConfigured } from "./gemini-text";
 import { pick, range, seededRng } from "./_rng";
 import type { ProductMatch } from "./reverseImageSearch";
@@ -90,6 +91,24 @@ function mapShoppingResult(item: ShoppingResult, confidence: number): ProductMat
   };
 }
 
+/** Confidence given to the top hit, and to the last one. */
+const SERP_CONFIDENCE_TOP = 0.95;
+const SERP_CONFIDENCE_LAST = 0.35;
+
+/**
+ * Every result Google Shopping returned, not the first twelve.
+ *
+ * There used to be a `.slice(0, 12)` here, which saved nothing: `data` is the
+ * response body, so the request had already been made and already been billed.
+ * One call returns roughly forty to sixty rows and we were discarding most of
+ * them, then charging the user another search when the twelve did not contain
+ * what they wanted. Keeping them all costs exactly the same.
+ *
+ * Confidence is now spread across however many results there are rather than
+ * decremented by a fixed step. The old 0.06-per-row decay with a 0.35 floor hit
+ * that floor at row 11, so past the old cap every result claimed identical
+ * confidence and the ordering signal was gone precisely where it was needed.
+ */
 async function searchProductsSerp(query: string): Promise<ProductMatch[]> {
   const data = await serpApiGet<ShoppingResponse>({
     engine: "google_shopping",
@@ -99,15 +118,23 @@ async function searchProductsSerp(query: string): Promise<ProductMatch[]> {
     google_domain: "google.com",
   });
 
+  const rows = data.shopping_results ?? [];
+  const span = SERP_CONFIDENCE_TOP - SERP_CONFIDENCE_LAST;
   const matches: ProductMatch[] = [];
-  let confidence = 0.95;
-  for (const row of (data.shopping_results ?? []).slice(0, 12)) {
-    const m = mapShoppingResult(row, confidence);
+  for (const [i, row] of rows.entries()) {
+    // Rank-proportional, so the first is always 0.95 and the last always 0.35
+    // whether there are five results or sixty. A single result gets the top
+    // score rather than being averaged into the middle.
+    const progress = rows.length > 1 ? i / (rows.length - 1) : 0;
+    const m = mapShoppingResult(row, round2(SERP_CONFIDENCE_TOP - span * progress));
     if (!m) continue;
     matches.push(m);
-    confidence = Math.max(0.35, confidence - 0.06);
   }
   return matches;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 // -----------------------------------------------------------------------------
@@ -178,21 +205,52 @@ function searchProductsStub(query: string): ProductMatch[] {
   ];
 }
 
-/** Text search for products to add. */
-export async function searchWebProducts(query: string): Promise<ProductMatch[]> {
+/** Which lane answered, and whether anything was billed for it. */
+export type SearchProvider = "serpapi" | "gemini" | "stub";
+
+export type WebProductSearch = {
+  matches: ProductMatch[];
+  provider: SearchProvider;
+  /** True when the cache answered, so no request went out and nothing was billed. */
+  cached: boolean;
+};
+
+/**
+ * Text search for products to add.
+ *
+ * Returns *how* it answered as well as what it found, because the caller has to
+ * record the search — SerpAPI bills per request and until now none of those
+ * requests were counted anywhere (see prisma ProductSearchEvent).
+ *
+ * Only the SerpAPI lane is cached. Caching gemini would be caching a result with
+ * no price and no URL, and if SerpAPI were briefly down, a ten-minute cache
+ * would keep serving that degraded answer after it recovered.
+ */
+export async function searchWebProductsDetailed(query: string): Promise<WebProductSearch> {
   const q = query.trim();
-  if (!q) return [];
+  if (!q) return { matches: [], provider: "stub", cached: true };
 
   if (serpApiEnabled()) {
+    const nowMs = Date.now();
+    const hit = getCachedSearch<ProductMatch[]>(q, nowMs);
+    if (hit) {
+      log.info("web-product-search.cache-hit", { provider: "serpapi", results: hit.length });
+      return { matches: hit, provider: "serpapi", cached: true };
+    }
+
     const startedAt = Date.now();
     try {
       const matches = await searchProductsSerp(q);
+      // Empty results are cached too: a query that finds nothing will find
+      // nothing again in ten minutes, and re-billing to confirm that is the
+      // most wasteful search there is.
+      setCachedSearch(q, matches, Date.now());
       log.info("web-product-search.ok", {
         provider: "serpapi",
         ms: Date.now() - startedAt,
         results: matches.length,
       });
-      return matches;
+      return { matches, provider: "serpapi", cached: false };
     } catch (err) {
       // Fall through to gemini rather than failing: a name with no price still
       // lets the user add the piece and paste a link afterwards.
@@ -210,12 +268,24 @@ export async function searchWebProducts(query: string): Promise<ProductMatch[]> 
         results: matches.length,
         priced: false,
       });
-      return matches;
+      return { matches, provider: "gemini", cached: false };
     } catch (err) {
       log.error("web-product-search.gemini.failed", err, { ms: Date.now() - startedAt });
-      return [];
+      return { matches: [], provider: "gemini", cached: false };
     }
   }
 
-  return searchProductsStub(q);
+  return { matches: searchProductsStub(q), provider: "stub", cached: false };
+}
+
+/**
+ * Matches only.
+ *
+ * Kept for callers that genuinely cannot record the search — nothing else. If
+ * you have a userId in scope, use `searchWebProductsDetailed` and log a
+ * ProductSearchEvent; a billed call that reports nothing is how this path became
+ * invisible in the first place.
+ */
+export async function searchWebProducts(query: string): Promise<ProductMatch[]> {
+  return (await searchWebProductsDetailed(query)).matches;
 }

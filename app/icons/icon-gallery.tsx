@@ -44,7 +44,7 @@ export function IconGallery() {
               type="button"
               onClick={() => setSize(s)}
               className={`rounded-full px-3 py-1 transition ${
-                size === s ? "bg-white text-ink shadow-tile" : "text-ink-muted hover:text-ink"
+                size === s ? "bg-surface text-ink shadow-tile" : "text-ink-muted hover:text-ink"
               }`}
             >
               {s}px
@@ -66,7 +66,7 @@ export function IconGallery() {
                 type="button"
                 onClick={() => copy(name, name)}
                 title="Copy JSX"
-                className="flex w-full flex-col items-center gap-3 rounded-2xl border border-ink/10 bg-white px-3 py-5 transition hover:border-ink/25 hover:bg-paper-warm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="flex w-full flex-col items-center gap-3 rounded-2xl border border-ink/10 bg-surface px-3 py-5 transition hover:border-ink/25 hover:bg-paper-warm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               >
                 <Component size={size} className="text-ink" />
                 <span className="w-full truncate text-center text-[11px] text-ink-muted">

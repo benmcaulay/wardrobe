@@ -9,6 +9,7 @@ import {
   type FilterOptions,
 } from "@/components/closet-filters";
 import { ClosetGrid, type ClosetGridItem } from "@/components/closet-grid";
+import { ClosetRail, type RailViewItem } from "@/components/closet-rail";
 import {
   filterSortClosetItems,
   type ClosetFilterableItem,
@@ -18,7 +19,13 @@ import type { SortOrders } from "@/lib/closet-sort";
 import { fadeUp, springSoft } from "@/lib/ui-motion";
 
 export type ClosetPageItem = ClosetFilterableItem &
-  Omit<ClosetGridItem, "createdAt" | "name" | "brand" | "category" | "colors" | "season" | "isWishlist">;
+  Omit<ClosetGridItem, "createdAt" | "name" | "brand" | "category" | "colors" | "season" | "isWishlist"> & {
+    /** For the rail's time axis. Null means no wear has ever been logged. */
+    lastWornAtMs: number | null;
+  };
+
+/** Grid to find a piece; rail to see the shape of the closet. */
+type Layout = "grid" | "rail";
 
 type Props = {
   allItems: ClosetPageItem[];
@@ -27,6 +34,8 @@ type Props = {
   sortOrders: SortOrders;
   totalCount: number;
   hiddenFilters?: readonly ClosetFilterKey[];
+  /** Server clock, so the rail's axis is identical on both sides of hydration. */
+  nowMs: number;
 };
 
 export function ClosetFilteredView({
@@ -36,8 +45,10 @@ export function ClosetFilteredView({
   sortOrders,
   totalCount,
   hiddenFilters,
+  nowMs,
 }: Props) {
   const [filters, setFilters] = useState(initialFilters);
+  const [layout, setLayout] = useState<Layout>("grid");
 
   const filtered = useMemo(
     () => filterSortClosetItems(allItems, filters, sortOrders),
@@ -79,6 +90,19 @@ export function ClosetFilteredView({
     [filtered],
   );
 
+  const railItems = useMemo<RailViewItem[]>(
+    () =>
+      filtered.map((item) => ({
+        id: item.id,
+        name: item.name,
+        imagePath: item.imagePath,
+        thumbZoom: item.thumbZoom,
+        mirror: item.mirror,
+        lastWornAtMs: item.lastWornAtMs,
+      })),
+    [filtered],
+  );
+
   const filteredValueFormatted = useMemo(() => {
     const cents = filteredGridItems.reduce((sum, i) => sum + (i.priceCents ?? 0), 0);
     return new Intl.NumberFormat("en-US", {
@@ -113,11 +137,21 @@ export function ClosetFilteredView({
           </p>
         </div>
         {/* mt-14 drops this clear of the fixed menu trigger (app/closet/layout.tsx). */}
-        <p className="mt-14 text-xs text-ink-muted">
-          {filteredGridItems.length === totalCount
-            ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"} in closet`
-            : `${filteredGridItems.length} of ${totalCount} shown`}
-        </p>
+        <div className="mt-14 flex items-center gap-3">
+          <p className="text-xs text-ink-muted">
+            {filteredGridItems.length === totalCount
+              ? `${totalCount} ${totalCount === 1 ? "piece" : "pieces"} in closet`
+              : `${filteredGridItems.length} of ${totalCount} shown`}
+          </p>
+          <div className="flex rounded-full bg-paper-warm p-0.5 text-xs">
+            <LayoutButton active={layout === "grid"} onClick={() => setLayout("grid")}>
+              Grid
+            </LayoutButton>
+            <LayoutButton active={layout === "rail"} onClick={() => setLayout("rail")}>
+              Rail
+            </LayoutButton>
+          </div>
+        </div>
       </motion.div>
 
       {totalCount > 0 && (
@@ -129,6 +163,16 @@ export function ClosetFilteredView({
         />
       )}
 
+      {/*
+        The results block below is keyed on the filters so a new query
+        cross-fades — but deliberately NOT on the result count. The count used
+        to be in that key, which meant any change to the number of tiles
+        remounted the whole grid: a piece leaving the closet destroyed and
+        rebuilt ClosetGrid, taking its vacancy state with it, so the hole it is
+        supposed to hold open (lib/space/vacancy.ts) could never render. Every
+        filter that can change the count is already in the key, so the count was
+        redundant for the cross-fade as well as harmful.
+      */}
       <AnimatePresence mode="wait">
         {filteredGridItems.length === 0 ? (
           <motion.div
@@ -143,21 +187,48 @@ export function ClosetFilteredView({
           </motion.div>
         ) : (
           <motion.div
-            key={`${filters.sort}-${filteredGridItems.length}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.owner}-${filters.brand}-${filters.season}`}
+            key={`${filters.sort}-${filters.q}-${filters.categories.join(",")}-${filters.colors.join(",")}-${filters.tag}-${filters.owner}-${filters.brand}-${filters.season}`}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <ClosetGrid
-              items={filteredGridItems}
-              sort={filters.sort}
-              sortOrders={sortOrders}
-              noneCategoryLabel={NONE_CATEGORY}
-            />
+            {layout === "rail" ? (
+              <ClosetRail items={railItems} nowMs={nowMs} />
+            ) : (
+              <ClosetGrid
+                items={filteredGridItems}
+                sort={filters.sort}
+                sortOrders={sortOrders}
+                noneCategoryLabel={NONE_CATEGORY}
+              />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+function LayoutButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3 py-1 transition ${
+        active ? "bg-surface text-ink shadow-tile" : "text-ink-muted hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

@@ -185,7 +185,7 @@ export function GearClient({ initial }: { initial: GearView[] }) {
                   type="button"
                   disabled={busy}
                   onClick={() => void addPresets([preset.name])}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 bg-surface px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
                 >
                   <GearIcon
                     name={preset.icon ?? "pouch"}
@@ -244,7 +244,7 @@ export function GearClient({ initial }: { initial: GearView[] }) {
                 ) : (
                   <li
                     key={row.id}
-                    className="flex items-center gap-3 rounded-xl border border-ink/10 bg-white p-3 shadow-tile"
+                    className="flex items-center gap-3 rounded-xl border border-ink/10 bg-surface p-3 shadow-tile"
                   >
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-paper-warm">
                       <GearIcon name={gearIconName(row)} className="h-5 w-5" />
@@ -334,7 +334,7 @@ function GearForm({
     setDraft((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <div className="rounded-2xl border border-ink/15 bg-white p-5 shadow-tile">
+    <div className="rounded-2xl border border-ink/15 bg-surface p-5 shadow-tile">
       <div className="grid gap-3 sm:grid-cols-6">
         <div className="sm:col-span-3">
           <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Name</label>

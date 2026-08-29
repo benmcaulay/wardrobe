@@ -8,6 +8,7 @@ import {
   Gloock,
   Ojuju,
 } from "next/font/google";
+import { APP_NAME } from "@/lib/brand";
 import { DesignLabChrome } from "./lab-chrome";
 
 const unbounded = Unbounded({
@@ -50,7 +51,7 @@ const ojuju = Ojuju({
 });
 
 export const metadata = {
-  title: "Design Lab · Wardrobe",
+  title: `Design Lab · ${APP_NAME}`,
   description: "Three bold UI directions for the core closet experience.",
 };
 

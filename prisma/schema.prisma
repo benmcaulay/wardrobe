@@ -53,6 +53,7 @@ model User {
   wearEvents        WearEvent[]
   preferenceEvents  PreferenceEvent[]
   styleNotes        StyleNote[]
+  productSearches   ProductSearchEvent[]
 }
 
 // An unlisted public link to one item, one outfit, or the wishlist.
@@ -118,6 +119,39 @@ model CreditPurchase {
   createdAt       DateTime @default(now())
 
   @@index([userId])
+}
+
+// One product search that was actually issued, so paid searches stop being
+// invisible.
+//
+// SerpAPI bills per *search*, not per result, and every other paid call in the
+// app lands in a ledger the Settings page totals — this one did not. Worse, the
+// expensive paths are the quiet ones: "Check prices" on the wishlist fires one
+// search per watched item, and none of them showed up anywhere.
+//
+// `cached` rows are searches that were served from the in-process cache
+// (lib/services/product-search-cache.ts) and therefore cost nothing. They are
+// recorded rather than skipped because the whole point is being able to see how
+// many billed searches the cache avoided.
+//
+// The query text is deliberately NOT stored. Counting and costing needs the
+// provider and the outcome, not what somebody was shopping for, and retaining
+// search strings would be a new category of personal data for no functional
+// gain.
+model ProductSearchEvent {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "serpapi" | "gemini" | "stub"
+  provider String
+  /// Served from cache, so nothing was billed.
+  cached      Boolean @default(false)
+  resultCount Int     @default(0)
+  /// Tenths of a US cent, from SERPAPI_COST_TENTH_CENTS. 0 when unpriced or cached.
+  costTenthCents Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 // Background generation job. Generation (esp. multi-garment virtual try-on,

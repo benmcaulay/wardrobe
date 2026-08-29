@@ -69,7 +69,7 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
   return (
     <div className="space-y-4">
       {fitWhole ? (
-        <div className="relative w-full max-h-[min(70vh,880px)] mx-auto rounded-2xl overflow-hidden bg-white ring-1 ring-inset ring-ink/10 aspect-square flex items-center justify-center">
+        <div className="relative w-full max-h-[min(70vh,880px)] mx-auto rounded-2xl overflow-hidden bg-surface ring-1 ring-inset ring-ink/10 aspect-square flex items-center justify-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}

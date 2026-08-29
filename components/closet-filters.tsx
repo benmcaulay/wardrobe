@@ -215,7 +215,7 @@ export function ClosetFilters({
           }}
           placeholder="Search name, brand, category, color, season, tags…"
           aria-label="Search wardrobe"
-          className="closet-search-input w-full rounded-full border border-ink/10 bg-white px-5 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
+          className="closet-search-input w-full rounded-full border border-ink/10 bg-surface px-5 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40"
         />
         {qDraft && (
           <button
@@ -363,7 +363,7 @@ function OwnerFilter({
         className={`inline-flex max-w-[200px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs capitalize transition ${
           active
             ? "border-ink/30 bg-paper-warm text-ink"
-            : "border-ink/10 bg-white text-ink hover:border-ink/30"
+            : "border-ink/10 bg-surface text-ink hover:border-ink/30"
         }`}
       >
         <span className="truncate">{current.label}</span>
@@ -375,7 +375,7 @@ function OwnerFilter({
         <div
           role="listbox"
           aria-label="Owner filter"
-          className="absolute left-0 top-full z-30 mt-1 min-w-[160px] rounded-xl border border-ink/10 bg-white p-1.5 shadow-lg"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[160px] rounded-xl border border-ink/10 bg-surface p-1.5 shadow-lg"
         >
           {segments.map((seg) => {
             const isOn = seg.value === value;
@@ -426,7 +426,7 @@ function SortControl({
       className={`inline-flex items-stretch overflow-hidden rounded-full border text-xs transition ${
         active
           ? "border-ink/30 bg-paper-warm text-ink"
-          : "border-ink/10 bg-white text-ink hover:border-ink/30"
+          : "border-ink/10 bg-surface text-ink hover:border-ink/30"
       }`}
     >
       <label className="relative flex items-center">
@@ -544,7 +544,7 @@ export function CategoryTreeFilter({
         className={`inline-flex items-center gap-1.5 max-w-[200px] rounded-full border px-3 py-1.5 pr-2 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed ${
           active
             ? "bg-ink text-paper border-ink"
-            : "bg-white border-ink/10 text-ink hover:border-ink/30"
+            : "bg-surface border-ink/10 text-ink hover:border-ink/30"
         }`}
       >
         <span className="truncate">{summary}</span>
@@ -562,7 +562,7 @@ export function CategoryTreeFilter({
           role="listbox"
           aria-label="Category filter"
           aria-multiselectable
-          className="absolute z-30 top-full left-0 mt-1 w-[240px] max-w-[min(320px,calc(100vw-3rem))] rounded-xl border border-ink/10 bg-white p-2 shadow-lg"
+          className="absolute z-30 top-full left-0 mt-1 w-[240px] max-w-[min(320px,calc(100vw-3rem))] rounded-xl border border-ink/10 bg-surface p-2 shadow-lg"
         >
           {showSearch && (
             <input
@@ -690,7 +690,7 @@ export function MultiSelectFilter({
         className={`inline-flex items-center gap-1.5 max-w-[200px] rounded-full border px-3 py-1.5 pr-2 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed ${
           active
             ? "bg-ink text-paper border-ink"
-            : "bg-white border-ink/10 text-ink hover:border-ink/30"
+            : "bg-surface border-ink/10 text-ink hover:border-ink/30"
         }`}
       >
         <span className="truncate">{summary}</span>
@@ -707,7 +707,7 @@ export function MultiSelectFilter({
         <div
           role="listbox"
           aria-label={`${label} filter`}
-          className="absolute z-30 top-full left-0 mt-1 min-w-[200px] max-w-[min(320px,calc(100vw-3rem))] rounded-xl border border-ink/10 bg-white p-2 shadow-lg"
+          className="absolute z-30 top-full left-0 mt-1 min-w-[200px] max-w-[min(320px,calc(100vw-3rem))] rounded-xl border border-ink/10 bg-surface p-2 shadow-lg"
         >
           <div className="flex flex-wrap gap-1">
             {options.map((o) => {
@@ -809,7 +809,7 @@ function Select({
         className={`inline-flex max-w-[200px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs capitalize transition disabled:cursor-not-allowed disabled:opacity-40 ${
           active
             ? "bg-ink text-paper border-ink"
-            : "bg-white border-ink/10 text-ink hover:border-ink/30"
+            : "bg-surface border-ink/10 text-ink hover:border-ink/30"
         }`}
       >
         <span className="truncate">{text}</span>
@@ -821,7 +821,7 @@ function Select({
         <div
           role="listbox"
           aria-label={`${label} filter`}
-          className="absolute left-0 top-full z-30 mt-1 max-h-72 min-w-[180px] max-w-[min(320px,calc(100vw-3rem))] overflow-y-auto rounded-xl border border-ink/10 bg-white p-2 shadow-lg"
+          className="absolute left-0 top-full z-30 mt-1 max-h-72 min-w-[180px] max-w-[min(320px,calc(100vw-3rem))] overflow-y-auto rounded-xl border border-ink/10 bg-surface p-2 shadow-lg"
         >
           <div className="flex flex-wrap gap-1">
             {options.map((o) => {

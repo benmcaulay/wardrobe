@@ -311,7 +311,7 @@ export function LooksCarousel({
           <button
             type="button"
             onClick={() => onEditLook(days[Math.min(focused, count - 1)])}
-            className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm"
+            className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-surface px-3.5 py-1.5 text-xs transition hover:bg-paper-warm"
           >
             Edit this look
           </button>

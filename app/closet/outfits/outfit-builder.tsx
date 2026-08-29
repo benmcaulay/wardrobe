@@ -360,7 +360,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
         {savedOutfits.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {savedOutfits.map((outfit) => (
-              <div key={outfit.id} className="flex items-center rounded-full border border-ink/10 bg-white pr-1">
+              <div key={outfit.id} className="flex items-center rounded-full border border-ink/10 bg-surface pr-1">
                 <button
                   type="button"
                   onClick={() => loadOutfit(outfit)}
@@ -414,7 +414,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
           onPointerUp={handleCanvasPointerUp}
           onPointerLeave={handleCanvasPointerUp}
         >
-          <div className="absolute inset-0 bg-gradient-to-b from-paper-warm/70 to-white" />
+          <div className="absolute inset-0 bg-gradient-to-b from-paper-warm/70 to-surface" />
           <div
             className="absolute left-1/2 -translate-x-1/2 bottom-8 w-40 rounded-full border border-ink/10 bg-paper/70"
             style={{ height: Math.max(220, frameHeight * 0.7) }}
@@ -467,7 +467,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
         className="w-full shrink-0 space-y-3 md:sticky md:top-6 md:w-[300px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
-        <div className="rounded-2xl border border-ink/10 bg-white p-3 space-y-2">
+        <div className="rounded-2xl border border-ink/10 bg-surface p-3 space-y-2">
           <div className="text-[10px] uppercase tracking-wide text-ink-muted">Outfit</div>
           <div className="flex gap-2">
             <input
@@ -557,7 +557,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
               onChange={(e) => setFilters((prev) => ({ ...prev, q: e.target.value }))}
               placeholder="Search name, brand, color, tags…"
               aria-label="Search closet for outfit pieces"
-              className="w-full rounded-full border border-ink/10 bg-white px-3 py-1.5 pr-8 text-xs focus:outline-none focus:border-ink/40"
+              className="w-full rounded-full border border-ink/10 bg-surface px-3 py-1.5 pr-8 text-xs focus:outline-none focus:border-ink/40"
             />
             {filters.q && (
               <button
@@ -596,7 +596,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
                 className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
                   filters.brand
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 <option value="">Brand</option>
@@ -621,7 +621,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
                 className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
                   filters.season
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 }`}
               >
                 <option value="">Season</option>
@@ -647,7 +647,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
                 className={`appearance-none rounded-full border px-3 py-1.5 pr-7 text-xs cursor-pointer transition ${
                   filters.tag
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 <option value="">Tag</option>
@@ -688,7 +688,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
                   <button
                     type="button"
                     onClick={() => void addPiece(item)}
-                    className="w-full rounded-xl bg-white border border-ink/10 hover:border-ink/25 p-2 flex items-center gap-2 text-left"
+                    className="w-full rounded-xl bg-surface border border-ink/10 hover:border-ink/25 p-2 flex items-center gap-2 text-left"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img

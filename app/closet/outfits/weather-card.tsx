@@ -97,7 +97,7 @@ export function WeatherCard({
 
   if (known && !editing) {
     return (
-      <section className="rounded-2xl border border-ink/10 bg-white p-4">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-4">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="font-serif text-lg">
             {BAND_COPY[context.band!] ?? context.band} · {formatTemperature(context.highC!, temperatureUnit)}
@@ -154,7 +154,7 @@ export function WeatherCard({
           onChange={(e) => setDraft(e.target.value)}
           placeholder={context.location ?? "San Diego"}
           aria-label="Home location"
-          className="min-w-0 flex-1 rounded-xl border border-ink/15 bg-white px-3 py-1.5 text-sm focus:border-ink/40 focus:outline-none"
+          className="min-w-0 flex-1 rounded-xl border border-ink/15 bg-surface px-3 py-1.5 text-sm focus:border-ink/40 focus:outline-none"
         />
         <button
           type="button"

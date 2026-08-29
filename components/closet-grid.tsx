@@ -14,6 +14,12 @@ import {
 } from "@/lib/closet-group-order";
 import { sortWardrobeItems, type ClosetSortKey, type SortOrders } from "@/lib/closet-sort";
 import { thumbnailUrl } from "@/lib/image-paths";
+import {
+  VACANCY_HOLD_MS,
+  vacanciesBetween,
+  withVacancies,
+  type Vacancy,
+} from "@/lib/space/vacancy";
 
 export type ClosetGridItem = {
   id: string;
@@ -48,10 +54,43 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
   const suppressNavRef = useRef(false);
   const itemsById = useRef(new Map(initialItems.map((i) => [i.id, i])));
 
+  /*
+   * Holes held open where pieces just left. See lib/space/vacancy.ts for why
+   * they exist at all; the state lives here because the grid is the only thing
+   * that knows where the tile was.
+   */
+  const [vacancies, setVacancies] = useState<Vacancy[]>([]);
+  const previousIds = useRef(initialItems.map((i) => i.id));
+  const vacancyTimers = useRef<number[]>([]);
+
   useEffect(() => {
+    const nextIds = initialItems.map((i) => i.id);
+    const opened = vacanciesBetween(previousIds.current, nextIds);
+    previousIds.current = nextIds;
+
     setItems(initialItems);
     itemsById.current = new Map(initialItems.map((i) => [i.id, i]));
+
+    if (opened.length === 0) return;
+    setVacancies((prev) => [...prev, ...opened]);
+    const openedIds = new Set(opened.map((v) => v.id));
+    const timer = window.setTimeout(() => {
+      setVacancies((prev) => prev.filter((v) => !openedIds.has(v.id)));
+    }, VACANCY_HOLD_MS);
+    vacancyTimers.current.push(timer);
+    // Only these holes are cleared, not every open one: two removals a moment
+    // apart should each get their full beat rather than the second cutting the
+    // first short.
   }, [initialItems]);
+
+  // Timers outlive the effect that made them by design, so unmount is the only
+  // place they can be cleaned up.
+  useEffect(() => {
+    const timers = vacancyTimers.current;
+    return () => {
+      for (const t of timers) window.clearTimeout(t);
+    };
+  }, []);
 
   const reduce = useReducedMotion();
 
@@ -144,7 +183,11 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
     // No entrance animation: the closet is the landing surface, and a rolling
     // per-tile reveal delays the last tile behind ~100 staggered children.
     <motion.ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4">
-      {items.map((item) => {
+      {withVacancies(items, vacancies, (i) => i.id).map((slot) => {
+        if (slot.kind === "vacancy") {
+          return <VacancyCell key={slot.key} reduce={reduce} />;
+        }
+        const item = slot.item;
         const isDragging = draggedId === item.id;
         const isDropTarget = dropTargetId === item.id && draggedId !== item.id;
         const isShaking = shakeId === item.id;
@@ -182,7 +225,7 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
                 onClick={(e) => {
                   if (suppressNavRef.current) e.preventDefault();
                 }}
-                className="block rounded-2xl bg-white shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent cursor-grab active:cursor-grabbing"
+                className="block rounded-2xl bg-surface shadow-tile overflow-hidden aspect-square relative group focus-visible:ring-2 focus-visible:ring-accent cursor-grab active:cursor-grabbing"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -200,7 +243,7 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
                 />
                 {item.isWishlist && (
                   <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-1 pointer-events-none">
-                    <span className="bg-white/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
+                    <span className="bg-surface/90 text-ink text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full">
                       Wishlist
                     </span>
                   </div>
@@ -216,5 +259,35 @@ export function ClosetGrid({ items: initialItems, sort, sortOrders, noneCategory
         );
       })}
     </motion.ul>
+  );
+}
+
+/**
+ * The room a piece left behind.
+ *
+ * Exactly the footprint of the tile that was here, empty, for
+ * `VACANCY_HOLD_MS` — then it unmounts and the grid's `layout` animation closes
+ * the gap. No label, no icon, no undo affordance: the point is the absence, and
+ * anything put inside it is a thing in the space again.
+ *
+ * The opacity keyframes hold at full for most of the beat and release at the
+ * end, so the hole reads as a deliberate pause rather than a tile that failed
+ * to load. Under reduced motion it simply appears and disappears — the pause is
+ * information, so it stays; only the fade goes.
+ */
+function VacancyCell({ reduce }: { reduce: boolean | null }) {
+  return (
+    <motion.li
+      layout={!reduce}
+      aria-hidden
+      initial={reduce ? false : { opacity: 0 }}
+      animate={reduce ? { opacity: 1 } : { opacity: [0, 1, 1, 0] }}
+      transition={
+        reduce
+          ? { duration: 0 }
+          : { duration: VACANCY_HOLD_MS / 1000, times: [0, 0.14, 0.68, 1], ease: "linear" }
+      }
+      className="aspect-square rounded-2xl border border-dashed border-ink/25 bg-paper-warm/50"
+    />
   );
 }

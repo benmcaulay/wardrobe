@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { imageUrl } from "@/lib/image-paths";
 import {
   deleteGhostViewFor,
+  deleteOriginalPhotoFor,
   addExtraSourceImageFor,
   addManualGhostViewFor,
+  addWebProductGhostViewFor,
   enqueueGhostViewFor,
   getGhostJobStatus,
   getPendingGhostViewJobForItem,
@@ -18,6 +20,10 @@ import {
   type GhostViewStyle,
 } from "@/lib/actions/ghost-mannequin";
 import { ImageCropper } from "@/components/image-cropper";
+import { PhotoSourcePicker } from "@/components/photo-source-picker";
+import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
+import { searchWebProductsAction } from "@/app/closet/add/actions";
+import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import { BackgroundWhitener } from "@/components/background-whitener";
 import { Check, Edit, Mirror as MirrorIcon, Refresh, Sparkle, Upload } from "@/components/icons";
 import { Button } from "@/components/ui-button";
@@ -27,15 +33,24 @@ const ICON = BUTTON_ICON_SIZE.md;
 const ICON_SM = BUTTON_ICON_SIZE.sm;
 
 type GhostView = { label: string; imagePath: string; mirror?: boolean; thumbZoom?: number };
-type PickImageState = {
-  selectedExtraPaths: string[];
+/**
+ * The "Add another picture" dialog's only state: what to call the picture.
+ *
+ * Used to also carry the AI render's context-image selection, primary-source
+ * override and front/back hint, because one modal served both "add a picture"
+ * and "generate with AI". Generating is now a single button press
+ * (`doGenerate`), so those fields have no UI and no reader.
+ */
+type AddPictureDraft = {
   label: string;
+};
+
+/** Options applied to the next render, from the button's ⋮ menu. */
+type GenerateOptions = {
+  /** View name. Blank falls back to "Ghost"/"View n" server-side. */
+  label: string;
+  /** Extra directions passed to the model. */
   instructions: string;
-  /** `null` = listing photo is the model's first input */
-  primaryPath: string | null;
-  compositionHint: "default" | "rear";
-  /** Which entry point opened the dialog — decides what starts expanded. */
-  mode: "upload" | "ai";
 };
 
 const POLL_INTERVAL_MS = 2000;
@@ -88,10 +103,28 @@ export function ImageCarousel({
   const prevGhostCountRef = useRef(initialGhostViews.length);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [pickingImages, setPickingImages] = useState<PickImageState | null>(null);
+  const [addingPicture, setAddingPicture] = useState<AddPictureDraft | null>(null);
+  /*
+   * Held on the page, not in a dialog. Generation is one click now; these are
+   * the two things worth being able to set before that click, and they persist
+   * across renders so a prompt you tuned once survives the next generate.
+   */
+  const [genOptions, setGenOptions] = useState<GenerateOptions>({ label: "", instructions: "" });
+  const [genMenuOpen, setGenMenuOpen] = useState(false);
   const [croppingPath, setCroppingPath] = useState<string | null>(null);
   const [whiteningPath, setWhiteningPath] = useState<string | null>(null);
   const [croppingOriginal, setCroppingOriginal] = useState(false);
+  /*
+   * Camera and web-search state for the "Add another picture" chooser.
+   *
+   * Held here rather than in the modal because the camera modal has to render
+   * *outside* the dialog (a modal inside a modal cannot sit above it), and
+   * because search results should survive closing and reopening the dialog —
+   * every re-search is a billed SerpAPI call.
+   */
+  const [webcamOpen, setWebcamOpen] = useState(false);
+  const [webQuery, setWebQuery] = useState("");
+  const [webResults, setWebResults] = useState<ProductMatch[]>([]);
   const router = useRouter();
   const noCredits = credits < 1;
 
@@ -122,16 +155,11 @@ export function ImageCarousel({
     ? `scale(${activeGhost.thumbZoom ?? 1}) ${activeGhost.mirror ? "scaleX(-1)" : ""}`
     : `scale(${originalStyle.thumbZoom}) ${originalStyle.mirror ? "scaleX(-1)" : ""}`;
 
-  function openViewDialog(mode: "upload" | "ai") {
+  function openAddPictureDialog() {
     setError(null);
     setNotice(null);
-    setPickingImages({
-      selectedExtraPaths: [...sourceImagePaths],
+    setAddingPicture({
       label: ghostViews.length > 0 ? `View ${ghostViews.length + 1}` : "Front",
-      instructions: "",
-      primaryPath: null,
-      compositionHint: "default",
-      mode,
     });
   }
 
@@ -144,12 +172,39 @@ export function ImageCarousel({
       return;
     }
     setSourceImagePaths((prev) => (prev.includes(res.imagePath) ? prev : [...prev, res.imagePath]));
-    setPickingImages((prev) =>
-      prev && !prev.selectedExtraPaths.includes(res.imagePath)
-        ? { ...prev, selectedExtraPaths: [...prev.selectedExtraPaths, res.imagePath] }
-        : prev,
-    );
     router.refresh();
+  }
+
+  async function runWebSearch(query: string): Promise<ProductMatch[]> {
+    const res = await searchWebProductsAction(query);
+    if (!res.ok) throw new Error(res.error);
+    return res.matches;
+  }
+
+  /** Import a listing photo as another view. Never touches the item's fields. */
+  async function addWebView(match: ProductMatch) {
+    setError(null);
+    setManualAdding(true);
+    try {
+      const label = addingPicture?.label.trim() || undefined;
+      const res = await addWebProductGhostViewFor(itemId, match, label);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setGhostViews((prev) => {
+        const next = [
+          ...prev,
+          { label: res.label, imagePath: res.imagePath, mirror: false, thumbZoom: 1 },
+        ];
+        setActiveIndex(next.length - 1);
+        return next;
+      });
+      setAddingPicture(null);
+      router.refresh();
+    } finally {
+      setManualAdding(false);
+    }
   }
 
   async function addManualView(file: File) {
@@ -158,7 +213,7 @@ export function ImageCarousel({
     try {
       const formData = new FormData();
       formData.append("image", file);
-      const label = pickingImages?.label.trim() ?? "";
+      const label = addingPicture?.label.trim() ?? "";
       if (label) formData.append("label", label);
       const res = await addManualGhostViewFor(itemId, formData);
       if (!res.ok) {
@@ -173,15 +228,15 @@ export function ImageCarousel({
         setActiveIndex(next.length - 1);
         return next;
       });
-      setPickingImages(null);
+      setAddingPicture(null);
       router.refresh();
     } finally {
       setManualAdding(false);
     }
   }
 
-  function dismissGenerateModal() {
-    setPickingImages(null);
+  function dismissAddPictureDialog() {
+    setAddingPicture(null);
   }
 
   async function pollGhostJob(jobId: string, signal: number) {
@@ -206,7 +261,6 @@ export function ImageCarousel({
               "Change the instructions to get a different image.",
           );
         }
-        setPickingImages(null);
         router.refresh();
         return;
       }
@@ -230,16 +284,27 @@ export function ImageCarousel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once per item
   }, [itemId]);
 
-  function doGenerate(pick: PickImageState) {
+  /**
+   * Generate, immediately.
+   *
+   * No dialog. What the removed one asked for is either already known or has a
+   * default worth keeping: every context image is passed (which is what the old
+   * checkboxes defaulted to), the render starts from the thumbnail rather than
+   * an overridable "main photo" (see runGenerateGhostViewFor), and the front
+   * angle is the default. Name and instructions come from the ⋮ menu.
+   */
+  function doGenerate() {
     setError(null);
+    setNotice(null);
+    setGenMenuOpen(false);
     setGhostGenerating(true);
     void enqueueGhostViewFor(
       itemId,
-      pick.selectedExtraPaths,
-      pick.label,
-      pick.instructions,
-      pick.primaryPath,
-      pick.compositionHint,
+      sourceImagePaths,
+      genOptions.label,
+      genOptions.instructions,
+      null,
+      "default",
     )
       .then((res) => {
         if (!res.ok) {
@@ -253,6 +318,34 @@ export function ImageCarousel({
         setError("Something went wrong starting ghost generation. Please try again.");
         setGhostGenerating(false);
       });
+  }
+
+  /**
+   * Delete the original photo.
+   *
+   * Only offered once another picture exists: the server promotes the thumbnail
+   * into the original's place (see deleteOriginalPhotoFor) because an item
+   * cannot have no photo, so with nothing to promote there is nothing to do.
+   */
+  function deleteOriginal() {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const res = await deleteOriginalPhotoFor(itemId);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      // The promoted image stops being a view and becomes the original, and the
+      // original is the thumbnail again — mirror both locally so the strip does
+      // not show it twice before the refresh lands.
+      setGhostViews((prev) => prev.filter((v) => v.imagePath !== res.originalImagePath));
+      setOrigPath(res.originalImagePath);
+      setPrimaryPath(null);
+      setActiveIndex("original");
+      setNotice(`Original deleted — "${res.promotedFrom}" is the item's photo now.`);
+      router.refresh();
+    });
   }
 
   function setPrimary(imagePath: string | null) {
@@ -333,15 +426,38 @@ export function ImageCarousel({
 
       {/* Thumbnail row */}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        <ViewThumb
-          src={imageUrl(origPath)}
-          label="Original"
-          mirror={originalStyle.mirror}
-          thumbZoom={originalStyle.thumbZoom}
-          active={activeIndex === "original"}
-          isPrimary={primaryPath === null}
-          onClick={() => setActiveIndex("original")}
-        />
+        {/*
+          The original gets the same corner × as every other tile. It used to be
+          a Delete button buried in the framing controls below, which meant the
+          one photo you cannot reach by hovering its own thumbnail was the one
+          whose delete lived somewhere else.
+
+          Only once there is something to promote into its place — see
+          deleteOriginalPhotoFor. With nothing to promote the × is absent rather
+          than disabled, matching how the button behaved.
+        */}
+        <div className="relative group">
+          <ViewThumb
+            src={imageUrl(origPath)}
+            label="Original"
+            mirror={originalStyle.mirror}
+            thumbZoom={originalStyle.thumbZoom}
+            active={activeIndex === "original"}
+            isPrimary={primaryPath === null}
+            onClick={() => setActiveIndex("original")}
+          />
+          {hasGhosts && (
+            <button
+              type="button"
+              onClick={deleteOriginal}
+              aria-label="Delete original photo"
+              title="Delete the original — the thumbnail takes its place"
+              className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-surface/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition border border-ink/10"
+            >
+              ×
+            </button>
+          )}
+        </div>
         {ghostViews.map((view, i) => (
           <div key={view.imagePath} className="relative group">
             <ViewThumb
@@ -357,7 +473,7 @@ export function ImageCarousel({
               type="button"
               onClick={() => removeView(view.imagePath)}
               aria-label={`Delete ${view.label}`}
-              className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition border border-ink/10"
+              className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-surface/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition border border-ink/10"
             >
               ×
             </button>
@@ -372,14 +488,15 @@ export function ImageCarousel({
       </div>
 
       {/* Add / generate view */}
-      {!pickingImages && (
+      {!addingPicture && (
         <div className="rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2">
           <p className="text-xs">
             <span className="font-medium">Catalog views</span>{" "}
             {hasGhosts ? `· ${ghostViews.length}` : "— none yet."}
           </p>
           <p className="text-[11px] text-ink-muted">
-            Paste or upload a photo to add a view for free, or generate one with AI
+            Adding a picture is free. Generating renders from whichever image is set as the
+            thumbnail
             {noCredits
               ? " (out of credits — buy more in Settings)."
               : ` (1 credit · ${costLabel}).`}
@@ -393,23 +510,67 @@ export function ImageCarousel({
           <div className="flex gap-2 flex-wrap">
             <Button
               variant="solid"
-              onClick={() => openViewDialog("upload")}
+              onClick={openAddPictureDialog}
               disabled={ghostGenerating || manualAdding}
               icon={<Upload size={ICON} />}
             >
-              {hasGhosts ? "Add another view" : "Add catalog view"}
+              Add another picture
             </Button>
-            <Button
-              onClick={() => openViewDialog("ai")}
-              disabled={ghostGenerating || manualAdding || noCredits || !!categoryBlocked}
-              title={
-                categoryBlocked ?? (noCredits ? "Out of credits — buy more in Settings" : undefined)
-              }
-              icon={<Sparkle size={ICON} />}
-            >
-              {ghostGenerating ? "Generating…" : "Generate with AI"}
-            </Button>
+
+            {/*
+              A split button: the label generates, the ⋮ opens the two settings
+              worth having. Pressing this used to open a dialog whose only
+              required field was a name, so the common case — "render this
+              again" — cost two clicks and a form.
+            */}
+            <div className="relative inline-flex items-stretch">
+              <Button
+                onClick={doGenerate}
+                disabled={ghostGenerating || manualAdding || noCredits || !!categoryBlocked}
+                title={
+                  categoryBlocked ??
+                  (noCredits ? "Out of credits — buy more in Settings" : "Render from the thumbnail")
+                }
+                icon={<Sparkle size={ICON} />}
+                className="rounded-r-none border-r-0 pr-3"
+              >
+                {ghostGenerating ? "Generating…" : "Generate with AI"}
+              </Button>
+              <Button
+                iconOnly
+                aria-label="Render options"
+                aria-expanded={genMenuOpen}
+                aria-haspopup="dialog"
+                title="Name and prompt for this render"
+                onClick={() => setGenMenuOpen((open) => !open)}
+                disabled={ghostGenerating || manualAdding}
+                /* w-8, not the icon-only square: this is the right end of a
+                   button, not a button of its own. */
+                className={`w-8 rounded-l-none border-l border-l-ink/20 ${
+                  genMenuOpen ? "bg-paper-warm" : ""
+                }`}
+                icon={<MoreGlyph />}
+              />
+              {genMenuOpen && (
+                <GenerateOptionsMenu
+                  options={genOptions}
+                  onChange={setGenOptions}
+                  onClose={() => setGenMenuOpen(false)}
+                />
+              )}
+            </div>
           </div>
+          {(genOptions.label.trim() || genOptions.instructions.trim()) && (
+            <p className="text-[11px] text-ink-muted">
+              Next render:{" "}
+              {[
+                genOptions.label.trim() ? `named "${genOptions.label.trim()}"` : null,
+                genOptions.instructions.trim() ? "with your prompt" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
           {categoryBlocked && (
             <p className="text-[11px] text-amber-700">{categoryBlocked}</p>
           )}
@@ -421,25 +582,38 @@ export function ImageCarousel({
           )}
         </div>
       )}
-      {/* Modal popup for adding a new view */}
-      {pickingImages && (
-        <GenerateViewModal
-          variant={hasGhosts ? "another" : "first"}
-          costLabel={costLabel}
-          originalPath={origPath}
-          extraImagePaths={sourceImagePaths}
-          pickState={pickingImages}
-          generating={ghostGenerating}
+      {/* Modal popup for adding a new picture */}
+      {addingPicture && (
+        <AddPictureModal
+          draft={addingPicture}
           manualAdding={manualAdding}
-          canGenerate={!noCredits}
-          onChange={setPickingImages}
+          onChange={setAddingPicture}
           onPasteAsView={(file) => void addManualView(file)}
           onPasteAsSource={(file) => void addSourceImage(file)}
           onUploadAsView={(file) => void addManualView(file)}
-          onGenerate={() => pickingImages && doGenerate(pickingImages)}
-          onCancel={dismissGenerateModal}
+          onTakePhoto={() => setWebcamOpen(true)}
+          webQuery={webQuery}
+          onWebQueryChange={setWebQuery}
+          webResults={webResults}
+          onWebResultsChange={setWebResults}
+          onWebSearch={runWebSearch}
+          onSelectWebProduct={(m) => void addWebView(m)}
+          onCancel={dismissAddPictureDialog}
         />
       )}
+
+      {/* Outside the dialog: a modal nested inside another modal cannot paint
+          above it, and the capture has to cover the dialog it was opened from. */}
+      <WebcamCaptureModal
+        open={webcamOpen}
+        preferredFacing="environment"
+        title="Take a photo"
+        onClose={() => setWebcamOpen(false)}
+        onCapture={(file) => {
+          setWebcamOpen(false);
+          void addManualView(file);
+        }}
+      />
       {whitening && (
         <OriginalWhitenModal
           src={imageUrl(origPath)}
@@ -682,7 +856,7 @@ function OriginalWhitenModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+      <div className="w-full max-w-2xl rounded-2xl border border-ink/10 bg-surface shadow-tile p-4 space-y-3 my-8">
         <div className="flex items-center justify-between">
           <h3 className="font-serif text-xl tracking-tight">Whiten background</h3>
           <button
@@ -711,7 +885,7 @@ function OriginalCropModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-lg rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+      <div className="w-full max-w-lg rounded-2xl border border-ink/10 bg-surface shadow-tile p-4 space-y-3 my-8">
         <div className="flex items-center justify-between">
           <h3 className="font-serif text-xl tracking-tight">Crop original photo</h3>
           <button
@@ -744,7 +918,7 @@ function GhostViewWhitenModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+      <div className="w-full max-w-2xl rounded-2xl border border-ink/10 bg-surface shadow-tile p-4 space-y-3 my-8">
         <div className="flex items-center justify-between">
           <h3 className="font-serif text-xl tracking-tight">Whiten background</h3>
           <button
@@ -782,7 +956,7 @@ function GhostViewCropModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-lg rounded-2xl border border-ink/10 bg-white shadow-tile p-4 space-y-3 my-8">
+      <div className="w-full max-w-lg rounded-2xl border border-ink/10 bg-surface shadow-tile p-4 space-y-3 my-8">
         <div className="flex items-center justify-between">
           <h3 className="font-serif text-xl tracking-tight">Crop this view</h3>
           <button
@@ -848,7 +1022,7 @@ function ViewThumb({
         active ? "border-ink bg-paper-warm" : "border-ink/10 hover:border-ink/30"
       }`}
     >
-      <div className="w-full aspect-square rounded overflow-hidden bg-white">
+      <div className="w-full aspect-square rounded overflow-hidden bg-surface">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
@@ -867,283 +1041,241 @@ function ViewThumb({
   );
 }
 
-function GenerateViewModal({
-  variant,
-  costLabel,
-  originalPath,
-  extraImagePaths,
-  pickState,
-  generating,
+/**
+ * Add another picture: camera, the web, or a file.
+ *
+ * Used to be a two-headed dialog that also carried every AI render setting —
+ * context-image checkboxes, a "main photo for this render" select, a front/back
+ * radio and a prompt box — with the two halves reordered depending on which
+ * button opened it. Generating is now one press of the button on the page, so
+ * all of that is gone; what remains is one job with one field.
+ */
+function AddPictureModal({
+  draft,
   manualAdding,
-  canGenerate,
   onChange,
   onPasteAsView,
   onPasteAsSource,
   onUploadAsView,
-  onGenerate,
+  onTakePhoto,
+  webQuery,
+  onWebQueryChange,
+  webResults,
+  onWebResultsChange,
+  onWebSearch,
+  onSelectWebProduct,
   onCancel,
 }: {
-  variant: "first" | "another";
-  costLabel: string;
-  originalPath: string;
-  extraImagePaths: string[];
-  pickState: PickImageState;
-  generating: boolean;
+  draft: AddPictureDraft;
   manualAdding: boolean;
-  canGenerate: boolean;
-  onChange: (s: PickImageState) => void;
+  onChange: (draft: AddPictureDraft) => void;
   onPasteAsView: (file: File) => void;
   onPasteAsSource: (file: File) => void;
   onUploadAsView: (file: File) => void;
-  onGenerate: () => void;
+  onTakePhoto: () => void;
+  webQuery: string;
+  onWebQueryChange: (q: string) => void;
+  webResults: ProductMatch[];
+  onWebResultsChange: (r: ProductMatch[]) => void;
+  onWebSearch: (q: string) => Promise<ProductMatch[]>;
+  onSelectWebProduct: (m: ProductMatch) => void;
   onCancel: () => void;
 }) {
-  const aiFirst = pickState.mode === "ai";
-  const title = aiFirst
-    ? "Generate with AI"
-    : variant === "another"
-      ? "Add another view"
-      : "Add catalog view";
-  const busy = generating || manualAdding;
-  const canAiGenerate = canGenerate && pickState.label.trim().length > 0;
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const toggleExtra = (path: string) => {
-    const sel = pickState.selectedExtraPaths;
-    const wasSelected = sel.includes(path);
-    const selectedExtraPaths = wasSelected ? sel.filter((p) => p !== path) : [...sel, path];
-    const primaryPath =
-      wasSelected && pickState.primaryPath === path ? null : pickState.primaryPath;
-    onChange({
-      ...pickState,
-      selectedExtraPaths,
-      primaryPath,
-    });
-  };
-
   useEffect(() => {
     const onPaste = (e: globalThis.ClipboardEvent) => {
-      if (busy) return;
+      if (manualAdding) return;
       const items = Array.from(e.clipboardData?.items ?? []);
       const imageItem = items.find((i) => i.type.startsWith("image/"));
       const file = imageItem?.getAsFile();
       if (!file) return;
       e.preventDefault();
-      // Default: paste becomes a catalog view directly (no AI).
-      // Shift+paste still adds as an AI context source.
+      // Default: paste becomes a view directly. Shift+paste adds it as an AI
+      // context source instead.
       const shiftHeld = Boolean((e as unknown as { shiftKey?: boolean }).shiftKey);
       if (shiftHeld) onPasteAsSource(file);
       else onPasteAsView(file);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [busy, onPasteAsView, onPasteAsSource]);
+  }, [manualAdding, onPasteAsView, onPasteAsSource]);
+
+  // Escape closes, which a dialog with no other dismissal keyboard path needs.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-ink/35 backdrop-blur-[1px] flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl border border-ink/10 bg-white shadow-tile p-4 flex flex-col gap-3">
-        <div className="order-1 flex items-center justify-between">
-          <h3 className="font-serif text-xl tracking-tight">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 p-4 backdrop-blur-[1px]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add another picture"
+        className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-ink/10 bg-surface p-4 shadow-tile"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-serif text-xl tracking-tight">Add another picture</h3>
           <button
             type="button"
             onClick={onCancel}
-            className="w-7 h-7 rounded-full border border-ink/15 text-sm hover:bg-paper"
+            className="h-7 w-7 rounded-full border border-ink/15 text-sm hover:bg-paper"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        <div
-          className={`${aiFirst ? "order-3" : "order-2"} rounded-xl border border-ink/10 bg-paper-warm p-3 space-y-2`}
-        >
-          <p className="text-xs font-medium">
-            {aiFirst ? "Name this view" : "Paste or upload a photo"}
-          </p>
-          <p className="text-[11px] text-ink-muted">
-            {aiFirst
-              ? "The AI render needs a name. You can also paste or upload a photo instead — that adds a view immediately, no credit."
-              : "Adds the image as a catalog view immediately — no AI, no credit. Optional: name it below first. Shift+paste adds it as an AI context source instead."}
-          </p>
-          <label className="block space-y-1">
-            <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
-            <input
-              type="text"
-              placeholder="e.g. Back, Detail, Flat lay…"
-              value={pickState.label}
-              onChange={(e) => onChange({ ...pickState, label: e.target.value })}
-              disabled={busy}
-              className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-white placeholder:text-ink-muted focus:outline-none focus:border-ink/40 disabled:opacity-50"
-            />
-          </label>
+        <label className="block space-y-1">
+          <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
           <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) onUploadAsView(file);
-            }}
+            type="text"
+            placeholder="e.g. Back, Detail, Flat lay…"
+            value={draft.label}
+            onChange={(e) => onChange({ ...draft, label: e.target.value })}
+            disabled={manualAdding}
+            className="w-full rounded-lg border border-ink/15 bg-surface px-3 py-1.5 text-xs placeholder:text-ink-muted focus:border-ink/40 focus:outline-none disabled:opacity-50"
           />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
-          >
-            {manualAdding ? "Adding…" : "Upload photo as view"}
-          </button>
-        </div>
+        </label>
 
-        <details
-          open={aiFirst}
-          className={`${aiFirst ? "order-2" : "order-3"} rounded-xl border border-ink/10 p-3 group`}
-        >
-          <summary className="text-xs font-medium cursor-pointer list-none flex items-center justify-between">
-            <span>{aiFirst ? "Render settings" : "Or generate with AI"}</span>
-            <span className="text-[10px] text-ink-muted group-open:hidden">
-              1 credit · {costLabel}
-            </span>
-          </summary>
-          <div className="mt-3 space-y-3">
-            <p className="text-[11px] text-ink-muted">
-              The <span className="font-medium">first image</span> the model sees drives pose —
-              upload a separate back photo (Shift+paste), select it below, choose &quot;Back / rear
-              catalog&quot;, then generate.
-            </p>
-
-            <p className="text-[10px] uppercase tracking-wide text-ink-muted">
-              Main photo for this render
-            </p>
-            <select
-              value={pickState.primaryPath ?? "__original__"}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "__original__") {
-                  onChange({ ...pickState, primaryPath: null });
-                  return;
-                }
-                const nextSel = pickState.selectedExtraPaths.includes(v)
-                  ? pickState.selectedExtraPaths
-                  : [...pickState.selectedExtraPaths, v];
-                onChange({ ...pickState, primaryPath: v, selectedExtraPaths: nextSel });
-              }}
-              className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper focus:outline-none focus:border-ink/40"
-            >
-              <option value="__original__">Original photo</option>
-              {extraImagePaths.map((path, i) => (
-                <option key={path} value={path}>
-                  Extra source {i + 1}
-                </option>
-              ))}
-            </select>
-
-            <fieldset className="space-y-1.5 border-0 p-0 m-0">
-              <legend className="text-[10px] uppercase tracking-wide text-ink-muted">
-                Catalog angle
-              </legend>
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input
-                  type="radio"
-                  name="composition"
-                  checked={pickState.compositionHint === "default"}
-                  onChange={() => onChange({ ...pickState, compositionHint: "default" })}
-                  className="accent-ink"
-                />
-                Front (default)
-              </label>
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input
-                  type="radio"
-                  name="composition"
-                  checked={pickState.compositionHint === "rear"}
-                  onChange={() => onChange({ ...pickState, compositionHint: "rear" })}
-                  className="accent-ink"
-                />
-                Back / rear catalog
-              </label>
-            </fieldset>
-
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded flex items-center justify-center bg-ink/10 border border-ink/20 flex-shrink-0">
-                <svg className="w-3 h-3 text-ink" viewBox="0 0 12 12" fill="currentColor">
-                  <path d="M10 3L5 8.5 2 5.5l-1 1 4 4 6-7z" />
-                </svg>
-              </div>
-              <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imageUrl(originalPath)}
-                  alt="Garment"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <span className="text-xs text-ink-muted">
-                Listing photo{pickState.primaryPath ? " (included as context)" : " (main input)"}
-              </span>
-            </div>
-
-            {extraImagePaths.map((path) => {
-              const selected = pickState.selectedExtraPaths.includes(path);
-              return (
-                <label key={path} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={() => toggleExtra(path)}
-                    className="w-4 h-4 rounded accent-ink flex-shrink-0"
-                  />
-                  <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={imageUrl(path)} alt="" className="w-full h-full object-cover" />
-                  </div>
-                  <span className="text-xs text-ink-muted">Source image</span>
-                </label>
-              );
-            })}
-
-            <label className="block space-y-1">
-              <span className="text-[10px] uppercase tracking-wide text-ink-muted">
-                Instructions for the model (optional)
-              </span>
-              <textarea
-                placeholder="Context or directions for this render…"
-                value={pickState.instructions}
-                onChange={(e) => onChange({ ...pickState, instructions: e.target.value })}
-                rows={3}
-                className="w-full text-xs rounded-lg border border-ink/15 px-3 py-2 bg-paper placeholder:text-ink-muted focus:outline-none focus:border-ink/40 resize-none min-h-[4rem]"
-              />
-            </label>
-
-            {generating && (
-              <p className="text-[11px] text-ink-muted">
-                You can close this dialog or leave the item — generation continues in the
-                background.
-              </p>
-            )}
-            {!canGenerate && (
-              <p className="text-[11px] text-ink-muted">Out of credits for AI generation.</p>
-            )}
-            <button
-              type="button"
-              onClick={onGenerate}
-              disabled={busy || !canAiGenerate}
-              className="rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50"
-            >
-              {generating ? "Generating…" : "Generate with AI"}
-            </button>
-          </div>
-        </details>
+        <PhotoSourcePicker
+          compact
+          title={manualAdding ? "Adding…" : "Add another picture"}
+          subtitle="Drop, paste, snap, or click here"
+          disabled={manualAdding}
+          onFile={onUploadAsView}
+          onTakePhoto={onTakePhoto}
+          web={{
+            query: webQuery,
+            onQueryChange: onWebQueryChange,
+            results: webResults,
+            onResultsChange: onWebResultsChange,
+            onSearch: onWebSearch,
+            onSelect: onSelectWebProduct,
+            hint: "Picking a result adds its photo as a view. It does not change this item's brand, price, or any other field.",
+          }}
+        />
 
         <button
           type="button"
           onClick={onCancel}
-          className="order-4 self-start rounded-full border border-ink/15 px-4 py-1.5 text-xs hover:bg-paper transition"
+          className="self-start rounded-full border border-ink/15 px-4 py-1.5 text-xs transition hover:bg-paper"
         >
-          {busy ? "Close" : "Cancel"}
+          {manualAdding ? "Close" : "Cancel"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** Three dots. Local rather than in the icon suite, like MenuGlyph in the nav drawer. */
+function MoreGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden focusable="false">
+      <g fill="currentColor">
+        <circle cx="7" cy="2.5" r="1.35" />
+        <circle cx="7" cy="7" r="1.35" />
+        <circle cx="7" cy="11.5" r="1.35" />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * The two render settings, in a popover on the generate button.
+ *
+ * Everything else the old dialog asked for now has a fixed answer (see
+ * `doGenerate`), so this is a name and a prompt. Both persist on the page, so
+ * tuning a prompt once and pressing generate three times works without
+ * retyping.
+ */
+function GenerateOptionsMenu({
+  options,
+  onChange,
+  onClose,
+}: {
+  options: GenerateOptions;
+  onChange: (next: GenerateOptions) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    // `mousedown`, not `click`: the button that opened this is outside `ref`, so
+    // a click listener would fire on the same event that opened the menu and
+    // close it again immediately.
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const dirty = Boolean(options.label.trim() || options.instructions.trim());
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Render options"
+      /* Right-aligned to the ⋮ and above the fold-prone bottom of the panel. */
+      className="absolute right-0 top-full z-30 mt-2 w-72 space-y-2.5 rounded-xl border border-ink/15 bg-surface p-3 shadow-tile"
+    >
+      <label className="block space-y-1">
+        <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
+        <input
+          type="text"
+          placeholder="Ghost"
+          value={options.label}
+          onChange={(e) => onChange({ ...options, label: e.target.value })}
+          className="w-full rounded-lg border border-ink/15 bg-surface px-3 py-1.5 text-xs placeholder:text-ink-muted focus:border-ink/40 focus:outline-none"
+        />
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-[10px] uppercase tracking-wide text-ink-muted">
+          Prompt (optional)
+        </span>
+        <textarea
+          placeholder="Context or directions for this render…"
+          value={options.instructions}
+          onChange={(e) => onChange({ ...options, instructions: e.target.value })}
+          rows={3}
+          className="min-h-[4rem] w-full resize-none rounded-lg border border-ink/15 bg-surface px-3 py-2 text-xs placeholder:text-ink-muted focus:border-ink/40 focus:outline-none"
+        />
+      </label>
+
+      <p className="text-[11px] text-ink-muted">
+        Applies to every render until you change it. Leave the name blank and it&apos;s numbered
+        for you.
+      </p>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full bg-ink px-4 py-1.5 text-xs tracking-wide text-paper transition hover:bg-ink-soft"
+        >
+          Done
+        </button>
+        {dirty && (
+          <button
+            type="button"
+            onClick={() => onChange({ label: "", instructions: "" })}
+            className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper"
+          >
+            Clear
+          </button>
+        )}
       </div>
     </div>
   );

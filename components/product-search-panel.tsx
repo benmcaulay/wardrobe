@@ -90,7 +90,7 @@ export function ProductSearchPanel({
       )}
 
       {selectedUrl && onClearSelection && (
-        <div className="flex items-center gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2">
+        <div className="flex items-center gap-2 rounded-xl border border-ink/15 bg-surface px-3 py-2">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] uppercase tracking-wide text-ink-muted">Selected listing</p>
             <p className="text-xs truncate">{selectedMatch?.name ?? "Product"}</p>
@@ -108,6 +108,20 @@ export function ProductSearchPanel({
       {results.length > 0 && (
         <>
           {/*
+            The count, because the list now has depth worth knowing about.
+            Google Shopping returns roughly forty to sixty rows per search and
+            all of them are kept — the old `.slice(0, 12)` in
+            lib/services/webProductSearch.ts discarded the rest *after* the
+            request had already been billed, so scrolling the full set costs
+            nothing extra. Saying how many there are is what turns a grid that
+            looks complete into one the user knows to scroll.
+          */}
+          <p className="text-[11px] text-ink-muted">
+            {results.length} {results.length === 1 ? "result" : "results"} · scroll for more,
+            no further searches
+          </p>
+
+          {/*
             A grid rather than a list of rows. The old layout gave each result a
             48px square with object-cover, which both shrank the photo and
             cropped it — you could not tell a full product shot from a detail
@@ -123,7 +137,7 @@ export function ProductSearchPanel({
                   <button
                     type="button"
                     onClick={() => onSelect(m)}
-                    className={`group w-full overflow-hidden rounded-xl border bg-white text-left transition ${
+                    className={`group w-full overflow-hidden rounded-xl border bg-surface text-left transition ${
                       selected
                         ? "border-ink ring-1 ring-ink"
                         : "border-ink/10 hover:border-ink/30"

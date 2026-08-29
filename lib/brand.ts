@@ -24,5 +24,27 @@ export const APP_NAME = "MAKING SPACE";
  */
 export const APP_WORDMARK = "MAKING SPACE";
 
-/** One line under the name. */
-export const APP_TAGLINE = "Your personal digital closet.";
+/**
+ * One line under the name.
+ *
+ * Was "Your personal digital closet", which described the old name: it says
+ * what the app *is* and nothing about what it's for. The product's argument is
+ * that the closet gets smaller and the wearing gets bigger, so the tagline
+ * makes that claim instead. Both halves are about the same clothes, which is
+ * the point — this is not a decluttering app, it's a wearing app that happens
+ * to require decluttering.
+ */
+export const APP_TAGLINE = "Own less of it, wear more of it.";
+
+/**
+ * The two halves of the wordmark, either side of the space.
+ *
+ * Split here rather than at the render site because the space between them is
+ * the one part of this brand that moves (see `wordmarkSpaceEm`), so every
+ * surface that draws the name needs the same two strings and the same seam.
+ */
+export const APP_WORDMARK_PARTS = ((): readonly [string, string] => {
+  const at = APP_WORDMARK.indexOf(" ");
+  if (at < 0) return [APP_WORDMARK, ""];
+  return [APP_WORDMARK.slice(0, at), APP_WORDMARK.slice(at + 1)];
+})();

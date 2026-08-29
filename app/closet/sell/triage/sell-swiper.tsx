@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { imageUrl } from "@/lib/image-paths";
 import { formatCents, suggestedAskingCents } from "@/lib/sale-listing";
+import { formatRailInches, railInchesForPiece } from "@/lib/space/ledger";
 import { fadeUp, scaleIn, springSnappy, springSoft } from "@/lib/ui-motion";
 import { setSaleDecision, removeSaleListing } from "../actions";
 
@@ -13,12 +14,25 @@ export type SwipeItem = {
   name: string;
   brand: string | null;
   category: string;
+  /** For the rail estimate — `classifyGarmentKind` reads all three. */
+  subcategory: string | null;
   priceCents: number | null;
   currency: string;
   imagePath: string;
 };
 
+/*
+ * The two piles keep their old internal names.
+ *
+ * "sell" is what the server action, the SaleListing status and every metric
+ * downstream call this decision, and renaming the wire format to match a label
+ * change would be a migration for nothing. Only the words on screen moved:
+ * right is now "Make space".
+ */
 type Decision = "sell" | "keep";
+
+/** What the right-hand pile is called to the person using it. */
+const PILE_LABEL: Record<Decision, string> = { sell: "Make space", keep: "Keep" };
 
 /** px the top card must travel before release counts as a decision. */
 const COMMIT_THRESHOLD = 110;
@@ -37,6 +51,20 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const decidedCount = history.length;
   const top = cards[0] ?? null;
+
+  /*
+   * Progress in rail inches, not in cards processed.
+   *
+   * "14 of 60 sorted" measures the chore; this measures the point. Only the
+   * make-space pile counts, and the wording downstream says "in the pile" —
+   * nothing has actually sold yet, and claiming reclaimed space for a garment
+   * that is still hanging there would be the fabricated figure lib/sell
+   * refuses to print.
+   */
+  const railInPile = history.reduce(
+    (sum, entry) => (entry.decision === "sell" ? sum + railInchesForPiece(entry.item) : sum),
+    0,
+  );
 
   const commit = useCallback(
     (item: SwipeItem, decision: Decision) => {
@@ -108,6 +136,7 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
     return (
       <DoneState
         decidedCount={decidedCount}
+        railInPile={railInPile}
         readyCount={readyCount}
         onUndo={history.length ? undo : undefined}
       />
@@ -169,7 +198,7 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
           return (
             <motion.article
               key={item.id}
-              className="absolute inset-0 rounded-3xl bg-white shadow-tile overflow-hidden border border-ink/10"
+              className="absolute inset-0 rounded-3xl bg-surface shadow-tile overflow-hidden border border-ink/10"
               style={{
                 zIndex: STACK_DEPTH - i,
                 cursor: isTop ? (dragging ? "grabbing" : "grab") : "default",
@@ -224,7 +253,7 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
                         : "left-5 -rotate-12 border-rose-400 text-rose-300"
                     }`}
                   >
-                    {intent === "sell" ? "Sell" : "Keep"}
+                    {PILE_LABEL[intent]}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -242,11 +271,11 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
         <motion.button
           type="button"
           onClick={() => top && commitWithServer(top, "keep")}
-          aria-label="Keep"
+          aria-label={PILE_LABEL.keep}
           whileHover={reduce ? undefined : { scale: 1.08 }}
           whileTap={reduce ? undefined : { scale: 0.92 }}
           transition={springSnappy}
-          className="grid h-16 w-16 place-items-center rounded-full border border-ink/15 bg-white text-2xl shadow-tile transition hover:bg-paper-warm"
+          className="grid h-16 w-16 place-items-center rounded-full border border-ink/15 bg-surface text-2xl shadow-tile transition hover:bg-paper-warm"
         >
           ✕
         </motion.button>
@@ -258,14 +287,14 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
           whileHover={reduce || history.length === 0 ? undefined : { scale: 1.08 }}
           whileTap={reduce || history.length === 0 ? undefined : { scale: 0.92 }}
           transition={springSnappy}
-          className="grid h-12 w-12 place-items-center rounded-full border border-ink/15 bg-white text-base shadow-tile transition hover:bg-paper-warm disabled:opacity-40"
+          className="grid h-12 w-12 place-items-center rounded-full border border-ink/15 bg-surface text-base shadow-tile transition hover:bg-paper-warm disabled:opacity-40"
         >
           ↶
         </motion.button>
         <motion.button
           type="button"
           onClick={() => top && commitWithServer(top, "sell")}
-          aria-label="Sell"
+          aria-label={PILE_LABEL.sell}
           whileHover={reduce ? undefined : { scale: 1.08 }}
           whileTap={reduce ? undefined : { scale: 0.92 }}
           transition={springSnappy}
@@ -277,6 +306,7 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
 
       <p className="mt-5 text-center text-xs text-ink-muted">
         {cards.length} {cards.length === 1 ? "piece" : "pieces"} left
+        {railInPile > 0 ? <> · {formatRailInches(railInPile)} of rail in the pile</> : null}
         {readyCount > 0 || decidedCount > 0 ? (
           <>
             {" · "}
@@ -292,10 +322,13 @@ export function SellSwiper({ items, readyCount }: { items: SwipeItem[]; readyCou
 
 function DoneState({
   decidedCount,
+  railInPile,
   readyCount,
   onUndo,
 }: {
   decidedCount: number;
+  /** Rail inches in the make-space pile this session. */
+  railInPile: number;
   readyCount: number;
   onUndo?: () => void;
 }) {
@@ -310,9 +343,12 @@ function DoneState({
     >
       <p className="font-serif text-3xl">All caught up.</p>
       <p className="mt-2 text-ink-muted">
-        {decidedCount > 0
-          ? `You triaged ${decidedCount} ${decidedCount === 1 ? "piece" : "pieces"} this session.`
-          : "Nothing left to swipe — every piece has been triaged."}
+        {decidedCount === 0
+          ? "Nothing left to sort — every piece has a pile."
+          : railInPile > 0
+            ? `${decidedCount} ${decidedCount === 1 ? "piece" : "pieces"} sorted, ` +
+              `${formatRailInches(railInPile)} of rail in the make-space pile.`
+            : `${decidedCount} ${decidedCount === 1 ? "piece" : "pieces"} sorted. You kept all of them.`}
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
         <Link
@@ -325,14 +361,14 @@ function DoneState({
           <button
             type="button"
             onClick={onUndo}
-            className="rounded-full border border-ink/15 px-6 py-2.5 text-sm tracking-wide transition hover:bg-white"
+            className="rounded-full border border-ink/15 px-6 py-2.5 text-sm tracking-wide transition hover:bg-surface"
           >
             Undo last
           </button>
         )}
         <Link
           href="/closet"
-          className="rounded-full border border-ink/15 px-6 py-2.5 text-sm tracking-wide transition hover:bg-white"
+          className="rounded-full border border-ink/15 px-6 py-2.5 text-sm tracking-wide transition hover:bg-surface"
         >
           Back to closet
         </Link>

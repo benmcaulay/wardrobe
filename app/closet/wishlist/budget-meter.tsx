@@ -50,7 +50,7 @@ export function BudgetMeter({
 
   if (editing) {
     return (
-      <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
         <h2 className="font-serif text-2xl">
           {budget ? "Edit your budget" : "Set your budget"}
         </h2>
@@ -142,7 +142,7 @@ export function BudgetMeter({
     fundsCents > 0 ? `${Math.min(100, Math.max(0, (cents / fundsCents) * 100))}%` : "0%";
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 className="font-serif text-2xl">{budget?.name}</h2>

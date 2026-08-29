@@ -9,11 +9,15 @@
  *    out. Notes, owners, wear counts, dHash and sourceData stay private.
  *  - `allowedItemIds` is the allow-list the image route checks, so a token for
  *    one item can't be used to fetch a different item's thumbnail.
+ *
+ * The `space` kind is the narrowest of all: no items, no thumbnails, no
+ * `allowedItemIds` — just counts. See `SharedSpace`.
  */
 
 import { prisma } from "@/lib/db";
 import { parseColors, parseStringArray, type Color } from "@/lib/json";
 import { thumbnailPathFor } from "@/lib/image-paths";
+import { loadSpaceSnapshot } from "@/lib/server/space-ledger";
 import { isShareKind, type ShareKind } from "./kinds";
 import { isValidShareTokenFormat } from "./token";
 
@@ -30,6 +34,26 @@ export type SharedItem = {
   productUrl: string | null;
 };
 
+/**
+ * The space ledger, as much of it as may leave the account.
+ *
+ * Counts and rail inches only. **Money is deliberately excluded** — a shared
+ * link is a URL anybody can forward, and "I made $2,340 selling clothes this
+ * year" is the single most sensitive number this app holds. The private page
+ * shows it; this type has no field for it, so no future edit to the public page
+ * can leak it by reaching one field further.
+ *
+ * Per-month counts go out because the shape of the year is the interesting part
+ * and a count of garments identifies nobody.
+ */
+export type SharedSpace = {
+  /** Trailing months, oldest first. */
+  months: { startMs: number; in: number; out: number }[];
+  allTime: { in: number; out: number; railInches: number };
+  /** Pieces currently in the closet, for scale. */
+  ownedCount: number;
+};
+
 export type ResolvedShare = {
   token: string;
   kind: ShareKind;
@@ -39,6 +63,8 @@ export type ResolvedShare = {
   items: SharedItem[];
   /** Ids whose thumbnails this token may fetch. */
   allowedItemIds: Set<string>;
+  /** Present only on `space` shares. */
+  space?: SharedSpace;
 };
 
 export type ShareLookup =
@@ -151,6 +177,31 @@ export async function resolveShare(rawToken: string): Promise<ShareLookup> {
         title: outfit.name,
         items: ordered.map(toSharedItem),
         allowedItemIds: new Set(ordered.map((i) => i.id)),
+      },
+    };
+  }
+
+  if (link.kind === "space") {
+    const snapshot = await loadSpaceSnapshot(link.userId);
+    return {
+      status: "ok",
+      share: {
+        ...base,
+        kind: "space",
+        title: ownerName ? `${ownerName}'s year of space` : "A year of space",
+        // Nothing to show and nothing to fetch: the empty allow-list means the
+        // thumbnail route refuses every id for this token.
+        items: [],
+        allowedItemIds: new Set<string>(),
+        space: {
+          months: snapshot.months.map((m) => ({ startMs: m.startMs, in: m.in, out: m.out })),
+          allTime: {
+            in: snapshot.allTime.in.count,
+            out: snapshot.allTime.out.count,
+            railInches: snapshot.allTime.rail.inches,
+          },
+          ownedCount: snapshot.ownedCount,
+        },
       },
     };
   }

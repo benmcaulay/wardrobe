@@ -84,7 +84,7 @@ export function ReorderableStringList({
               e.preventDefault();
               handleDrop(idx);
             }}
-            className={`flex items-center gap-2 rounded-xl border bg-white px-2 py-2 transition ${
+            className={`flex items-center gap-2 rounded-xl border bg-surface px-2 py-2 transition ${
               isOver ? "border-ink ring-1 ring-ink/20" : "border-ink/10"
             } ${isDragging ? "opacity-40" : ""}`}
           >

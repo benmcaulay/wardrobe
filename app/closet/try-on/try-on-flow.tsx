@@ -318,7 +318,7 @@ export function TryOnFlow({
                   type="button"
                   onClick={() => onDeletePhoto(p.id)}
                   aria-label="Delete photo"
-                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-surface/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                 >
                   ×
                 </button>
@@ -340,7 +340,7 @@ export function TryOnFlow({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="rounded-xl border border-ink/15 bg-white px-2 py-2 text-[11px] text-ink hover:bg-paper-warm transition disabled:opacity-50"
+                className="rounded-xl border border-ink/15 bg-surface px-2 py-2 text-[11px] text-ink hover:bg-paper-warm transition disabled:opacity-50"
                 aria-label="Choose photos from library or files"
               >
                 Choose files
@@ -453,7 +453,7 @@ export function TryOnFlow({
               <ul className="flex flex-wrap gap-2">
                 {selectedItemsOrdered.map((item) => (
                   <li key={item.id}>
-                    <div className="flex items-center gap-1.5 rounded-lg border border-ink/10 bg-white pl-1 pr-0.5 py-0.5 max-w-[220px]">
+                    <div className="flex items-center gap-1.5 rounded-lg border border-ink/10 bg-surface pl-1 pr-0.5 py-0.5 max-w-[220px]">
                       <div className="w-9 h-9 rounded-md overflow-hidden bg-paper-warm flex-shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -705,7 +705,7 @@ export function TryOnFlow({
                   onClick={() => onDeleteRecent(r.id)}
                   disabled={deletingRecentId === r.id}
                   aria-label="Delete try-on image"
-                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition disabled:opacity-60"
+                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-surface/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition disabled:opacity-60"
                 >
                   {deletingRecentId === r.id ? "…" : "\u00d7"}
                 </button>

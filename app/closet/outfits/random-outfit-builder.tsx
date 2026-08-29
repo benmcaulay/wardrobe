@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { decode, type Color, type Season } from "@/lib/json";
 import { wornOnFromLocalDate, wornOnToISODate } from "@/lib/wear/rollup";
@@ -1004,7 +1005,10 @@ export function RandomOutfitBuilder({
   }
 
   function handleFrameBackgroundPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if ((e.target as HTMLElement).closest("[data-outfit-slot]")) return;
+    const target = e.target as HTMLElement;
+    // `data-keep-selection` covers controls that live on the canvas but aren't
+    // slots — the "want one" link on an empty slot, for instance.
+    if (target.closest("[data-outfit-slot]") || target.closest("[data-keep-selection]")) return;
     setSelectedSlotId(null);
     (document.activeElement as HTMLElement | null)?.blur();
   }
@@ -1056,7 +1060,7 @@ export function RandomOutfitBuilder({
             onClick={() => void spin()}
             disabled={!readyToSpin || spinning}
             aria-label={spinning ? "Spinning…" : "Spin outfit"}
-            className="group relative mx-auto flex h-[156px] w-[156px] items-center justify-center rounded-full border-[1.5px] border-accent-soft bg-white text-ink transition hover:border-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            className="group relative mx-auto flex h-[156px] w-[156px] items-center justify-center rounded-full border-[1.5px] border-accent-soft bg-surface text-ink transition hover:border-accent disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <span
               aria-hidden
@@ -1166,7 +1170,7 @@ export function RandomOutfitBuilder({
                       if (dragStackIndex !== null) reorderStack(dragStackIndex, index);
                       setDragStackIndex(null);
                     }}
-                    className={`flex items-center gap-1.5 rounded-lg border border-ink/10 bg-white p-1.5 transition ${
+                    className={`flex items-center gap-1.5 rounded-lg border border-ink/10 bg-surface p-1.5 transition ${
                       dragStackIndex === index ? "opacity-40" : ""
                     }`}
                   >
@@ -1227,7 +1231,7 @@ export function RandomOutfitBuilder({
             </div>
           )}
 
-          <div className="w-full rounded-2xl border border-ink/10 bg-white p-3 space-y-2 text-left">
+          <div className="w-full rounded-2xl border border-ink/10 bg-surface p-3 space-y-2 text-left">
             <div className="text-[11px] uppercase tracking-wide text-ink-muted">Your closet</div>
             <input
               type="search"
@@ -1274,7 +1278,7 @@ export function RandomOutfitBuilder({
             )}
           </div>
 
-          <div className="w-full rounded-2xl border border-ink/10 bg-white p-4 space-y-2 text-left">
+          <div className="w-full rounded-2xl border border-ink/10 bg-surface p-4 space-y-2 text-left">
             <div className="text-[11px] uppercase tracking-wide text-ink-muted">Save outfit</div>
             <div className="flex gap-2">
               <input
@@ -1309,7 +1313,7 @@ export function RandomOutfitBuilder({
         >
         <div
           ref={frameRef}
-          className="relative surface-canvas rounded-2xl border border-ink/10 overflow-hidden shadow-tile"
+          className="group/canvas relative surface-canvas rounded-2xl border border-ink/10 overflow-hidden shadow-tile"
           style={{
             width: FRAME_WIDTH,
             height: FRAME_HEIGHT,
@@ -1340,32 +1344,75 @@ export function RandomOutfitBuilder({
               const mirror = slot.mirror ?? item?.mirror ?? false;
               const thumbZoom = item?.thumbZoom ?? 1;
               return (
-                <button
+                /*
+                 * An empty slot is space, not a broken tile.
+                 *
+                 * It used to be a heavy dashed box on an opaque white card,
+                 * which read as a failed image load — the one thing on the
+                 * canvas that looked like an error. Now it's a hairline on the
+                 * canvas itself: room for a piece, held open on purpose.
+                 *
+                 * Wrapped in a div because the "want one" link cannot live
+                 * inside the drag button — an anchor nested in a button is
+                 * invalid, and the pointer handler would swallow the click
+                 * anyway. The wrapper carries the positioning; the button fills
+                 * it.
+                 */
+                <div
                   key={slot.id}
-                  type="button"
-                  data-outfit-slot
-                  onPointerDown={(e) => startCanvasDrag(e, slot)}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 touch-none overflow-hidden rounded-xl outline-none focus:outline-none ${
-                    isSelected ? "ring-2 ring-ink" : ""
-                  } ${item ? "" : "border-2 border-dashed border-ink/20 bg-white/80"}`}
+                  className="absolute -translate-x-1/2 -translate-y-1/2"
                   style={{ left: slot.x, top: slot.y, zIndex: slot.z, width: size, height: size }}
                 >
-                  {item ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      key={item.id}
-                      src={processedImageUrls[item.id] ?? imageUrl(item.imagePath)}
-                      alt={item.name}
-                      className={OUTFIT_PIECE_IMG_CLASS}
-                      style={{
-                        transform: itemTileImageTransform({ thumbZoom, mirror }),
-                      }}
-                      draggable={false}
-                    />
-                  ) : (
-                    <CategorySlotIcon categories={slot.categories} />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    data-outfit-slot
+                    onPointerDown={(e) => startCanvasDrag(e, slot)}
+                    className={`h-full w-full touch-none overflow-hidden rounded-xl outline-none focus:outline-none ${
+                      isSelected ? "ring-2 ring-ink" : ""
+                    } ${
+                      item
+                        ? ""
+                        : "border border-ink/15 bg-transparent transition-colors hover:border-ink/30 hover:bg-ink/[0.03]"
+                    }`}
+                  >
+                    {item ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        key={item.id}
+                        src={processedImageUrls[item.id] ?? imageUrl(item.imagePath)}
+                        alt={item.name}
+                        className={OUTFIT_PIECE_IMG_CLASS}
+                        style={{
+                          transform: itemTileImageTransform({ thumbZoom, mirror }),
+                        }}
+                        draggable={false}
+                      />
+                    ) : (
+                      <CategorySlotIcon categories={slot.categories} />
+                    )}
+                  </button>
+
+                  {/*
+                    Tap the gap to want one. The rule already knows what shape
+                    belongs here, so an unfilled slot is the most specific
+                    statement of a wardrobe gap this app ever gets to make —
+                    better than any inference on the wishlist page, which has to
+                    guess from category counts.
+                  */}
+                  {!item ? (
+                    <Link
+                      href={`/closet/wishlist?want=${encodeURIComponent(slot.categories[0] ?? "")}`}
+                      data-keep-selection
+                      /* No article: categories are user-named and arrive
+                         singular, plural and uncountable, so "Add a
+                         {category}" produced "Add a shoes". */
+                      title={`Add to wishlist: ${slot.categories.join(" or ")}`}
+                      className="absolute bottom-0.5 right-0.5 grid h-5 w-5 place-items-center rounded-full border border-ink/15 bg-surface text-[11px] leading-none text-ink-muted opacity-0 shadow-tile transition hover:text-ink focus-visible:opacity-100 group-hover/canvas:opacity-100"
+                    >
+                      +<span className="sr-only">Add to wishlist</span>
+                    </Link>
+                  ) : null}
+                </div>
               );
             })}
         </div>
@@ -1378,7 +1425,7 @@ export function RandomOutfitBuilder({
         className="w-full shrink-0 space-y-4 md:sticky md:top-6 md:w-[460px] md:overflow-y-auto md:pr-1"
         style={panelMaxHeight ? { maxHeight: panelMaxHeight } : undefined}
       >
-        <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
+        <div className="rounded-2xl border border-ink/10 bg-surface p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[11px] uppercase tracking-wide text-ink-muted">Category rules</div>
             <label className="flex items-center gap-1.5 text-[11px] text-ink-muted cursor-pointer select-none">
@@ -1524,7 +1571,7 @@ export function RandomOutfitBuilder({
                         className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize ${
                           on
                             ? "bg-accent text-white border-accent"
-                            : "bg-white border-ink/10 text-ink-muted hover:border-ink/25"
+                            : "bg-surface border-ink/10 text-ink-muted hover:border-ink/25"
                         }`}
                       >
                         {depth > 0 && (
@@ -1571,7 +1618,7 @@ export function RandomOutfitBuilder({
           </label>
         </div>
 
-        <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
+        <div className="rounded-2xl border border-ink/10 bg-surface p-4 space-y-3">
           <button
             type="button"
             onClick={() => setVisualLayersOpen((o) => !o)}
@@ -1698,7 +1745,7 @@ export function RandomOutfitBuilder({
           )}
         </div>
 
-        <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
+        <div className="rounded-2xl border border-ink/10 bg-surface p-4 space-y-3">
           <div className="text-[11px] uppercase tracking-wide text-ink-muted">Color rules</div>
           <p className="text-sm text-ink-muted">
             Optional — counts items whose <span className="text-ink">primary color</span> (★ in the
@@ -1757,7 +1804,7 @@ export function RandomOutfitBuilder({
         {rulesFooter}
 
         {selected && (
-          <div className="rounded-2xl border border-ink/10 bg-white p-4 space-y-3">
+          <div className="rounded-2xl border border-ink/10 bg-surface p-4 space-y-3">
             <div className="text-[11px] uppercase tracking-wide text-ink-muted">Selected slot</div>
             <p className="text-sm truncate">
               <span className="capitalize">{formatCategoryList(selected.categories)}</span>
@@ -1823,7 +1870,7 @@ export function RandomOutfitBuilder({
             type="button"
             onClick={() => setPreviewItem(null)}
             aria-label="Close preview"
-            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 bg-white text-ink-muted hover:text-ink hover:border-ink/30 transition"
+            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 bg-surface text-ink-muted hover:text-ink hover:border-ink/30 transition"
           >
             ×
           </button>

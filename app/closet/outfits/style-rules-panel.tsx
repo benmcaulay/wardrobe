@@ -31,7 +31,7 @@ export function StyleRulesPanel({
   const [text, setText] = useState("");
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-4 shadow-tile">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-4 shadow-tile">
       <h3 className="font-serif text-lg">Styling Tips</h3>
       <textarea
         value={text}

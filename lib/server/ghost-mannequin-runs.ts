@@ -193,7 +193,22 @@ export async function runGenerateGhostViewFor(
     }
   }
 
-  const listing = item.originalImagePath;
+  /*
+   * Render from whatever is currently the thumbnail, not from the original.
+   *
+   * `ghostImagePath` is the thumbnail pointer and null means "the original is
+   * the thumbnail" (see setPrimaryThumbnailFor). Reading it here is what makes
+   * the button do what the page shows: the tile you picked as the thumbnail is
+   * the cleanest image of the garment, and it is the one a second render should
+   * build on. Anchoring to the original instead meant that after whitening a
+   * photo or generating a good front view, every later render went back to the
+   * messy phone snap and repeated the work.
+   *
+   * It also lets the original be deleted (deleteOriginalPhotoFor) without
+   * changing what generation reads — the promoted image is already the
+   * thumbnail.
+   */
+  const listing = item.ghostImagePath ?? item.originalImagePath;
   const primary =
     primaryGarmentPath?.trim() && primaryGarmentPath.trim() !== listing
       ? primaryGarmentPath.trim()
@@ -214,6 +229,21 @@ export async function runGenerateGhostViewFor(
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
+
+  /*
+   * Which image the render actually started from.
+   *
+   * Worth a line of its own: the source is now the thumbnail rather than the
+   * original, `stack` can reorder it again when a primary override is passed,
+   * and a render that came out wrong is nearly impossible to diagnose without
+   * knowing which of an item's four images went in.
+   */
+  log.info("ghost.view.source", {
+    itemId,
+    garmentImagePath: stack.garmentImagePath,
+    fromThumbnail: stack.garmentImagePath === item.ghostImagePath,
+    extras: stack.extraImagePaths.length,
+  });
 
   let result: GhostMannequinResult;
   try {

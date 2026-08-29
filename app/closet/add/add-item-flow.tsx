@@ -4,7 +4,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type RefObject,
 } from "react";
 import { motion, useReducedMotion } from "motion/react";
@@ -12,6 +11,7 @@ import { Camera, Hanger, Upload } from "@/components/icons";
 import { springSnappy, springSoft } from "@/lib/ui-motion";
 import { ItemFormFields } from "@/components/item-form-fields";
 import { ProductSearchPanel } from "@/components/product-search-panel";
+import { PhotoSourcePicker, type WebSourceProps } from "@/components/photo-source-picker";
 import { CreditMark } from "@/components/credit-mark";
 import { ImageCropper } from "@/components/image-cropper";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
@@ -37,6 +37,7 @@ import {
   discardUpload,
   discardExtraImage,
   saveExtraImage,
+  saveWebProductImage,
   searchWebProductsAction,
   type AnalyzeUploadResponse,
 } from "./actions";
@@ -202,7 +203,6 @@ export function AddItemFlow({
     setWebcam({ facing });
   }
 
-  const libraryInputRef = useRef<HTMLInputElement>(null);
   const extraInputRef = useRef<HTMLInputElement>(null);
   const pollGenRef = useRef(0);
 
@@ -268,7 +268,25 @@ export function AddItemFlow({
     if (state.kind !== "ready") return;
     const formData = new FormData();
     formData.append("image", file);
-    const res = await saveExtraImage(formData);
+    await appendDraftView(await saveExtraImage(formData));
+  }
+
+  /**
+   * A listing photo as another view, during the add flow.
+   *
+   * Deliberately does not pre-fill any form field. Picking a listing on the
+   * *idle* screen does prefill, because there is nothing to overwrite yet; by
+   * the time the form is on screen the user has typed in it, and they asked for
+   * a picture.
+   */
+  async function addWebManualView(match: ProductMatch) {
+    if (state.kind !== "ready") return;
+    await appendDraftView(await saveWebProductImage(match));
+  }
+
+  /** Shared tail: put a saved path into the draft's views. */
+  async function appendDraftView(res: Awaited<ReturnType<typeof saveExtraImage>>) {
+    if (state.kind !== "ready") return;
     if (!res.ok) {
       setState((s) => (s.kind === "ready" ? { ...s, ghostError: res.error } : s));
       return;
@@ -426,7 +444,6 @@ export function AddItemFlow({
   function cancelCrop() {
     if (state.kind === "cropping") URL.revokeObjectURL(state.sourceUrl);
     setState({ kind: "idle" });
-    clearFileInputs(libraryInputRef);
   }
 
   function patchValue(patch: Partial<ItemFormValue>) {
@@ -712,36 +729,30 @@ export function AddItemFlow({
     setState({ kind: "idle" });
     setPendingFormPatch(null);
     resetWebSearch();
-    clearFileInputs(libraryInputRef, extraInputRef);
+    clearFileInputs(extraInputRef);
   }
 
   return (
     <div className="space-y-8">
       {state.kind === "idle" && (
-        <>
-          <ProductSearchPanel
-            title="Search the web"
-            hint={
-              webMatchAutofill
-                ? "Find a listing first, then add your garment photo. Fields pre-fill when you pick a result."
-                : "Pick a result to import its photo and pre-fill the form — or add your own photo below."
-            }
-            query={webSearchQuery}
-            onQueryChange={setWebSearchQuery}
-            results={webSearchResults}
-            onResultsChange={setWebSearchResults}
-            onSearch={runWebSearch}
-            onSelect={(m) => void onSelectWebProduct(m)}
-            selectedUrl={selectedWebProductUrl}
-            onClearSelection={clearWebSelection}
-          />
-          <IdleView
-            onFile={handleFile}
-            libraryInputRef={libraryInputRef}
-            onTakePhoto={() => openWebcamCapture("environment", handleFile)}
-            error={state.error}
-          />
-        </>
+        <IdleView
+          onFile={handleFile}
+          onTakePhoto={() => openWebcamCapture("environment", handleFile)}
+          error={state.error}
+          web={{
+            query: webSearchQuery,
+            onQueryChange: setWebSearchQuery,
+            results: webSearchResults,
+            onResultsChange: setWebSearchResults,
+            onSearch: runWebSearch,
+            onSelect: (m) => void onSelectWebProduct(m),
+            selectedUrl: selectedWebProductUrl,
+            onClearSelection: clearWebSelection,
+            hint: webMatchAutofill
+              ? "Find a listing first, then add your garment photo. Fields pre-fill when you pick a result."
+              : "Pick a result to import its photo and pre-fill the form — or add your own photo instead.",
+          }}
+        />
       )}
 
       {state.kind === "cropping" && (
@@ -762,6 +773,8 @@ export function AddItemFlow({
           credits={credits}
           extraInputRef={extraInputRef}
           onTakePhotoExtra={() => openWebcamCapture("environment", addExtra)}
+          onTakePhotoView={() => openWebcamCapture("environment", (f) => void addManualView(f))}
+          onAddWebView={(m) => void addWebManualView(m)}
           webMatchAutofill={webMatchAutofill}
           webSearchQuery={webSearchQuery}
           onWebSearchQueryChange={setWebSearchQuery}
@@ -882,134 +895,38 @@ export function AddItemFlow({
   );
 }
 
+/**
+ * The first photo.
+ *
+ * Now the same control as "Add another picture" on a saved item
+ * (components/photo-source-picker.tsx) rather than a bespoke drop zone with a
+ * separate always-open search panel above it. The three sources were already
+ * the same three; they were just two different UIs, which is why adding picture
+ * two used to offer only a file.
+ *
+ * The web lane opens by default here and only here — searching for a listing is
+ * this screen's intended front door, and the panel it replaces was always
+ * visible.
+ */
 function IdleView({
   onFile,
-  libraryInputRef,
   onTakePhoto,
   error,
+  web,
 }: {
   onFile: (f: File) => void;
-  libraryInputRef: RefObject<HTMLInputElement>;
   onTakePhoto: () => void;
   error?: string;
+  web: WebSourceProps;
 }) {
-  const [dragActive, setDragActive] = useState(false);
-  const reduce = useReducedMotion();
-
-  function onInputChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) onFile(file);
-    e.target.value = "";
-  }
-
-  // Staggered entrance: the panel settles, then its contents arrive in order.
-  const item = {
-    hidden: reduce ? {} : { opacity: 0, y: 8 },
-    show: { opacity: 1, y: 0 },
-  };
-
   return (
-    <div>
-      {/* The whole panel is the file picker — a <label> over the hidden input
-          means clicking anywhere in the dropzone opens it, instead of requiring
-          a hit on a 100px pill. Keyboard users still get the two buttons. */}
-      <motion.label
-        htmlFor="add-garment-file"
-        initial={reduce ? false : { opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={springSoft}
-        variants={{ show: { transition: { staggerChildren: 0.05, delayChildren: 0.05 } } }}
-        whileHover={reduce ? undefined : { scale: 1.004 }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragActive(true);
-        }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragActive(false);
-          const file = e.dataTransfer.files[0];
-          if (file) onFile(file);
-        }}
-        className={`block cursor-pointer rounded-3xl border-2 border-dashed p-12 text-center transition-colors ${
-          dragActive ? "border-accent bg-accent-soft/20" : "border-ink/15 bg-paper-warm hover:border-ink/30"
-        }`}
-      >
-        <motion.div
-          animate={
-            reduce
-              ? undefined
-              : dragActive
-                ? { scale: 1.12, rotate: -3 }
-                : { scale: 1, rotate: 0 }
-          }
-          transition={springSnappy}
-          className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-ink text-paper"
-        >
-          <Hanger className="h-7 w-7" />
-        </motion.div>
-
-        <p className="font-serif text-2xl">
-          {dragActive ? "Drop it right here" : "Add a garment photo"}
-        </p>
-        <p className="text-ink-muted text-sm mt-2">
-          Drop, paste, snap, or click anywhere in this panel
-        </p>
-
-        <input
-          id="add-garment-file"
-          ref={libraryInputRef}
-          type="file"
-          accept={IMAGE_ACCEPT}
-          className="hidden"
-          onChange={onInputChange}
-        />
-
-        <div className="mt-6 flex flex-col sm:flex-row justify-center gap-2 sm:gap-3">
-          <motion.button
-            type="button"
-            // Stop the label from also opening the file picker.
-            onClick={(e) => {
-              e.preventDefault();
-              onTakePhoto();
-            }}
-            whileHover={reduce ? undefined : { scale: 1.04 }}
-            whileTap={reduce ? undefined : { scale: 0.96 }}
-            transition={springSnappy}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-ink text-paper px-6 py-2 text-sm tracking-wide hover:bg-ink-soft"
-            aria-label="Take photo with camera"
-          >
-            <Camera className="h-4 w-4" />
-            Take photo
-          </motion.button>
-          <motion.button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              libraryInputRef.current?.click();
-            }}
-            whileHover={reduce ? undefined : { scale: 1.04 }}
-            whileTap={reduce ? undefined : { scale: 0.96 }}
-            transition={springSnappy}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-ink/15 bg-white px-6 py-2 text-sm tracking-wide hover:bg-paper-warm"
-            aria-label="Choose image from photo library or files"
-          >
-            <Upload className="h-4 w-4" />
-            Choose file
-          </motion.button>
-        </div>
-
-        <p className="text-ink-muted text-[11px] mt-4">JPG, PNG, WebP or HEIC · up to 10 MB</p>
-      </motion.label>
-      {error && (
-        <p
-          role="alert"
-          className="mt-4 text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2"
-        >
-          {error}
-        </p>
-      )}
-    </div>
+    <PhotoSourcePicker
+      onFile={onFile}
+      onTakePhoto={onTakePhoto}
+      web={web}
+      webDefaultOpen
+      error={error}
+    />
   );
 }
 
@@ -1039,7 +956,7 @@ function ProcessingView({ previewUrl }: { previewUrl: string }) {
 function Shimmer({ className = "" }: { className?: string }) {
   return (
     <div className={`relative overflow-hidden rounded-lg bg-paper-warm ${className}`} aria-hidden>
-      <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.4s_infinite] bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+      <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.4s_infinite] bg-gradient-to-r from-transparent via-surface/60 to-transparent" />
     </div>
   );
 }
@@ -1111,7 +1028,7 @@ function VariantPanel({
               }}
               disabled={generating}
               aria-label="Remove ghost preview"
-              className="absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow-sm border border-ink/10 disabled:opacity-30"
+              className="absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full bg-surface/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow-sm border border-ink/10 disabled:opacity-30"
             >
               ×
             </button>
@@ -1195,6 +1112,13 @@ function ImagePickerPanel({
   onGenerate,
   onCancel,
   onAddManualView,
+  onTakePhotoView,
+  webSearchQuery,
+  onWebSearchQueryChange,
+  webSearchResults,
+  onWebSearchResultsChange,
+  onSearchWeb,
+  onAddWebView,
 }: {
   costLabel: string;
   previewUrl: string;
@@ -1203,6 +1127,13 @@ function ImagePickerPanel({
   generating: boolean;
   hasExistingGhostViews: boolean;
   canGenerate: boolean;
+  onTakePhotoView: () => void;
+  webSearchQuery: string;
+  onWebSearchQueryChange: (q: string) => void;
+  webSearchResults: ProductMatch[];
+  onWebSearchResultsChange: (r: ProductMatch[]) => void;
+  onSearchWeb: (q: string) => Promise<ProductMatch[]>;
+  onAddWebView: (m: ProductMatch) => void;
   onToggleExtra: (id: string) => void;
   onLabelChange: (label: string) => void;
   onInstructionsChange: (instructions: string) => void;
@@ -1212,7 +1143,6 @@ function ImagePickerPanel({
   onCancel: () => void;
   onAddManualView: (file: File) => void;
 }) {
-  const fileRef = useRef<HTMLInputElement>(null);
   const canAiGenerate = canGenerate && pickState.label.trim().length > 0;
   const aiFirst = pickState.mode === "ai";
 
@@ -1220,16 +1150,12 @@ function ImagePickerPanel({
     <div className="flex flex-col gap-3 rounded-xl border border-ink/10 bg-paper-warm p-3">
       <div className="order-1">
         <p className="text-xs font-medium">
-          {aiFirst
-            ? "Generate with AI"
-            : hasExistingGhostViews
-              ? "Add another view"
-              : "Add catalog view"}
+          {aiFirst ? "Generate with AI" : "Add another picture"}
         </p>
         <p className="text-[11px] text-ink-muted mt-1">
           {aiFirst
-            ? "The AI render needs a name. You can also upload a photo instead — that adds a view immediately, no credit."
-            : "Paste or upload a photo to add it as a view immediately (no AI). Or generate with AI below."}
+            ? "The AI render needs a name. You can also add a photo instead — that adds a view immediately, no credit."
+            : "Camera, the web, or a file — added as a view immediately (no AI). Or generate with AI below."}
         </p>
       </div>
 
@@ -1241,33 +1167,39 @@ function ImagePickerPanel({
           value={pickState.label}
           onChange={(e) => onLabelChange(e.target.value)}
           disabled={generating}
-          className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-white placeholder:text-ink-muted focus:outline-none focus:border-ink/40 disabled:opacity-50"
+          className="w-full text-xs rounded-lg border border-ink/15 px-3 py-1.5 bg-surface placeholder:text-ink-muted focus:outline-none focus:border-ink/40 disabled:opacity-50"
         />
       </label>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept={IMAGE_ACCEPT}
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (file) onAddManualView(file);
-        }}
-      />
-      <button
-        type="button"
-        disabled={generating}
-        onClick={() => fileRef.current?.click()}
-        className={`${aiFirst ? "order-4" : "order-3"} self-start rounded-full bg-ink text-paper px-4 py-1.5 text-xs tracking-wide hover:bg-ink-soft transition disabled:opacity-50`}
-      >
-        Upload photo as view
-      </button>
+      {/*
+        The same three sources the first photo gets on the idle screen. This
+        used to be a lone "Upload photo as view" button, so picture two could
+        only ever come from a file — no camera, no web — while picture one had
+        all three.
+      */}
+      <div className={aiFirst ? "order-4" : "order-3"}>
+        <PhotoSourcePicker
+          compact
+          title="Add another picture"
+          subtitle="Drop, paste, snap, or click here"
+          disabled={generating}
+          onFile={onAddManualView}
+          onTakePhoto={onTakePhotoView}
+          web={{
+            query: webSearchQuery,
+            onQueryChange: onWebSearchQueryChange,
+            results: webSearchResults,
+            onResultsChange: onWebSearchResultsChange,
+            onSearch: onSearchWeb,
+            onSelect: onAddWebView,
+            hint: "Picking a result adds its photo as a view. It does not change the fields you have already filled in.",
+          }}
+        />
+      </div>
 
       <details
         open={aiFirst}
-        className={`${aiFirst ? "order-2" : "order-5"} rounded-lg border border-ink/10 bg-white p-3`}
+        className={`${aiFirst ? "order-2" : "order-5"} rounded-lg border border-ink/10 bg-surface p-3`}
       >
         <summary className="text-xs font-medium cursor-pointer list-none">
           {aiFirst ? "Render settings" : `Or generate with AI · 1 credit · ${costLabel}`}
@@ -1415,6 +1347,8 @@ function ReadyView({
   extraInputRef,
   webMatchAutofill,
   onTakePhotoExtra,
+  onTakePhotoView,
+  onAddWebView,
   webSearchQuery,
   onWebSearchQueryChange,
   webSearchResults,
@@ -1452,6 +1386,10 @@ function ReadyView({
   extraInputRef: RefObject<HTMLInputElement>;
   webMatchAutofill: boolean;
   onTakePhotoExtra: () => void;
+  /** Camera for the "Add another picture" chooser — a view, not an AI source. */
+  onTakePhotoView: () => void;
+  /** A listing photo as another view. */
+  onAddWebView: (m: ProductMatch) => void;
   webSearchQuery: string;
   onWebSearchQueryChange: (query: string) => void;
   webSearchResults: ProductMatch[];
@@ -1488,7 +1426,9 @@ function ReadyView({
     name: state.value.name,
   });
   const categoryBlocked = !categoryCheck.ok ? categoryCheck.error : null;
-  const ghostBtnLabel = hasGhosts ? "Add another view" : "Add catalog view";
+  // "Another" holds even with no catalog views yet: the garment photo is
+  // already picture one.
+  const ghostBtnLabel = "Add another picture";
 
   return (
     <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-8 items-start">
@@ -1533,6 +1473,13 @@ function ReadyView({
               }
               onCancel={onCancelPick}
               onAddManualView={onAddManualView}
+              onTakePhotoView={onTakePhotoView}
+              webSearchQuery={webSearchQuery}
+              onWebSearchQueryChange={onWebSearchQueryChange}
+              webSearchResults={webSearchResults}
+              onWebSearchResultsChange={onWebSearchResultsChange}
+              onSearchWeb={onSearchWeb}
+              onAddWebView={onAddWebView}
             />
           ) : (
             <>
@@ -1601,7 +1548,7 @@ function ReadyView({
                     type="button"
                     onClick={() => onRemoveExtra(e.id)}
                     aria-label="Remove image"
-                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-surface/95 text-ink text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                   >
                     ×
                   </button>

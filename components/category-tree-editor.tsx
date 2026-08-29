@@ -139,7 +139,7 @@ export function CategoryTreeEditor({
                 if (!dragged || !mode || dragged === row.key) return;
                 onMove(dragged, row.name, mode);
               }}
-              className={`relative flex items-center gap-2 rounded-xl border bg-white px-2 py-2 transition ${
+              className={`relative flex items-center gap-2 rounded-xl border bg-surface px-2 py-2 transition ${
                 nesting ? "border-ink ring-1 ring-ink/20" : "border-ink/10"
               } ${beside ? "border-t-2 border-t-ink" : ""} ${isDragging ? "opacity-40" : ""} ${
                 isSelected ? "ring-2 ring-accent/50 border-accent/40" : ""

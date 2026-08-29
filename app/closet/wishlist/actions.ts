@@ -7,7 +7,8 @@ import { NONE_CATEGORY } from "@/lib/categories";
 import { encode, parseStylePrefs } from "@/lib/json";
 import { getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
 import { saveImageBuffer, deleteUpload, UploadError } from "@/lib/uploads";
-import { searchWebProducts } from "@/lib/services/webProductSearch";
+import { searchWebProductsDetailed } from "@/lib/services/webProductSearch";
+import { recordSearchResult } from "@/lib/server/product-search-log";
 import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import { normalizePriority } from "@/lib/wishlist/priority";
 import { appendPricePoint, parsePriceHistory } from "@/lib/wishlist/price-watch";
@@ -84,8 +85,8 @@ export type WishlistPreview = {
 
 /** Read a pasted store link without committing it, so the user can confirm. */
 export async function previewFromUrl(url: string): Promise<ActionResult<WishlistPreview>> {
-  await requireUser();
-  const resolved = await resolveWishlistProduct(url);
+  const user = await requireUser();
+  const resolved = await resolveWishlistProduct(url, { userId: user.id });
   if (!resolved.ok) return fail(resolved.error);
 
   const p = resolved.product;
@@ -105,11 +106,16 @@ export async function previewFromUrl(url: string): Promise<ActionResult<Wishlist
 }
 
 export async function searchProducts(query: string): Promise<ActionResult<ProductMatch[]>> {
-  await requireUser();
+  const user = await requireUser();
   const q = query.trim();
   if (!q) return fail("Enter something to search for.");
   try {
-    return { ok: true, value: await searchWebProducts(q) };
+    const result = await searchWebProductsDetailed(q);
+    // Awaited, not fire-and-forget: a serverless invocation can be frozen the
+    // moment the response is returned, and a dropped write is a search that
+    // was billed and never counted.
+    await recordSearchResult(user.id, result);
+    return { ok: true, value: result.matches };
   } catch (err) {
     return fail((err as Error).message || "Search failed.");
   }
@@ -395,7 +401,10 @@ export async function refreshPrices(): Promise<ActionResult<PriceCheckResult>> {
       continue;
     }
 
-    const cents = await recheckPriceCents(url, item.name, item.brand);
+    // Billed to the user: "Check prices" issues one shopping search per watched
+    // item whose page has no readable price, which is the largest and quietest
+    // spend in the app.
+    const cents = await recheckPriceCents(url, item.name, item.brand, { userId: user.id });
     checked += 1;
 
     if (cents == null) {

@@ -114,7 +114,7 @@ export function SellLanding(props: Props) {
             href="/closet/sell/triage"
             className="rounded-full bg-ink px-6 py-3 text-sm tracking-wide text-paper transition hover:bg-ink-soft"
           >
-            Sell or keep
+            Keep or make space
             {counts.untriaged > 0 && (
               <span className="opacity-60"> · {counts.untriaged} to sort</span>
             )}

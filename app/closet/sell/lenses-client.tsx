@@ -43,7 +43,7 @@ export function LensesClient({ lenses }: { lenses: ClosetLenses }) {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-ink/10 bg-white p-4">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-4">
         <h2 className="text-sm font-medium text-ink">Quietest pieces</h2>
 
         {!readiness.ready ? (
@@ -74,7 +74,7 @@ export function LensesClient({ lenses }: { lenses: ClosetLenses }) {
       </section>
 
       {redundant.length > 0 ? (
-        <section className="rounded-2xl border border-ink/10 bg-white p-4">
+        <section className="rounded-2xl border border-ink/10 bg-surface p-4">
           <h2 className="text-sm font-medium text-ink">Close cousins</h2>
           <ul className="mt-3 space-y-3">
             {redundant.map((cluster) => (
@@ -92,7 +92,7 @@ export function LensesClient({ lenses }: { lenses: ClosetLenses }) {
       ) : null}
 
       {valuable.length > 0 ? (
-        <section className="rounded-2xl border border-ink/10 bg-white p-4">
+        <section className="rounded-2xl border border-ink/10 bg-surface p-4">
           {/* Deliberately its own section, far from dormancy: joining the two
               would turn two facts into a recommendation nobody asked for. */}
           <h2 className="text-sm font-medium text-ink">Holding their value</h2>

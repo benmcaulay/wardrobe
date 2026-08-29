@@ -824,7 +824,7 @@ export function TripPlanner({
               if (e.key === "Enter") void describeTrip();
             }}
             placeholder="Or describe it: 5 days in Lisbon for a wedding, plus a beach day"
-            className="min-w-0 flex-1 rounded-2xl border border-ink/15 bg-white px-3.5 py-2 text-sm placeholder:text-ink-muted/60 focus:border-ink/30"
+            className="min-w-0 flex-1 rounded-2xl border border-ink/15 bg-surface px-3.5 py-2 text-sm placeholder:text-ink-muted/60 focus:border-ink/30"
           />
           <button
             type="button"
@@ -849,7 +849,7 @@ export function TripPlanner({
                 className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
                   on
                     ? "border-ink bg-ink text-paper"
-                    : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                    : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
                 }`}
               >
                 {a.label}
@@ -864,7 +864,7 @@ export function TripPlanner({
             className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
               requirements.laundry
                 ? "border-ink bg-ink text-paper"
-                : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
             }`}
           >
             Laundry available
@@ -890,7 +890,7 @@ export function TripPlanner({
                     max={30}
                     value={count}
                     onChange={(e) => setActivityDays(a.id, Number(e.target.value))}
-                    className="w-16 rounded-lg border border-ink/15 bg-white px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
+                    className="w-16 rounded-lg border border-ink/15 bg-surface px-2 py-1 text-xs focus:border-ink/40 focus:outline-none"
                   />
                   <span className="text-ink-muted">
                     {count === 1 ? "day" : "days"}
@@ -1490,7 +1490,7 @@ function ClimateUnknown({
             type="button"
             disabled={busy}
             onClick={() => choose(p.avgHighC)}
-            className="rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+            className="rounded-full border border-ink/15 bg-surface px-3.5 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
           >
             {p.label}
             <span className="ml-1.5 text-ink-muted">
@@ -1546,7 +1546,7 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
 
   if (editing) {
     return (
-      <div className="rounded-2xl border border-ink/15 bg-white p-5 shadow-tile">
+      <div className="rounded-2xl border border-ink/15 bg-surface p-5 shadow-tile">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="block text-[11px] uppercase tracking-wide text-ink-muted">Leaving</label>

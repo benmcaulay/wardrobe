@@ -252,7 +252,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
             className={`rounded-full border px-3 py-1 text-xs transition ${
               filter === t.id
                 ? "border-ink bg-ink text-paper"
-                : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
             }`}
           >
             {t.label} ({t.count})
@@ -273,7 +273,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
           selectableVisible.length > 0 && selectableVisible.every((l) => selected.has(l.itemId));
         if (selectableVisible.length === 0 && selected.size === 0) return null;
         return (
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-white px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-surface px-3 py-2 text-xs">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -374,7 +374,7 @@ export function ListingsClient({ initial }: { initial: Listing[] }) {
 function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
     <motion.div
-      className="rounded-2xl border border-ink/10 bg-white p-4"
+      className="rounded-2xl border border-ink/10 bg-surface p-4"
       whileHover={{ y: -2, transition: springSoft }}
     >
       <dt className="text-[11px] uppercase tracking-wide text-ink-muted">{label}</dt>
@@ -563,7 +563,7 @@ function ListingCard({
       initial="hidden"
       animate="show"
       exit="exit"
-      className={`rounded-3xl border bg-white p-4 shadow-tile sm:p-5 ${
+      className={`rounded-3xl border bg-surface p-4 shadow-tile sm:p-5 ${
         selected ? "border-ink ring-1 ring-ink/30" : "border-ink/10"
       }`}
     >
@@ -577,7 +577,7 @@ function ListingCard({
               className="h-full w-full object-cover"
             />
             {status !== "sold" && (
-              <label className="absolute left-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-white/90 shadow-sm">
+              <label className="absolute left-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-surface/90 shadow-sm">
                 <input
                   type="checkbox"
                   checked={selected}
@@ -708,7 +708,7 @@ function ListingCard({
                     className={`rounded-full border px-3 py-1 text-xs transition ${
                       on
                         ? "border-ink bg-ink text-paper"
-                        : "border-ink/15 bg-white text-ink hover:bg-paper-warm"
+                        : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
                     }`}
                   >
                     {m.label}
@@ -802,7 +802,7 @@ function ListingCard({
               <button
                 type="button"
                 onClick={() => setMarkingSold(false)}
-                className="rounded-full border border-ink/15 px-3 py-2 text-xs transition hover:bg-white"
+                className="rounded-full border border-ink/15 px-3 py-2 text-xs transition hover:bg-surface"
               >
                 Cancel
               </button>

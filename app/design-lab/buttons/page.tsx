@@ -39,7 +39,7 @@ function Row({ title, hint, children }: { title: string; hint?: string; children
         <h2 className="text-xs uppercase tracking-wide text-ink-muted">{title}</h2>
         {hint && <p className="mt-1 text-[11px] text-ink-muted">{hint}</p>}
       </div>
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-white p-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-surface p-4">
         {children}
       </div>
     </section>

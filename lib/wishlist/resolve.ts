@@ -16,7 +16,8 @@ import { tryImmersiveProductMetadata } from "../services/immersiveProduct";
 import { isAggregatorProductUrl, parseBrandFromTitle } from "../shopping-parse";
 import { scrapeProduct, type ProductMetadata } from "../services/productScraper";
 import type { ProductMatch } from "../services/reverseImageSearch";
-import { searchWebProducts } from "../services/webProductSearch";
+import { searchWebProductsDetailed } from "../services/webProductSearch";
+import { recordSearchResult } from "../server/product-search-log";
 
 export type ResolvedProduct = {
   name: string;
@@ -44,8 +45,20 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * Who to bill the fallback search to.
+ *
+ * Threaded rather than omitted because the fallback below is a real SerpAPI
+ * search — pasting a link whose page has no readable price quietly issues one,
+ * and until this was plumbed through, that search was billed and counted
+ * nowhere. `null` is allowed for callers with no user in scope, but there
+ * currently aren't any.
+ */
+export type SearchBilling = { userId: string | null };
+
 export async function resolveWishlistProduct(
   rawUrl: string,
+  billing: SearchBilling = { userId: null },
 ): Promise<ResolveSuccess | ResolveFailure> {
   const url = rawUrl.trim();
   if (!isHttpUrl(url)) {
@@ -87,7 +100,7 @@ export async function resolveWishlistProduct(
 
   if (base.priceCents != null) return { ok: true, product: base };
 
-  const fallback = await priceFromShoppingSearch(base.name, base.brand);
+  const fallback = await priceFromShoppingSearch(base.name, base.brand, billing);
   if (!fallback) return { ok: true, product: base };
 
   return {
@@ -105,12 +118,15 @@ export async function resolveWishlistProduct(
 async function priceFromShoppingSearch(
   name: string,
   brand: string | null,
+  billing: SearchBilling,
 ): Promise<{ priceCents: number; currency: string; thumbnailUrl: string | null } | null> {
   const query = [brand, name].filter(Boolean).join(" ").trim();
   if (!query) return null;
 
   try {
-    const matches = await searchWebProducts(query);
+    const result = await searchWebProductsDetailed(query);
+    if (billing.userId) await recordSearchResult(billing.userId, result);
+    const matches = result.matches;
     const priced = matches.find((m) => m.priceCents > 0);
     if (!priced) return null;
     return {
@@ -173,6 +189,7 @@ export async function recheckPriceCents(
   url: string,
   name?: string | null,
   brand?: string | null,
+  billing: SearchBilling = { userId: null },
 ): Promise<number | null> {
   if (isHttpUrl(url) && !isAggregatorProductUrl(url)) {
     try {
@@ -184,6 +201,6 @@ export async function recheckPriceCents(
   }
 
   if (!name?.trim()) return null;
-  const fallback = await priceFromShoppingSearch(name, brand ?? null);
+  const fallback = await priceFromShoppingSearch(name, brand ?? null, billing);
   return fallback?.priceCents ?? null;
 }

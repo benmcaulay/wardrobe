@@ -154,7 +154,7 @@ export function OutfitStudio({
       {returnTo ? (
         <Link
           href={returnTo}
-          className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs transition hover:bg-paper-warm"
+          className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 bg-surface px-3.5 py-1.5 text-xs transition hover:bg-paper-warm"
         >
           ← {returnLabel}
         </Link>

@@ -309,7 +309,7 @@ export function ItemFormFields({
                 className={`cursor-pointer rounded-full border px-3 py-1 text-xs capitalize transition ${
                   checked
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 } ${disabled ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <input
@@ -340,7 +340,7 @@ export function ItemFormFields({
                 className={`cursor-pointer rounded-full border px-3 py-1 text-xs capitalize transition ${
                   checked
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 } ${disabled ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <input
@@ -371,7 +371,7 @@ export function ItemFormFields({
                 className={`cursor-pointer rounded-full border px-3 py-1 text-xs capitalize transition ${
                   checked
                     ? "bg-ink text-paper border-ink"
-                    : "bg-white border-ink/10 text-ink hover:border-ink/30"
+                    : "bg-surface border-ink/10 text-ink hover:border-ink/30"
                 } ${disabled ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <input
@@ -433,7 +433,7 @@ function StarIcon({ filled }: { filled: boolean }) {
 }
 
 const inputCls =
-  "w-full rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 disabled:bg-paper-warm disabled:text-ink-muted";
+  "w-full rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 disabled:bg-paper-warm disabled:text-ink-muted";
 
 function Field({
   label,

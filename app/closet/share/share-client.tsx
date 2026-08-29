@@ -7,7 +7,13 @@ import { itemTileImageTransform } from "@/lib/item-tile-meta";
 import { MARKETPLACES } from "@/lib/marketplaces";
 import { ICON_REGISTRY } from "@/components/icons";
 import { SHARE_DESTINATIONS, type ShareDestination } from "@/lib/share/destinations";
-import { SHARE_KIND_LABELS, SHARE_KINDS, sharePath, type ShareKind } from "@/lib/share/kinds";
+import {
+  kindRequiresTarget,
+  SHARE_KIND_LABELS,
+  SHARE_KINDS,
+  sharePath,
+  type ShareKind,
+} from "@/lib/share/kinds";
 import {
   createShareLink,
   deleteShareLink,
@@ -59,13 +65,7 @@ export function ShareClient({
   // Don't open on a kind that has nothing to share — an empty wishlist would
   // otherwise sit selected-but-disabled, with a live "Make link" button.
   const available = useMemo(
-    () =>
-      SHARE_KINDS.filter(
-        (k) =>
-          (k === "wishlist" && wishlistCount > 0) ||
-          (k === "item" && items.length > 0) ||
-          (k === "outfit" && outfits.length > 0),
-      ),
+    () => SHARE_KINDS.filter((k) => !kindDisabled(k, items.length, outfits.length, wishlistCount)),
     [items.length, outfits.length, wishlistCount],
   );
   const [kind, setKind] = useState<ShareKind>(() => available[0] ?? "item");
@@ -109,20 +109,17 @@ export function ShareClient({
 
   // Guard the button too: `available` can go empty (nothing in the closet at
   // all), and a wishlist share only makes sense with something on the list.
-  const canCreate = available.includes(kind) && (kind === "wishlist" || !!targetId);
+  const canCreate = available.includes(kind) && (!kindRequiresTarget(kind) || !!targetId);
 
   return (
     <div className="space-y-12">
-      <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+      <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
         <h2 className="font-serif text-2xl">Make a link</h2>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {SHARE_KINDS.map((k) => {
             const on = kind === k;
-            const disabled =
-              (k === "item" && items.length === 0) ||
-              (k === "outfit" && outfits.length === 0) ||
-              (k === "wishlist" && wishlistCount === 0);
+            const disabled = kindDisabled(k, items.length, outfits.length, wishlistCount);
             return (
               <button
                 key={k}
@@ -137,7 +134,7 @@ export function ShareClient({
                 className={`rounded-full border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
                   on
                     ? "border-ink/30 bg-paper-warm text-ink"
-                    : "border-ink/10 bg-white text-ink hover:border-ink/30"
+                    : "border-ink/10 bg-surface text-ink hover:border-ink/30"
                 }`}
               >
                 {SHARE_KIND_LABELS[k].label}
@@ -146,7 +143,7 @@ export function ShareClient({
             );
           })}
 
-          {kind !== "wishlist" && (
+          {kindRequiresTarget(kind) && (
             <div className="relative ml-auto min-w-[10rem] flex-1 sm:max-w-[16rem]">
               <input
                 type="text"
@@ -155,7 +152,7 @@ export function ShareClient({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={`Search ${kind === "item" ? "items" : "outfits"}…`}
                 aria-label={`Search ${kind === "item" ? "items" : "outfits"}`}
-                className="w-full rounded-full border border-ink/10 bg-white py-1.5 pl-3 pr-8 text-xs focus:border-accent/40 focus:outline-none focus:ring-2 focus:ring-accent/40"
+                className="w-full rounded-full border border-ink/10 bg-surface py-1.5 pl-3 pr-8 text-xs focus:border-accent/40 focus:outline-none focus:ring-2 focus:ring-accent/40"
               />
               {query ? (
                 <button
@@ -179,7 +176,7 @@ export function ShareClient({
 
         {/* bg-paper matches the page behind the card; the border is what
             defines the scroll area now that it no longer contrasts. */}
-        {kind !== "wishlist" && (
+        {kindRequiresTarget(kind) && (
           <div className="mt-5 max-h-64 overflow-y-auto rounded-xl border border-ink/10 bg-paper p-2">
             {targets.length === 0 ? (
               <p className="p-4 text-sm text-ink-muted">
@@ -199,7 +196,7 @@ export function ShareClient({
                       }`}
                     >
                       {t.imagePath ? (
-                        <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-white">
+                        <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-surface">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={thumbnailUrl(t.imagePath)}
@@ -215,7 +212,7 @@ export function ShareClient({
                           />
                         </span>
                       ) : (
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface">
                           <Icon name="hanger" className="h-4 w-4 text-ink-muted" />
                         </span>
                       )}
@@ -337,7 +334,7 @@ function ShareSheet({
   }
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-6 shadow-tile">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-tile">
       <h2 className="font-serif text-2xl">Send it</h2>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <code className="min-w-0 flex-1 truncate rounded-xl bg-paper-warm px-3 py-2 text-xs">
@@ -360,7 +357,7 @@ function ShareSheet({
               type="button"
               onClick={() => run(d)}
               title={d.note ?? d.label}
-              className="flex w-full flex-col items-center gap-2 rounded-xl border border-ink/10 bg-white px-2 py-4 transition hover:border-ink/25 hover:bg-paper-warm"
+              className="flex w-full flex-col items-center gap-2 rounded-xl border border-ink/10 bg-surface px-2 py-4 transition hover:border-ink/25 hover:bg-paper-warm"
             >
               <Icon name={d.icon} className="h-5 w-5 text-ink" />
               <span className="text-[11px] text-ink-muted">
@@ -371,7 +368,7 @@ function ShareSheet({
         ))}
       </ul>
 
-      {kind !== "wishlist" && (
+      {kindRequiresTarget(kind) && (
         <div className="mt-6 border-t border-ink/10 pt-5">
           <h3 className="text-[11px] uppercase tracking-wide text-ink-muted">
             Selling it instead?
@@ -388,7 +385,7 @@ function ShareSheet({
                   target="_blank"
                   rel="noopener noreferrer"
                   title={m.note ?? `List on ${m.label}`}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-ink/10 bg-white px-3 py-1.5 text-xs text-ink transition hover:border-ink/30"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-ink/10 bg-surface px-3 py-1.5 text-xs text-ink transition hover:border-ink/30"
                 >
                   <Icon name="storefront" className="h-3.5 w-3.5 text-ink-muted" />
                   {m.label}
@@ -427,11 +424,11 @@ function LinkRow({
     <li>
       <article
         className={`flex flex-wrap items-center gap-3 rounded-2xl border p-3 ${
-          row.revoked ? "border-ink/10 bg-paper-warm opacity-70" : "border-ink/10 bg-white"
+          row.revoked ? "border-ink/10 bg-paper-warm opacity-70" : "border-ink/10 bg-surface"
         }`}
       >
         <Icon
-          name={row.kind === "wishlist" ? "heart" : row.kind === "outfit" ? "hanger" : "tag"}
+          name={SHARE_ROW_ICON[row.kind] ?? "tag"}
           className="h-4 w-4 shrink-0 text-ink-muted"
         />
         <div className="min-w-0 flex-1">
@@ -483,3 +480,30 @@ function LinkRow({
     </li>
   );
 }
+
+/**
+ * Which kinds have nothing to point at.
+ *
+ * `space` is never disabled: a closet with nothing in it still has a truthful
+ * ledger (nothing in, nothing out), so there is no state in which the card
+ * would be empty or misleading.
+ */
+function kindDisabled(
+  kind: ShareKind,
+  itemCount: number,
+  outfitCount: number,
+  wishlistCount: number,
+): boolean {
+  if (kind === "item") return itemCount === 0;
+  if (kind === "outfit") return outfitCount === 0;
+  if (kind === "wishlist") return wishlistCount === 0;
+  return false;
+}
+
+/** Icon per kind in the links list. */
+const SHARE_ROW_ICON: Record<ShareKind, string> = {
+  item: "tag",
+  outfit: "hanger",
+  wishlist: "heart",
+  space: "ruler",
+};

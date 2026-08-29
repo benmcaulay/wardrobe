@@ -1,10 +1,19 @@
 # MAKING SPACE
 
-Your personal digital closet with **AI-powered ghost-mannequin photos**
-and **virtual try-on**. Upload clothing pictures and get back clean,
-professional studio-style images — the kind you'd see on a product page —
-or upload a few photos of yourself and see how a saved outfit looks on you,
-without a photographer.
+**Own less of it, wear more of it.**
+
+A personal digital closet with **AI-powered ghost-mannequin photos** and
+**virtual try-on**. Upload clothing pictures and get back clean, professional
+studio-style images — the kind you'd see on a product page — or upload a few
+photos of yourself and see how a saved outfit looks on you, without a
+photographer.
+
+Then the other half: the **Space** ledger (`/closet/space`) reports what came in,
+what went out, and roughly how much hanging rail that freed — four separate
+figures, never fused into a score. The closet grid holds a piece's slot open for
+a beat before closing it, the **Rail** view lays the closet out on a
+time-since-worn axis so the gaps are visible, and the app has a night backdrop
+called **Space** to go with the name.
 
 Background removal runs for real, free, client-side via
 `@imgly/background-removal`. Ghost mannequin generation runs for real on
