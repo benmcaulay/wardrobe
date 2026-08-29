@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import { prisma } from "@/lib/db";
 import { encode, parseStylePrefs } from "@/lib/json";
 import { NONE_CATEGORY } from "@/lib/categories";
-import { getPrimaryOwnerId } from "@/lib/owners";
+import { getOwnersFromPrefs, getPrimaryOwnerId, sanitizeOwnerIds } from "@/lib/owners";
+import { DEFAULT_SCAN_SCENE, type ScanSceneType } from "@/lib/scan-scene";
 import { checkAiQuota } from "@/lib/ai-guardrails";
 import {
   detectGarmentBounds,
@@ -60,6 +61,7 @@ async function workItemToReview(
   work: GarmentWorkItem,
   sourcePhotoPath: string,
   closetIndex: ClosetHashEntry[],
+  ownerIds: string[],
   splitGroupId?: string,
 ): Promise<CameraRollScanItemResult> {
   // Hash the crop so commit can persist it and so we can flag pieces already
@@ -75,6 +77,7 @@ async function workItemToReview(
     originalImagePath: work.garmentImagePath,
     sourcePhotoPath,
     splitGroupId,
+    ownerIds,
     // The garment is isolated from a multi-item scene, so its ghost needs the
     // "ignore other pieces" instruction. Persisted so commit can pass it on.
     isolatedCrop: work.isDerivedCrop || undefined,
@@ -103,7 +106,10 @@ export async function processScanPhotoForReview(
   userId: string,
   originalImagePath: string,
   closetIndex: ClosetHashEntry[] = [],
+  options: { sceneType?: ScanSceneType; ownerIds?: string[] } = {},
 ): Promise<CameraRollScanItemResult[]> {
+  const sceneType = options.sceneType ?? DEFAULT_SCAN_SCENE;
+  const ownerIds = options.ownerIds ?? [];
   const reviewId = crypto.randomUUID();
 
   if (!originalImagePath.startsWith(`${userId}/`)) {
@@ -132,16 +138,26 @@ export async function processScanPhotoForReview(
     return [{ reviewId, originalImagePath, status: "failed", error: quota.error }];
   }
 
-  const detection = await detectGarmentsInPhoto(originalImagePath);
+  const detection = await detectGarmentsInPhoto(originalImagePath, sceneType);
   if (!detection.isGarment || detection.garments.length === 0) {
     await deleteUpload(originalImagePath).catch(() => undefined);
-    return [{ reviewId, originalImagePath, status: "skipped", reason: "Not clothing" }];
+    return [
+      {
+        reviewId,
+        originalImagePath,
+        status: "skipped",
+        scene: detection.scene,
+        reason: detection.skipReason || "Not clothing",
+      },
+    ];
   }
 
   const splitGroupId = detection.garments.length > 1 ? crypto.randomUUID() : undefined;
   const workItems = await resolveGarmentWorkItems(userId, originalImagePath, detection.garments);
   return Promise.all(
-    workItems.map((work) => workItemToReview(work, originalImagePath, closetIndex, splitGroupId)),
+    workItems.map((work) =>
+      workItemToReview(work, originalImagePath, closetIndex, ownerIds, splitGroupId),
+    ),
   );
 }
 
@@ -150,6 +166,8 @@ export type CommitScanReviewSelection = {
   name: string;
   category: string;
   include: boolean;
+  /** Owner roster ids chosen in review; falls back to the batch declaration. */
+  ownerIds?: string[];
 };
 
 export type CommitScanReviewResult = {
@@ -181,7 +199,9 @@ export async function commitScanReview(
     where: { id: userId },
     select: { stylePrefs: true },
   });
-  const primaryOwnerId = getPrimaryOwnerId(parseStylePrefs(dbUser?.stylePrefs));
+  const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  const primaryOwnerId = getPrimaryOwnerId(prefs);
+  const validOwnerIds = getOwnersFromPrefs(prefs).map((o) => o.id);
 
   for (const item of jobResult.items) {
     if (item.status !== "ready") {
@@ -192,6 +212,11 @@ export async function commitScanReview(
     const include = sel?.include ?? false;
     const name = sel?.name.trim() || item.name?.trim() || "Imported piece";
     const category = sel?.category?.trim() || item.category || NONE_CATEGORY;
+    // Review wins, then whatever the batch was declared for, then the roster
+    // default. Only the last of those is a guess.
+    const owners = sanitizeOwnerIds(sel?.ownerIds ?? item.ownerIds ?? [], validOwnerIds, [
+      primaryOwnerId,
+    ]);
 
     if (!include) {
       await discardReviewItem(userId, item);
@@ -215,7 +240,7 @@ export async function commitScanReview(
         material: item.material ?? null,
         styleTags: encode([]),
         season: encode([]),
-        owners: encode([primaryOwnerId]),
+        owners: encode(owners),
         originalImagePath: item.originalImagePath,
         dHash: item.dHash ?? null,
       },

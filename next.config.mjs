@@ -11,7 +11,17 @@ const nextConfig = {
     // fails the parse. It is only ever used in the browser worker, so keep it
     // external and let the runtime resolve it if anything server-side ever
     // touches it (nothing does).
-    serverComponentsExternalPackages: ["@sentry/node", "@huggingface/transformers"],
+    //
+    // onnxruntime-node is here for the same reason but is genuinely used
+    // server-side, by the Mode B face gate in lib/face/. A dynamic import() is
+    // not enough on its own — webpack still statically resolves the request and
+    // chokes on the .node binary, reached via
+    // camera-roll-scan action → kick-drain → worker → runner → face/gate.
+    serverComponentsExternalPackages: [
+      "@sentry/node",
+      "@huggingface/transformers",
+      "onnxruntime-node",
+    ],
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {

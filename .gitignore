@@ -45,3 +45,6 @@ pnpm-debug.log*
 
 # typescript
 *.tsbuildinfo
+
+# staged face models (pnpm face:fetch)
+.models/

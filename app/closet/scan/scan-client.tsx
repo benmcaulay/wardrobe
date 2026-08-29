@@ -12,7 +12,15 @@ import {
   uploadScanBatch,
 } from "@/lib/actions/camera-roll-scan";
 import { MAX_SCAN_PHOTOS, MAX_UPLOAD_BATCH } from "@/lib/camera-roll-scan-limits";
+import type { Owner } from "@/lib/json";
 import type { CameraRollScanItemResult, CameraRollScanProgress } from "@/lib/jobs/queue";
+import { DEFAULT_OWNERS } from "@/lib/owners";
+import {
+  DEFAULT_SCAN_SCENE,
+  SCAN_SCENE_TYPES,
+  SCENE_COPY,
+  type ScanSceneType,
+} from "@/lib/scan-scene";
 import {
   IMAGE_UPLOAD_ACCEPT,
   isAllowedImageUpload,
@@ -25,9 +33,17 @@ type Props = {
   credits: number;
   realGhost: boolean;
   categories: string[];
+  owners?: Owner[];
 };
 
-type Phase = "pick" | "uploading" | "scanning" | "review" | "done";
+/**
+ * "declare" comes before "pick" on purpose. The instruction that makes this
+ * work — *select photos of yourself, where the clothes are clearly visible* —
+ * was previously a sentence of helper text next to the button, and instructions
+ * next to a button get skipped. It is a step with its own screen because that
+ * is the only version users actually read.
+ */
+type Phase = "declare" | "pick" | "uploading" | "scanning" | "review" | "done";
 
 type ReviewDraft = {
   reviewId: string;
@@ -40,6 +56,7 @@ type ReviewDraft = {
   splitGroupId?: string;
   alreadyInCloset?: boolean;
   duplicateOfName?: string;
+  ownerIds: string[];
 };
 
 type ReviewSection = {
@@ -86,7 +103,10 @@ function readyItems(result: CameraRollScanProgress): CameraRollScanItemResult[] 
   return result.items.filter((i) => i.status === "ready");
 }
 
-function draftsFromResult(result: CameraRollScanProgress): ReviewDraft[] {
+function draftsFromResult(
+  result: CameraRollScanProgress,
+  fallbackOwnerIds: string[],
+): ReviewDraft[] {
   const seenGroups = new Set<string>();
   return readyItems(result).map((item) => {
     // Pieces already in the closet start unchecked; the user can still opt in.
@@ -106,12 +126,30 @@ function draftsFromResult(result: CameraRollScanProgress): ReviewDraft[] {
       splitGroupId: item.splitGroupId,
       alreadyInCloset: item.alreadyInCloset,
       duplicateOfName: item.duplicateOfName,
+      // A resumed scan carries its own declaration; a fresh one uses what is
+      // selected on screen right now.
+      ownerIds: item.ownerIds?.length ? item.ownerIds : fallbackOwnerIds,
     };
   });
 }
 
-export function ScanClient({ credits: initialCredits, realGhost, categories }: Props) {
-  const [phase, setPhase] = useState<Phase>("pick");
+export function ScanClient({
+  credits: initialCredits,
+  realGhost,
+  categories,
+  owners = DEFAULT_OWNERS,
+}: Props) {
+  const ownerRoster = owners.length > 0 ? owners : DEFAULT_OWNERS;
+  const [phase, setPhase] = useState<Phase>("declare");
+  const [sceneType, setSceneType] = useState<ScanSceneType>(DEFAULT_SCAN_SCENE);
+  const [batchOwnerIds, setBatchOwnerIds] = useState<string[]>(() =>
+    ownerRoster[0] ? [ownerRoster[0].id] : [],
+  );
+  // Mode B: uploaded reference-photo paths, keyed by owner. Empty = Mode A.
+  const [references, setReferences] = useState<Record<string, string[]>>({});
+  const [referenceOwner, setReferenceOwner] = useState<string | null>(null);
+  const [uploadingRef, setUploadingRef] = useState<string | null>(null);
+  const refInputRef = useRef<HTMLInputElement>(null);
   const [credits, setCredits] = useState(initialCredits);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<CameraRollScanProgress | null>(null);
@@ -131,7 +169,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
   function enterReview(jobId: string, result: CameraRollScanProgress) {
     setReviewJobId(jobId);
     setScanResult(result);
-    setDrafts(draftsFromResult(result));
+    setDrafts(draftsFromResult(result, batchOwnerIds));
     setSplitGroups(new Set());
     setPhase("review");
     sessionStorage.setItem(SCAN_REVIEW_JOB_KEY, jobId);
@@ -224,7 +262,14 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
       allPaths.push(...res.paths);
     }
 
-    const start = await startCameraRollScan(allPaths);
+    const referenceList = batchOwnerIds
+      .map((ownerId) => ({ ownerId, paths: references[ownerId] ?? [] }))
+      .filter((r) => r.paths.length > 0);
+    const start = await startCameraRollScan(allPaths, {
+      sceneType,
+      ownerIds: batchOwnerIds,
+      references: referenceList,
+    });
     if (!start.ok) {
       setError(start.error);
       setPhase("pick");
@@ -239,6 +284,33 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
       items: [],
     });
     startPolling(start.jobId);
+  }
+
+  /**
+   * Upload reference photos for one owner.
+   *
+   * They go through the same uploadScanBatch path as scan photos so the server
+   * can verify ownership by prefix. They are never classified, never imported,
+   * and the vectors derived from them are discarded when the job ends.
+   */
+  async function onReferenceFilesSelected(ownerId: string, files: FileList | null) {
+    const list = imageFilesFromList(files ?? []).slice(0, MAX_UPLOAD_BATCH);
+    if (list.length === 0) return;
+    setUploadingRef(ownerId);
+    setError(null);
+    try {
+      const formData = new FormData();
+      for (const file of list) formData.append("images", file);
+      const res = await uploadScanBatch(formData);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setReferences((prev) => ({ ...prev, [ownerId]: [...(prev[ownerId] ?? []), ...res.paths] }));
+    } finally {
+      setUploadingRef(null);
+      if (refInputRef.current) refInputRef.current.value = "";
+    }
   }
 
   async function onFilesSelected(files: FileList | null) {
@@ -258,6 +330,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
           name: d.name,
           category: d.category,
           include: d.include,
+          ownerIds: d.ownerIds,
         })),
       );
       if (!res.ok) {
@@ -293,7 +366,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
 
   function resetScan() {
     pollRef.current += 1;
-    setPhase("pick");
+    setPhase("declare");
     setError(null);
     setProgress(null);
     setScanResult(null);
@@ -301,6 +374,8 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
     setDrafts([]);
     setImportSummary(null);
     setUploadLabel("");
+    setReferences({});
+    setReferenceOwner(null);
     sessionStorage.removeItem(SCAN_REVIEW_JOB_KEY);
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -416,6 +491,194 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
 
   return (
     <div className="space-y-8">
+      {phase === "declare" && (
+        <section className="rounded-2xl border border-ink/10 bg-surface p-8 space-y-8">
+          <div className="space-y-2">
+            <h2 className="font-serif text-2xl">Before you pick photos</h2>
+            <p className="text-sm text-ink-muted">
+              Two questions, so we read the right clothes off the right person.
+            </p>
+          </div>
+
+          <fieldset className="space-y-3">
+            <legend className="text-xs uppercase tracking-wide text-ink-muted mb-2">
+              What are these photos?
+            </legend>
+            {SCAN_SCENE_TYPES.map((option) => {
+              const copy = SCENE_COPY[option];
+              const checked = sceneType === option;
+              return (
+                <label
+                  key={option}
+                  className={`flex cursor-pointer gap-3 rounded-xl border p-4 transition ${
+                    checked
+                      ? "border-ink bg-paper-warm"
+                      : "border-ink/10 bg-surface hover:border-ink/30"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="scan-scene"
+                    className="sr-only"
+                    checked={checked}
+                    onChange={() => setSceneType(option)}
+                  />
+                  <span
+                    aria-hidden
+                    className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border transition ${
+                      checked ? "border-ink bg-ink" : "border-ink/30"
+                    }`}
+                  />
+                  <span className="space-y-1">
+                    <span className="block text-sm">{copy.label}</span>
+                    <span className="block text-xs text-ink-muted">{copy.blurb}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+
+          <fieldset className="space-y-3">
+            <legend className="text-xs uppercase tracking-wide text-ink-muted mb-2">
+              Whose clothes are these?
+            </legend>
+            <div className="flex flex-wrap gap-2">
+              {ownerRoster.map((owner) => {
+                const checked = batchOwnerIds.includes(owner.id);
+                return (
+                  <label
+                    key={owner.id}
+                    className={`cursor-pointer rounded-full border px-3 py-1 text-xs capitalize transition ${
+                      checked
+                        ? "bg-ink text-paper border-ink"
+                        : "bg-surface border-ink/10 text-ink hover:border-ink/30"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={checked}
+                      onChange={(e) =>
+                        setBatchOwnerIds((prev) =>
+                          e.target.checked
+                            ? [...prev, owner.id]
+                            : prev.filter((id) => id !== owner.id),
+                        )
+                      }
+                    />
+                    {owner.name}
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-ink-muted">
+              Applied to everything in this batch. You can change it per piece in review.
+            </p>
+          </fieldset>
+
+          {sceneType === "worn" && (
+            <fieldset className="space-y-3">
+              <legend className="text-xs uppercase tracking-wide text-ink-muted mb-2">
+                Scanning a whole batch? <span className="normal-case">(optional)</span>
+              </legend>
+              <p className="text-xs text-ink-muted">
+                Add a few photos of <em>just</em> one person and we&apos;ll keep only the photos
+                they&apos;re the subject of. The reference photos are used for this scan and then
+                discarded — no face data is stored.
+              </p>
+              <input
+                ref={refInputRef}
+                type="file"
+                accept={IMAGE_UPLOAD_ACCEPT}
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (referenceOwner) void onReferenceFilesSelected(referenceOwner, e.target.files);
+                }}
+              />
+              <div className="space-y-2">
+                {ownerRoster
+                  .filter((o) => batchOwnerIds.includes(o.id))
+                  .map((owner) => {
+                    const count = references[owner.id]?.length ?? 0;
+                    const busy = uploadingRef === owner.id;
+                    return (
+                      <div
+                        key={owner.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper-warm px-3 py-2"
+                      >
+                        <span className="text-sm">
+                          <span className="capitalize">{owner.name}</span>
+                          <span className="text-ink-muted">
+                            {" · "}
+                            {count === 0
+                              ? "no reference photos"
+                              : `${count} reference photo${count === 1 ? "" : "s"}`}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          {count > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setReferences((prev) => {
+                                  const next = { ...prev };
+                                  delete next[owner.id];
+                                  return next;
+                                })
+                              }
+                              className="text-[11px] text-ink-muted underline underline-offset-2 hover:text-ink"
+                            >
+                              Clear
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              setReferenceOwner(owner.id);
+                              refInputRef.current?.click();
+                            }}
+                            className="rounded-full border border-ink/15 px-3 py-1 text-xs hover:border-ink/40 transition disabled:opacity-40"
+                          >
+                            {busy ? "Uploading…" : count > 0 ? "Add more" : "Add photos"}
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+              {Object.values(references).some((p) => p.length > 0) && (
+                <p className="text-xs text-ink-muted">
+                  Photos where nobody enrolled is the main subject will be skipped before we spend
+                  any credits on them.
+                </p>
+              )}
+            </fieldset>
+          )}
+
+          <div className="rounded-xl border border-ink/10 bg-paper-warm p-4">
+            <p className="text-xs uppercase tracking-wide text-ink-muted mb-1">Then pick photos</p>
+            <p className="text-sm">{SCENE_COPY[sceneType].instruction}</p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setPhase("pick");
+            }}
+            disabled={batchOwnerIds.length === 0}
+            className="rounded-full bg-ink text-paper px-8 py-3 text-sm tracking-wide hover:bg-ink-soft transition disabled:opacity-40 disabled:pointer-events-none"
+          >
+            Continue
+          </button>
+          {batchOwnerIds.length === 0 && (
+            <p className="text-xs text-ink-muted">Pick at least one owner to continue.</p>
+          )}
+        </section>
+      )}
+
       {phase === "pick" && (
         <>
           <section
@@ -435,6 +698,9 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
           >
             <p className="font-serif text-2xl">Drop photos here</p>
             <p className="text-sm text-ink-muted max-w-md mx-auto">
+              {SCENE_COPY[sceneType].instruction}
+            </p>
+            <p className="text-xs text-ink-muted max-w-md mx-auto">
               We&apos;ll detect garments so you can review before anything is saved — ghost-mannequin
               shots are generated after import, only for the pieces you keep.
             </p>
@@ -461,13 +727,27 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
             >
               Choose photos…
             </button>
+            <p className="text-xs text-ink-muted">
+              {SCENE_COPY[sceneType].label} ·{" "}
+              {ownerRoster
+                .filter((o) => batchOwnerIds.includes(o.id))
+                .map((o) => o.name)
+                .join(" + ") || "No owner"}{" "}
+              <button
+                type="button"
+                onClick={() => setPhase("declare")}
+                className="underline underline-offset-2 hover:text-ink"
+              >
+                Change
+              </button>
+            </p>
           </section>
           <MacPhotosHelp />
         </>
       )}
 
       {phase === "uploading" && (
-        <section className="rounded-2xl border border-ink/10 bg-white p-8 text-center space-y-4">
+        <section className="rounded-2xl border border-ink/10 bg-surface p-8 text-center space-y-4">
           <p className="text-sm text-ink-muted">{uploadLabel}</p>
           <Link
             href="/closet"
@@ -567,6 +847,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
                       drafts={section.drafts}
                       split={splitGroups.has(section.key)}
                       categories={categories}
+                      owners={ownerRoster}
                       onSplitToggle={() => toggleSplitGroup(section.key)}
                       onSelectPrimary={(reviewId) => selectPrimaryInGroup(section.key, reviewId)}
                       onPatch={patchDraftInGroup}
@@ -586,6 +867,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
                       key={section.key}
                       draft={section.drafts[0]!}
                       categories={categories}
+                      owners={ownerRoster}
                       onPatch={patchDraft}
                       onRemove={removeDraft}
                     />
@@ -683,6 +965,7 @@ export function ScanClient({ credits: initialCredits, realGhost, categories }: P
 type ReviewFieldProps = {
   draft: ReviewDraft;
   categories: string[];
+  owners: Owner[];
   onPatch: (reviewId: string, patch: Partial<ReviewDraft>) => void;
 };
 
@@ -694,14 +977,14 @@ function RemoveButton({ onClick, title = "Remove from scan" }: { onClick: () => 
       onClick={onClick}
       title={title}
       aria-label={title}
-      className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-ink/15 bg-white text-ink-muted hover:border-red-300 hover:text-red-700 hover:bg-red-50 transition text-sm leading-none"
+      className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-ink/15 bg-surface text-ink-muted hover:border-red-300 hover:text-red-700 hover:bg-red-50 transition text-sm leading-none"
     >
       ×
     </button>
   );
 }
 
-function ReviewFields({ draft, categories, onPatch }: ReviewFieldProps) {
+function ReviewFields({ draft, categories, owners, onPatch }: ReviewFieldProps) {
   return (
     <div className="flex-1 min-w-0 space-y-2">
       {draft.alreadyInCloset && (
@@ -727,6 +1010,35 @@ function ReviewFields({ draft, categories, onPatch }: ReviewFieldProps) {
           </option>
         ))}
       </select>
+      <div className="flex flex-wrap gap-1.5">
+        {owners.map((owner) => {
+          const checked = draft.ownerIds.includes(owner.id);
+          return (
+            <label
+              key={owner.id}
+              className={`cursor-pointer rounded-full border px-2 py-0.5 text-[11px] capitalize transition ${
+                checked
+                  ? "bg-ink text-paper border-ink"
+                  : "bg-surface border-ink/10 text-ink-muted hover:border-ink/30"
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={checked}
+                onChange={(e) =>
+                  onPatch(draft.reviewId, {
+                    ownerIds: e.target.checked
+                      ? [...draft.ownerIds, owner.id]
+                      : draft.ownerIds.filter((id) => id !== owner.id),
+                  })
+                }
+              />
+              {owner.name}
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -734,13 +1046,14 @@ function ReviewFields({ draft, categories, onPatch }: ReviewFieldProps) {
 function SingleReviewItem({
   draft,
   categories,
+  owners,
   onPatch,
   onRemove,
 }: ReviewFieldProps & { onRemove: (reviewId: string) => void }) {
   return (
     <li
       className={`relative rounded-xl border p-3 space-y-2 transition ${
-        draft.include ? "border-ink/15 bg-white" : "border-ink/10 bg-paper-warm/50 opacity-80"
+        draft.include ? "border-ink/15 bg-surface" : "border-ink/10 bg-paper-warm/50 opacity-80"
       }`}
     >
       <RemoveButton onClick={() => onRemove(draft.reviewId)} />
@@ -760,7 +1073,7 @@ function SingleReviewItem({
             className="w-full h-full object-cover"
           />
         </div>
-        <ReviewFields draft={draft} categories={categories} onPatch={onPatch} />
+        <ReviewFields draft={draft} categories={categories} owners={owners} onPatch={onPatch} />
       </div>
     </li>
   );
@@ -771,6 +1084,7 @@ type DuplicateGroupReviewProps = {
   drafts: ReviewDraft[];
   split: boolean;
   categories: string[];
+  owners: Owner[];
   onSplitToggle: () => void;
   onSelectPrimary: (reviewId: string) => void;
   onPatch: (reviewId: string, patch: Partial<ReviewDraft>) => void;
@@ -784,6 +1098,7 @@ function DuplicateGroupReview({
   drafts,
   split,
   categories,
+  owners,
   onSplitToggle,
   onSelectPrimary,
   onPatch,
@@ -827,7 +1142,7 @@ function DuplicateGroupReview({
       {split ? (
         <ul className="space-y-2">
           {drafts.map((draft) => (
-            <li key={draft.reviewId} className="relative flex gap-3 rounded-lg border border-ink/10 bg-white/60 p-2 pr-9">
+            <li key={draft.reviewId} className="relative flex gap-3 rounded-lg border border-ink/10 bg-surface/60 p-2 pr-9">
               <RemoveButton onClick={() => onRemove(draft.reviewId)} />
               <input
                 type="checkbox"
@@ -845,7 +1160,7 @@ function DuplicateGroupReview({
                 />
               </div>
               <div className="flex-1 min-w-0 space-y-2">
-                <ReviewFields draft={draft} categories={categories} onPatch={onPatch} />
+                <ReviewFields draft={draft} categories={categories} owners={owners} onPatch={onPatch} />
                 <button
                   type="button"
                   onClick={() => onUngroupItem(draft.reviewId)}
@@ -866,7 +1181,7 @@ function DuplicateGroupReview({
                 <label
                   className={`block cursor-pointer rounded-lg border p-1 transition ${
                     draft.include
-                      ? "border-accent ring-2 ring-accent/30 bg-white"
+                      ? "border-accent ring-2 ring-accent/30 bg-surface"
                       : "border-ink/10 bg-paper-warm/60 hover:border-ink/25"
                   }`}
                 >
@@ -891,7 +1206,7 @@ function DuplicateGroupReview({
                   onClick={() => onRemove(draft.reviewId)}
                   title="Remove from scan"
                   aria-label="Remove from scan"
-                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-ink/15 bg-white text-[11px] leading-none text-ink-muted hover:border-red-300 hover:text-red-700 hover:bg-red-50 transition"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-ink/15 bg-surface text-[11px] leading-none text-ink-muted hover:border-red-300 hover:text-red-700 hover:bg-red-50 transition"
                 >
                   ×
                 </button>
@@ -900,7 +1215,12 @@ function DuplicateGroupReview({
           </div>
           <div className="flex gap-3">
             <div className="w-16 h-20 rounded-lg overflow-hidden bg-paper-warm shrink-0 opacity-0 pointer-events-none" />
-            <ReviewFields draft={selected} categories={categories} onPatch={onPatch} />
+            <ReviewFields
+              draft={selected}
+              categories={categories}
+              owners={owners}
+              onPatch={onPatch}
+            />
           </div>
         </>
       )}
@@ -910,7 +1230,7 @@ function DuplicateGroupReview({
 
 function MacPhotosHelp() {
   return (
-    <details className="rounded-2xl border border-ink/10 bg-white p-4 text-sm">
+    <details className="rounded-2xl border border-ink/10 bg-surface p-4 text-sm">
       <summary className="cursor-pointer font-medium text-ink select-none">
         Using Apple Photos on Mac
       </summary>
@@ -935,7 +1255,7 @@ function MacPhotosHelp() {
             (<code className="text-[11px]">pip install osxphotos</code>), grant Terminal access under{" "}
             <strong className="text-ink">System Settings → Privacy → Photos</strong>, then run:
           </p>
-          <pre className="text-[11px] bg-white border border-ink/10 rounded-lg p-3 overflow-x-auto text-left">
+          <pre className="text-[11px] bg-surface border border-ink/10 rounded-lg p-3 overflow-x-auto text-left">
             {`WARDROBE_USER_EMAIL=you@example.com pnpm mac-photos:scan
 
 # optional filters:

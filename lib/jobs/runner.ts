@@ -3,6 +3,7 @@
  * outcome. This is the single place try-on generation actually happens (worker
  * and any inline caller share it), so credit accounting lives here exactly once.
  */
+import { randomUUID } from "node:crypto";
 import type { GenerationJob } from "@prisma/client";
 import { prisma } from "../db";
 import { encode } from "../json";
@@ -22,6 +23,7 @@ import {
   tallyScanProgress,
 } from "../server/camera-roll-scan";
 import { assignDuplicateGroups } from "../server/scan-duplicate-groups";
+import { buildFaceGate, faceSkipReason } from "../face/gate";
 import { loadClosetHashIndex } from "../server/scan-closet-index";
 import {
   markJobSucceeded,
@@ -216,12 +218,46 @@ async function runCameraRollScan(
   // re-scans of already-imported photos and flag per-garment duplicates.
   const closetIndex = await loadClosetHashIndex(userId);
 
+  // Mode B: an in-memory face gate built from the user's hand-picked reference
+  // photos. Null when the scan is Mode A, when no reference yielded exactly one
+  // face, or when the models are not staged — in every one of those cases the
+  // scan proceeds unfiltered rather than silently importing nothing.
+  const faceGate = payload.references?.length
+    ? await buildFaceGate(payload.references)
+    : null;
+
   // Bounded-concurrency pool: each worker pulls the next photo until drained,
   // pushing results and emitting progress as photos complete.
   async function worker() {
     while (cursor < total) {
       const photoPath = payload.photoPaths[cursor++]!;
-      const batch = await processScanPhotoForReview(userId, photoPath, closetIndex);
+
+      // The gate runs BEFORE processScanPhotoForReview so a rejected photo
+      // never reaches the paid classifier. That ordering is the whole cost
+      // argument for Mode B.
+      let batch: CameraRollScanProgress["items"];
+      const gated = faceGate ? await faceGate.evaluate(photoPath) : null;
+      if (gated && gated.ownerId === null) {
+        batch = [
+          {
+            reviewId: randomUUID(),
+            originalImagePath: photoPath,
+            status: "skipped",
+            reason: faceSkipReason(gated),
+            faceSimilarity: gated.similarity || undefined,
+          },
+        ];
+      } else {
+        batch = await processScanPhotoForReview(userId, photoPath, closetIndex, {
+          sceneType: payload.sceneType,
+          // A matched owner overrides the batch declaration: the gate knows
+          // whose photo this actually is, the declaration was only a default.
+          ownerIds: gated?.ownerId ? [gated.ownerId] : payload.ownerIds,
+        });
+        if (gated) {
+          batch = batch.map((item) => ({ ...item, faceSimilarity: gated.similarity }));
+        }
+      }
       items.push(...batch);
       photosProcessed += 1;
       await updateJobProgress(jobId, {

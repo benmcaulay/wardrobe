@@ -30,7 +30,8 @@
     "eval:ranker": "tsx --env-file=.env scripts/eval-ranker.ts",
     "eval:catalog": "tsx --env-file=.env scripts/eval-catalog.ts",
     "audit:layout": "tsx --env-file=.env scripts/audit-layout.ts",
-    "map:build": "tsx scripts/build-world-map.ts"
+    "map:build": "tsx scripts/build-world-map.ts",
+    "face:fetch": "tsx scripts/fetch-face-models.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -61,6 +62,7 @@
     "motion": "^12.42.2",
     "next": "14.2.18",
     "next-auth": "4.24.14",
+    "onnxruntime-node": "^1.29.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-easy-crop": "^5.5.7",

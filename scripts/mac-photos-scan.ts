@@ -21,6 +21,7 @@ import { PrismaClient } from "@prisma/client";
 import { MAX_SCAN_PHOTOS } from "../lib/camera-roll-scan-limits";
 import { kickJobDrain } from "../lib/jobs/kick-drain";
 import { enqueueJob } from "../lib/jobs/queue";
+import { parseScanSceneType, type ScanSceneType } from "../lib/scan-scene";
 import { saveImageBuffer } from "../lib/uploads";
 
 const prisma = new PrismaClient();
@@ -37,12 +38,15 @@ type CliOptions = {
   fromDate?: string;
   toDate?: string;
   album?: string;
+  scene: ScanSceneType;
   dryRun: boolean;
 };
 
 function parseArgs(): CliOptions {
   const argv = process.argv.slice(2);
-  const opts: CliOptions = { dryRun: false };
+  // A Photos-library export is mostly life photos, so "worn" is the honest
+  // default here — the flat-lay prompt would discard exactly those.
+  const opts: CliOptions = { dryRun: false, scene: "worn" };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--dry-run") opts.dryRun = true;
@@ -51,6 +55,7 @@ function parseArgs(): CliOptions {
     else if (arg === "--from-date") opts.fromDate = argv[++i];
     else if (arg === "--to-date") opts.toDate = argv[++i];
     else if (arg === "--album") opts.album = argv[++i];
+    else if (arg === "--scene") opts.scene = parseScanSceneType(argv[++i]);
     else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: pnpm mac-photos:scan -- [options]
 
@@ -60,6 +65,7 @@ Options:
   --from-date <YYYY-MM-DD>
   --to-date <YYYY-MM-DD>
   --album <name>       Only photos in this album
+  --scene <worn|flatlay>  What the photos are (default: worn)
   --dry-run            List matching photos without uploading
   --help               Show this help
 `);
@@ -188,7 +194,10 @@ async function main() {
       const paths = await uploadExportedFiles(user.id, exported);
       if (paths.length === 0) continue;
 
-      const jobId = await enqueueJob(user.id, "camera_roll_scan", { photoPaths: paths });
+      const jobId = await enqueueJob(user.id, "camera_roll_scan", {
+        photoPaths: paths,
+        sceneType: opts.scene,
+      });
       jobIds.push(jobId);
       kickJobDrain(paths.length);
       console.log(`[mac-photos] Enqueued scan job ${jobId} (${paths.length} photos)`);

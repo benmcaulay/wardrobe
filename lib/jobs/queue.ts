@@ -6,6 +6,7 @@
 import type { GenerationJob } from "@prisma/client";
 import { prisma } from "../db";
 import { encode, decode } from "../json";
+import type { ObservedScene, ScanSceneType } from "../scan-scene";
 
 export type GenerationJobType =
   | "virtual_tryon"
@@ -69,6 +70,16 @@ export type GhostPreviewJobResult = {
 
 export type CameraRollScanPayload = {
   photoPaths: string[];
+  /** What the user said this batch is (Mode A). Absent on pre-Mode-A jobs. */
+  sceneType?: ScanSceneType;
+  /** Owner roster ids the batch was declared for; the review default. */
+  ownerIds?: string[];
+  /**
+   * Mode B: hand-picked reference photos per owner. Used to build an in-memory
+   * face centroid for the length of the job and then discarded — no template is
+   * ever persisted. Absent means Mode A (the user already filtered by hand).
+   */
+  references?: { ownerId: string; paths: string[] }[];
 };
 
 export type CameraRollScanItemResult = {
@@ -98,6 +109,12 @@ export type CameraRollScanItemResult = {
   duplicateOfName?: string;
   /** Original camera-roll upload before per-garment crop. */
   sourcePhotoPath?: string;
+  /** Owner roster ids this piece will be filed under; editable in review. */
+  ownerIds?: string[];
+  /** What the classifier reported seeing, for the skip reason and telemetry. */
+  scene?: ObservedScene;
+  /** Mode B: cosine against the matched owner's reference centroid. */
+  faceSimilarity?: number;
   reason?: string;
   error?: string;
 };

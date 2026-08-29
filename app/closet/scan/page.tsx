@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs, NONE_CATEGORY } from "@/lib/categories";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
+import { getOwnersFromPrefs } from "@/lib/owners";
 import { getScanReadiness } from "@/lib/actions/wear-scan";
 import { ScanModes } from "./scan-modes";
 
@@ -21,6 +22,7 @@ export default async function CameraRollScanPage() {
   ]);
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
   const categories = [NONE_CATEGORY, ...getCategoriesListFromPrefs(prefs)];
+  const owners = getOwnersFromPrefs(prefs);
   const realGhost = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
 
   return (
@@ -34,6 +36,7 @@ export default async function CameraRollScanPage() {
         credits={dbUser?.credits ?? 0}
         realGhost={realGhost}
         categories={categories}
+        owners={owners}
         embedded={readiness.embedded}
         total={readiness.total}
       />

@@ -6,6 +6,13 @@ import { normalizeColorName } from "../colors";
 import type { Color } from "../json";
 import { FAVORITE_COLOR_OPTIONS } from "../preferences";
 import { contentTypeFor, getObject, objectExists } from "../storage";
+import {
+  DEFAULT_SCAN_SCENE,
+  parseObservedScene,
+  shouldSkipScene,
+  type ObservedScene,
+  type ScanSceneType,
+} from "../scan-scene";
 import { geminiJson, geminiText, geminiTextConfigured } from "./gemini-text";
 
 export type GarmentClassification = {
@@ -60,10 +67,15 @@ function cleanAttr(raw: unknown): string | undefined {
 export type GarmentScanDetection = {
   isGarment: boolean;
   garments: DetectedGarment[];
+  /** What the model reported seeing, independent of what the user declared. */
+  scene?: ObservedScene;
   skipReason?: string;
 };
 
 type RawClassifierJson = {
+  /** Positive scene enum from the current prompt. */
+  scene?: string;
+  /** Legacy boolean from the pre-scene prompt; still honoured when present. */
   isGarment?: boolean;
   category?: string;
   name?: string;
@@ -91,22 +103,47 @@ type RawDetectObject = {
 
 const REAL_MODE = boolEnv("USE_REAL_GARMENT_CLASSIFIER", true);
 
-export const CLASSIFIER_PROMPT = `You are sorting photos for a digital wardrobe app.
+/** Scene-specific guidance prepended to the shared classifier prompt. */
+const SCENE_GUIDANCE: Record<ScanSceneType, string> = {
+  worn: `These photos show a PERSON WEARING the clothes. That is expected — catalogue what they are wearing.
 
-Look at this image and list every DISTINCT clothing item (garment, shoes, or wearable accessory) that could be catalogued separately.
+Catalogue only the garments worn by the MAIN SUBJECT: the largest, most central, most in-focus person. If other people are visible — beside them, behind them, in the background — ignore what those people are wearing. Never describe or identify any person; report only the clothing.`,
+  flatlay: `These photos show GARMENTS BY THEMSELVES — laid flat, on a hanger, piled on a bed, or spread out as a shopping haul.
+
+List each piece separately. Overlapping garments are still separate entries.`,
+};
+
+/**
+ * The classifier prompt, specialised by what the user said the batch is.
+ *
+ * The scene is reported back as a positive enum rather than filtered by a
+ * "skip X" instruction — see the note in `lib/scan-scene.ts` on why negation
+ * was doing no work here.
+ */
+export function classifierPrompt(scene: ScanSceneType): string {
+  return `You are sorting photos for a digital wardrobe app.
+
+${SCENE_GUIDANCE[scene]}
+
+List every DISTINCT clothing item (garment, shoes, or wearable accessory) that could be catalogued separately.
 
 Rules:
-- If the photo shows multiple items (outfit flat-lay, bed spread, shopping haul, closet pile), list EACH item separately.
-- If only ONE primary item is visible, return a garments array with one entry.
-- Skip selfies where a person is the subject, food, scenery, receipts, or photos with no catalogue clothing.
 - Do NOT merge separate pieces into one entry (e.g. shirt + pants = two garments).
+- Report what this photo actually is in "scene", using exactly one of:
+  - "worn"    — a person is wearing the clothes
+  - "flatlay" — garments shown by themselves
+  - "other"   — food, scenery, receipts, screenshots, pets, or anything with no catalogue clothing
 - For each item, also report its colors, pattern, and material:
   - "colors": 1-3 dominant colors, MOST dominant first, chosen ONLY from this list: ${COLOR_VOCAB.join(", ")}. Pick the closest match; omit if unclear.
   - "pattern": e.g. solid, striped, plaid, floral, graphic, checked — or omit if unclear.
   - "material": best guess, e.g. cotton, denim, leather, wool, knit — or omit if unclear.
 
 Reply with ONLY valid JSON (no markdown):
-{"isGarment":true|false,"garments":[{"category":"top"|"bottom"|"dress"|"outerwear"|"shoes"|"accessory"|"other","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"optional skip reason when isGarment is false"}`;
+{"scene":"worn"|"flatlay"|"other","garments":[{"category":"top"|"bottom"|"dress"|"outerwear"|"shoes"|"accessory"|"other","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"why there is nothing to catalogue, when scene is other"}`;
+}
+
+/** Back-compat export: the default (worn) prompt. */
+export const CLASSIFIER_PROMPT = classifierPrompt(DEFAULT_SCAN_SCENE);
 
 /** Map vision-model category labels to wardrobe DB categories. */
 export function mapClassifierCategory(raw: string | undefined): string {
@@ -270,15 +307,25 @@ export function normalizeScanDetection(raw: RawClassifierJson): GarmentScanDetec
   let garments = parsedGarments.length > 0 ? parsedGarments : legacyGarments;
   garments = dedupeGarments(garments);
 
-  const isGarment = !!raw.isGarment && garments.length > 0;
-  if (!isGarment) {
+  // Prefer the positive scene enum. `isGarment` is only consulted when the
+  // model omitted "scene" entirely and sent the legacy boolean instead, which
+  // keeps stored results from older scans parseable.
+  const scene =
+    raw.scene !== undefined
+      ? parseObservedScene(raw.scene)
+      : raw.isGarment === false
+        ? "other"
+        : parseObservedScene(undefined);
+
+  if (shouldSkipScene(scene, garments.length)) {
     return {
       isGarment: false,
       garments: [],
+      scene,
       skipReason: raw.reason?.trim() || "Not a catalogue garment",
     };
   }
-  return { isGarment: true, garments: garments.slice(0, 8) };
+  return { isGarment: true, garments: garments.slice(0, 8), scene };
 }
 
 function dedupeGarments(garments: DetectedGarment[]): DetectedGarment[] {
@@ -300,17 +347,20 @@ async function loadImage(key: string): Promise<{ buffer: Buffer; mime: string }>
   return { buffer: buf, mime: contentTypeFor(key) };
 }
 
-async function realClassifyGarment(imagePath: string): Promise<GarmentScanDetection> {
+async function realClassifyGarment(
+  imagePath: string,
+  scene: ScanSceneType,
+): Promise<GarmentScanDetection> {
   const image = await loadImage(imagePath);
   const startedAt = Date.now();
   let text: string;
   try {
-    text = await geminiText(CLASSIFIER_PROMPT, { images: [image] });
+    text = await geminiText(classifierPrompt(scene), { images: [image] });
   } catch (err) {
     log.error("garment.classifier.failed", err, { ms: Date.now() - startedAt });
     throw err;
   }
-  log.info("garment.classifier.ok", { provider: "gemini", ms: Date.now() - startedAt });
+  log.info("garment.classifier.ok", { provider: "gemini", ms: Date.now() - startedAt, scene });
 
   const parsed = parseClassifierJson(text);
   if (!parsed) {
@@ -377,7 +427,10 @@ function stubScanDetection(imagePath: string): GarmentScanDetection {
 /**
  * Detect all catalogue garments in a camera-roll photo.
  */
-export async function detectGarmentsInPhoto(imagePath: string): Promise<GarmentScanDetection> {
+export async function detectGarmentsInPhoto(
+  imagePath: string,
+  scene: ScanSceneType = DEFAULT_SCAN_SCENE,
+): Promise<GarmentScanDetection> {
   if (!(await objectExists(imagePath))) {
     return { isGarment: false, garments: [], skipReason: "Image missing" };
   }
@@ -385,7 +438,7 @@ export async function detectGarmentsInPhoto(imagePath: string): Promise<GarmentS
     return stubScanDetection(imagePath);
   }
   try {
-    return await realClassifyGarment(imagePath);
+    return await realClassifyGarment(imagePath, scene);
   } catch {
     return {
       isGarment: true,
@@ -398,8 +451,11 @@ export async function detectGarmentsInPhoto(imagePath: string): Promise<GarmentS
  * Decide whether a camera-roll photo is a catalogue garment and infer metadata.
  * Uses fal vision when enabled; stub accepts everything in dev.
  */
-export async function classifyGarmentImage(imagePath: string): Promise<GarmentClassification> {
-  const scan = await detectGarmentsInPhoto(imagePath);
+export async function classifyGarmentImage(
+  imagePath: string,
+  scene: ScanSceneType = DEFAULT_SCAN_SCENE,
+): Promise<GarmentClassification> {
+  const scan = await detectGarmentsInPhoto(imagePath, scene);
   return normalizeClassification({
     isGarment: scan.isGarment,
     garments: scan.garments,

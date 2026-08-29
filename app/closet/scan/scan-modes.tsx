@@ -19,6 +19,7 @@
  */
 
 import { useState } from "react";
+import type { Owner } from "@/lib/json";
 import { ScanClient } from "./scan-client";
 import { WearScanClient } from "./wear-scan-client";
 
@@ -40,12 +41,14 @@ export function ScanModes({
   credits,
   realGhost,
   categories,
+  owners,
   embedded,
   total,
 }: {
   credits: number;
   realGhost: boolean;
   categories: string[];
+  owners: Owner[];
   embedded: number;
   total: number;
 }) {
@@ -82,7 +85,12 @@ export function ScanModes({
       {/* Both stay mounted: a half-finished import review is expensive to lose,
           and flipping over to check the other mode shouldn't discard it. */}
       <div hidden={mode !== "import"}>
-        <ScanClient credits={credits} realGhost={realGhost} categories={categories} />
+        <ScanClient
+          credits={credits}
+          realGhost={realGhost}
+          categories={categories}
+          owners={owners}
+        />
       </div>
       <div hidden={mode !== "wears"}>
         <WearScanClient embedded={embedded} total={total} />

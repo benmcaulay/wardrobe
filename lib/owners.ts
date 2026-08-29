@@ -74,3 +74,25 @@ export function resolveItemOwnerIds(ids: readonly string[], primaryOwnerId: stri
   const clean = ids.map((s) => s.trim()).filter(Boolean);
   return clean.length > 0 ? clean : [primaryOwnerId];
 }
+
+/**
+ * Keep only ids that exist on the roster, in roster order, deduplicated.
+ *
+ * Anything arriving from a client or a job payload is untrusted: a stale tab
+ * can carry an owner the user has since deleted in Settings, and a bad payload
+ * could otherwise write an arbitrary string into `WardrobeItem.owners`, which
+ * would then show up as a phantom filter chip that matches nothing. Falls back
+ * rather than returning empty, because an item with no owner is invisible to
+ * every owner filter.
+ */
+export function sanitizeOwnerIds(
+  ids: readonly string[],
+  rosterIds: readonly string[],
+  fallback: readonly string[],
+): string[] {
+  const wanted = new Set(ids.map((s) => s.trim()).filter(Boolean));
+  const kept = rosterIds.filter((id) => wanted.has(id));
+  if (kept.length > 0) return kept;
+  const cleanFallback = fallback.map((s) => s.trim()).filter(Boolean);
+  return cleanFallback.length > 0 ? [...new Set(cleanFallback)] : [];
+}

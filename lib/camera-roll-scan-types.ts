@@ -1,4 +1,5 @@
 import type { CameraRollScanProgress, CameraRollScanResult } from "@/lib/jobs/queue";
+import type { ScanSceneType } from "@/lib/scan-scene";
 
 export type UploadScanBatchResponse =
   | { ok: true; paths: string[]; rejected: string[] }
@@ -23,6 +24,18 @@ export type CommitScanReviewItemInput = {
   name: string;
   category: string;
   include: boolean;
+  ownerIds?: string[];
+};
+
+/** What the user declared before the picker opened (Mode A). */
+export type StartScanOptions = {
+  sceneType: ScanSceneType;
+  ownerIds: string[];
+  /**
+   * Mode B: hand-picked reference photos per owner. Empty means Mode A — the
+   * user filtered by hand and no face model runs.
+   */
+  references?: { ownerId: string; paths: string[] }[];
 };
 
 export type CommitScanReviewResponse =

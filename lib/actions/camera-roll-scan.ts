@@ -11,14 +11,18 @@ import {
   getJobForUser,
   type CameraRollScanResult,
 } from "@/lib/jobs/queue";
+import { getOwnersFromPrefs, getPrimaryOwnerId, sanitizeOwnerIds } from "@/lib/owners";
+import { parseScanSceneType } from "@/lib/scan-scene";
 import { commitScanReview } from "@/lib/server/camera-roll-scan";
 import { assignDuplicateGroups } from "@/lib/server/scan-duplicate-groups";
 import { saveUpload, UploadError } from "@/lib/uploads";
+import { parseStylePrefs } from "@/lib/json";
 import type {
   ActiveScanJobResponse,
   CameraRollScanStatusResponse,
   CommitScanReviewItemInput,
   CommitScanReviewResponse,
+  StartScanOptions,
   StartCameraRollScanResponse,
   UploadScanBatchResponse,
 } from "@/lib/camera-roll-scan-types";
@@ -58,6 +62,7 @@ export async function uploadScanBatch(formData: FormData): Promise<UploadScanBat
 /** Enqueue background scan → classify → ghost (review before import). */
 export async function startCameraRollScan(
   photoPaths: string[],
+  options?: Partial<StartScanOptions>,
 ): Promise<StartCameraRollScanResponse> {
   const user = await requireUser();
   const unique = [...new Set(photoPaths.map((p) => p.trim()).filter(Boolean))];
@@ -73,7 +78,39 @@ export async function startCameraRollScan(
     }
   }
 
-  const jobId = await enqueueJob(user.id, "camera_roll_scan", { photoPaths: unique });
+  // Resolve the declared owners against the live roster here rather than
+  // trusting the client: the job payload outlives the tab that created it, and
+  // a roster entry can be deleted in Settings while a scan is queued.
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  const ownerIds = sanitizeOwnerIds(
+    options?.ownerIds ?? [],
+    getOwnersFromPrefs(prefs).map((o) => o.id),
+    [getPrimaryOwnerId(prefs)],
+  );
+
+  // Reference photos are validated the same way as scan photos: they were
+  // uploaded through uploadScanBatch, so they must live under this user's
+  // prefix. Owners are resolved against the live roster for the same reason.
+  const rosterIds = getOwnersFromPrefs(prefs).map((o) => o.id);
+  const references = (options?.references ?? [])
+    .map((ref) => ({
+      ownerId: ref.ownerId,
+      paths: [...new Set(ref.paths.map((p) => p.trim()).filter(Boolean))].filter((p) =>
+        p.startsWith(`${user.id}/`),
+      ),
+    }))
+    .filter((ref) => rosterIds.includes(ref.ownerId) && ref.paths.length > 0);
+
+  const jobId = await enqueueJob(user.id, "camera_roll_scan", {
+    photoPaths: unique,
+    sceneType: parseScanSceneType(options?.sceneType),
+    ownerIds,
+    references: references.length > 0 ? references : undefined,
+  });
   kickJobDrain(unique.length);
   return { ok: true, jobId };
 }
