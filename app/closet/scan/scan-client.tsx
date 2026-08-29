@@ -932,6 +932,23 @@ export function ScanClient({
                 ? `${scanResult.ready} ready · ${scanResult.skipped} skipped`
                 : "Scan complete"}
           </p>
+          {(importSummary?.imported ?? 0) > 0 && (
+            <div className="mx-auto max-w-md rounded-xl border border-ink/10 bg-paper-warm p-4 text-left">
+              <p className="text-xs uppercase tracking-wide text-ink-muted mb-1">
+                Still working
+              </p>
+              <p className="text-sm text-ink">
+                Your {importSummary!.imported} {importSummary!.imported === 1 ? "piece is" : "pieces are"} in
+                the closet now, shown with the photo you uploaded. Clean product shots are being
+                generated in the background and will replace them as each one finishes. A large
+                batch can take a while — each shot is a separate generation, and slow ones are
+                retried.
+              </p>
+              <p className="text-xs text-ink-muted mt-2">
+                Safe to close this page; generation continues without it.
+              </p>
+            </div>
+          )}
           <div className="flex flex-wrap gap-3 justify-center pt-2">
             <Link
               href="/closet"

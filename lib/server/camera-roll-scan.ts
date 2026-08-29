@@ -106,7 +106,12 @@ export async function processScanPhotoForReview(
   userId: string,
   originalImagePath: string,
   closetIndex: ClosetHashEntry[] = [],
-  options: { sceneType?: ScanSceneType; ownerIds?: string[] } = {},
+  options: {
+    sceneType?: ScanSceneType;
+    ownerIds?: string[];
+    /** The user's own category labels, so the classifier answers in their taxonomy. */
+    categoryOptions?: readonly string[];
+  } = {},
 ): Promise<CameraRollScanItemResult[]> {
   const sceneType = options.sceneType ?? DEFAULT_SCAN_SCENE;
   const ownerIds = options.ownerIds ?? [];
@@ -138,7 +143,11 @@ export async function processScanPhotoForReview(
     return [{ reviewId, originalImagePath, status: "failed", error: quota.error }];
   }
 
-  const detection = await detectGarmentsInPhoto(originalImagePath, sceneType);
+  const detection = await detectGarmentsInPhoto(
+    originalImagePath,
+    sceneType,
+    options.categoryOptions ?? [],
+  );
   if (!detection.isGarment || detection.garments.length === 0) {
     await deleteUpload(originalImagePath).catch(() => undefined);
     return [

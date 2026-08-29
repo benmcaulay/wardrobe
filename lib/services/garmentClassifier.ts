@@ -1,7 +1,12 @@
 import path from "node:path";
 import { log } from "../log";
 import { boolEnv } from "../env";
-import { NONE_CATEGORY } from "../categories";
+import {
+  DEFAULT_CATEGORIES,
+  NONE_CATEGORY,
+  normalizeCategoryName,
+  suggestCategoryFromItem,
+} from "../categories";
 import { normalizeColorName } from "../colors";
 import type { Color } from "../json";
 import { FAVORITE_COLOR_OPTIONS } from "../preferences";
@@ -120,7 +125,12 @@ List each piece separately. Overlapping garments are still separate entries.`,
  * "skip X" instruction — see the note in `lib/scan-scene.ts` on why negation
  * was doing no work here.
  */
-export function classifierPrompt(scene: ScanSceneType): string {
+export function classifierPrompt(
+  scene: ScanSceneType,
+  categories: readonly string[] = DEFAULT_CATEGORIES,
+): string {
+  const vocab = categories.filter((c) => !normalizeCategoryName(c).match(/^none$/));
+  const categoryList = vocab.length > 0 ? vocab : [...DEFAULT_CATEGORIES];
   return `You are sorting photos for a digital wardrobe app.
 
 ${SCENE_GUIDANCE[scene]}
@@ -129,6 +139,9 @@ List every DISTINCT clothing item (garment, shoes, or wearable accessory) that c
 
 Rules:
 - Do NOT merge separate pieces into one entry (e.g. shirt + pants = two garments).
+- "category" MUST be copied verbatim from this list, which is the user's own
+  closet taxonomy: ${categoryList.join(", ")}. Pick the most specific one that
+  fits. If nothing fits, use "other".
 - Report what this photo actually is in "scene", using exactly one of:
   - "worn"    — a person is wearing the clothes
   - "flatlay" — garments shown by themselves
@@ -139,11 +152,68 @@ Rules:
   - "material": best guess, e.g. cotton, denim, leather, wool, knit — or omit if unclear.
 
 Reply with ONLY valid JSON (no markdown):
-{"scene":"worn"|"flatlay"|"other","garments":[{"category":"top"|"bottom"|"dress"|"outerwear"|"shoes"|"accessory"|"other","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"why there is nothing to catalogue, when scene is other"}`;
+{"scene":"worn"|"flatlay"|"other","garments":[{"category":"one of the categories above","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"why there is nothing to catalogue, when scene is other"}`;
 }
 
-/** Back-compat export: the default (worn) prompt. */
+/** Back-compat export: the default (worn) prompt over the built-in taxonomy. */
 export const CLASSIFIER_PROMPT = classifierPrompt(DEFAULT_SCAN_SCENE);
+
+/**
+ * Resolve a classifier category against the closet it is being filed into.
+ *
+ * `mapClassifierCategory` alone was the bug: it collapsed every answer onto the
+ * six built-in `DEFAULT_CATEGORIES`, which are only a starting suggestion. A
+ * closet configured with "t shirt", "jacket", "jeans" got "top", "outerwear",
+ * "bottom" — none of which exist in its picker, so review rendered them as
+ * uncategorised and every import needed the category set by hand.
+ *
+ * lib/categories.ts already documents this exact failure (SmartPakker put 82%
+ * of a natural-named closet into "other"); this path just hadn't learned it.
+ *
+ * Order: the user's own label if the model returned one, then the closest
+ * same-kind label from their list, then the canonical mapping, then None.
+ */
+export function resolveClassifierCategory(
+  raw: string | undefined,
+  name: string | undefined,
+  options: readonly string[],
+): string {
+  const list = options.filter((c) => c && !isNoneLabel(c));
+  const wanted = matchKey(raw ?? "");
+
+  if (wanted) {
+    const exact = list.find((o) => matchKey(o) === wanted);
+    if (exact) return exact;
+  }
+
+  const suggested = suggestCategoryFromItem({ category: raw, name }, list);
+  if (suggested) return suggested;
+
+  const canonical = mapClassifierCategory(raw);
+  if (canonical !== NONE_CATEGORY) {
+    const hit = list.find((o) => matchKey(o) === matchKey(canonical));
+    if (hit) return hit;
+    // No configured label of this kind — keep the canonical answer rather than
+    // discarding a correct classification.
+    if (list.length === 0) return canonical;
+  }
+  return NONE_CATEGORY;
+}
+
+function isNoneLabel(value: string): boolean {
+  return normalizeCategoryName(value) === normalizeCategoryName(NONE_CATEGORY);
+}
+
+/**
+ * Comparison key for matching a model answer to a configured label.
+ *
+ * `normalizeCategoryName` collapses whitespace but leaves punctuation, so a
+ * closet label "t shirt" never matched the "T-Shirt" the model actually
+ * returns. Hyphens and underscores are separators here, not content.
+ */
+function matchKey(value: string): string {
+  return normalizeCategoryName(value.replace(/[-_]+/g, " "));
+}
 
 /** Map vision-model category labels to wardrobe DB categories. */
 export function mapClassifierCategory(raw: string | undefined): string {
@@ -267,7 +337,10 @@ export function normalizeClassification(raw: RawClassifierJson): GarmentClassifi
   };
 }
 
-export function normalizeScanDetection(raw: RawClassifierJson): GarmentScanDetection {
+export function normalizeScanDetection(
+  raw: RawClassifierJson,
+  options: readonly string[] = [],
+): GarmentScanDetection {
   const legacyGarments: DetectedGarment[] = [];
   if (raw.category || raw.name) {
     const confidence =
@@ -277,7 +350,7 @@ export function normalizeScanDetection(raw: RawClassifierJson): GarmentScanDetec
           ? 0.75
           : 0.25;
     legacyGarments.push({
-      category: mapClassifierCategory(raw.category),
+      category: resolveClassifierCategory(raw.category, raw.name, options),
       name: (raw.name ?? "").trim().slice(0, 120) || "Imported piece",
       confidence,
       colors: resolveColorNames(raw.colors),
@@ -294,7 +367,7 @@ export function normalizeScanDetection(raw: RawClassifierJson): GarmentScanDetec
           : 0.7;
       const name = (g.name ?? "").trim().slice(0, 120) || "Imported piece";
       return {
-        category: mapClassifierCategory(g.category),
+        category: resolveClassifierCategory(g.category, name, options),
         name,
         confidence,
         colors: resolveColorNames(g.colors),
@@ -350,12 +423,13 @@ async function loadImage(key: string): Promise<{ buffer: Buffer; mime: string }>
 async function realClassifyGarment(
   imagePath: string,
   scene: ScanSceneType,
+  options: readonly string[],
 ): Promise<GarmentScanDetection> {
   const image = await loadImage(imagePath);
   const startedAt = Date.now();
   let text: string;
   try {
-    text = await geminiText(classifierPrompt(scene), { images: [image] });
+    text = await geminiText(classifierPrompt(scene, options), { images: [image] });
   } catch (err) {
     log.error("garment.classifier.failed", err, { ms: Date.now() - startedAt });
     throw err;
@@ -369,7 +443,7 @@ async function realClassifyGarment(
       garments: [{ category: NONE_CATEGORY, name: "Imported piece", confidence: 0.5, colors: [] }],
     };
   }
-  return normalizeScanDetection(parsed);
+  return normalizeScanDetection(parsed, options);
 }
 
 /**
@@ -430,6 +504,7 @@ function stubScanDetection(imagePath: string): GarmentScanDetection {
 export async function detectGarmentsInPhoto(
   imagePath: string,
   scene: ScanSceneType = DEFAULT_SCAN_SCENE,
+  categoryOptions: readonly string[] = [],
 ): Promise<GarmentScanDetection> {
   if (!(await objectExists(imagePath))) {
     return { isGarment: false, garments: [], skipReason: "Image missing" };
@@ -438,7 +513,7 @@ export async function detectGarmentsInPhoto(
     return stubScanDetection(imagePath);
   }
   try {
-    return await realClassifyGarment(imagePath, scene);
+    return await realClassifyGarment(imagePath, scene, categoryOptions);
   } catch {
     return {
       isGarment: true,

@@ -6,7 +6,8 @@
 import { randomUUID } from "node:crypto";
 import type { GenerationJob } from "@prisma/client";
 import { prisma } from "../db";
-import { encode } from "../json";
+import { encode, parseStylePrefs } from "../json";
+import { getCategoriesListFromPrefs } from "../categories";
 import { log } from "../log";
 import {
   createVirtualTryOn,
@@ -218,6 +219,15 @@ async function runCameraRollScan(
   // re-scans of already-imported photos and flag per-garment duplicates.
   const closetIndex = await loadClosetHashIndex(userId);
 
+  // The classifier answers in the user's OWN category vocabulary. Collapsing
+  // onto the six built-in defaults is what left a closet of "t shirt"/"jacket"
+  // items uncategorised after every import.
+  const scanUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { stylePrefs: true },
+  });
+  const categoryOptions = getCategoriesListFromPrefs(parseStylePrefs(scanUser?.stylePrefs));
+
   // Mode B: an in-memory face gate built from the user's hand-picked reference
   // photos. Null when the scan is Mode A, when no reference yielded exactly one
   // face, or when the models are not staged — in every one of those cases the
@@ -250,6 +260,7 @@ async function runCameraRollScan(
       } else {
         batch = await processScanPhotoForReview(userId, photoPath, closetIndex, {
           sceneType: payload.sceneType,
+          categoryOptions,
           // A matched owner overrides the batch declaration: the gate knows
           // whose photo this actually is, the declaration was only a default.
           ownerIds: gated?.ownerId ? [gated.ownerId] : payload.ownerIds,

@@ -7,7 +7,12 @@ import {
   SCENE_COPY,
   SCAN_SCENE_TYPES,
 } from "../lib/scan-scene";
-import { classifierPrompt, normalizeScanDetection } from "../lib/services/garmentClassifier";
+import {
+  classifierPrompt,
+  normalizeScanDetection,
+  resolveClassifierCategory,
+} from "../lib/services/garmentClassifier";
+import { NONE_CATEGORY } from "../lib/categories";
 import { sanitizeOwnerIds } from "../lib/owners";
 
 describe("scan scene declaration", () => {
@@ -122,5 +127,98 @@ describe("sanitizeOwnerIds", () => {
   it("deduplicates and trims", () => {
     expect(sanitizeOwnerIds([" me ", "me"], roster, ["me"])).toEqual(["me"]);
     expect(sanitizeOwnerIds([], roster, ["me", "me"])).toEqual(["me"]);
+  });
+});
+
+describe("resolveClassifierCategory", () => {
+  // The real closet that exposed this: user-defined labels, none of which are
+  // the six built-in DEFAULT_CATEGORIES except shoes/outerwear/accessory.
+  const closet = [
+    "hat",
+    "shirt",
+    "t shirt",
+    "long sleeve shirt",
+    "dress shirt",
+    "outerwear",
+    "jacket",
+    "sweater",
+    "hoodie",
+    "bottom",
+    "pants",
+    "jeans",
+    "shorts",
+    "shoes",
+    "accessory",
+  ];
+
+  it("keeps the user's own label when the model returns it verbatim", () => {
+    expect(resolveClassifierCategory("t shirt", "Adidas Osaka T", closet)).toBe("t shirt");
+    expect(resolveClassifierCategory("jeans", "Evisu Daruma", closet)).toBe("jeans");
+    expect(resolveClassifierCategory("hat", "Chargers 47", closet)).toBe("hat");
+  });
+
+  it("snaps a built-in answer onto the closest configured label", () => {
+    // The regression: "top" is not in this closet, so it used to be stored
+    // verbatim and rendered as uncategorised.
+    expect(closet).not.toContain("top");
+    const got = resolveClassifierCategory("top", "white graphic long sleeve t-shirt", closet);
+    expect(closet).toContain(got);
+  });
+
+  it("resolves the exact case from the failed import", () => {
+    // 'top' + a long-sleeve name should land on a top-kind label, not None.
+    const got = resolveClassifierCategory("top", "white graphic long sleeve t-shirt", closet);
+    expect(got).not.toBe(NONE_CATEGORY);
+  });
+
+  it("is case- and spacing-insensitive about the model's answer", () => {
+    expect(resolveClassifierCategory("T-Shirt", "tee", closet)).toBe("t shirt");
+    expect(resolveClassifierCategory("  SHOES ", "dunks", closet)).toBe("shoes");
+  });
+
+  it("uses the name when the category is useless", () => {
+    expect(resolveClassifierCategory("other", "Wool Overcoat", closet)).toBe("outerwear");
+  });
+
+  it("honours a valid user label verbatim over a more specific same-kind one", () => {
+    // "bottom" is in this closet, so it is the model's answer and we take it.
+    // The model was told to pick from the list; second-guessing a valid pick
+    // with name inference would override a real answer with a guess.
+    expect(closet).toContain("bottom");
+    expect(resolveClassifierCategory("bottom", "Nike Running Shorts", closet)).toBe("bottom");
+  });
+
+  it("uses the same-kind tiebreak when the model's label is NOT in the closet", () => {
+    // "trousers" is off-list, so inference runs and must land on a bottom.
+    const bottoms = ["bottom", "pants", "jeans", "shorts"];
+    expect(bottoms).toContain(resolveClassifierCategory("trousers", "Levi's 501", closet));
+    expect(bottoms).toContain(resolveClassifierCategory(undefined, "Nike Running Shorts", closet));
+  });
+
+  it("returns None rather than guessing when nothing fits", () => {
+    expect(resolveClassifierCategory("other", "a plate of food", closet)).toBe(NONE_CATEGORY);
+  });
+
+  it("falls back to the canonical taxonomy when the closet has no categories", () => {
+    expect(resolveClassifierCategory("t shirt", "tee", [])).toBe("top");
+  });
+
+  it("ignores a None entry in the options list", () => {
+    expect(resolveClassifierCategory("shoes", "dunks", [NONE_CATEGORY, "shoes"])).toBe("shoes");
+  });
+});
+
+describe("classifierPrompt category vocabulary", () => {
+  it("puts the user's own categories in the prompt", () => {
+    const prompt = classifierPrompt("worn", ["t shirt", "jeans", "hat"]);
+    expect(prompt).toContain("t shirt, jeans, hat");
+  });
+
+  it("falls back to the built-in taxonomy when the closet is empty", () => {
+    expect(classifierPrompt("worn", [])).toContain("top, bottom, dress, outerwear, shoes, accessory");
+  });
+
+  it("does not offer None as a category to choose", () => {
+    expect(classifierPrompt("worn", [NONE_CATEGORY, "shoes"])).not.toContain("None, shoes");
   });
 });
