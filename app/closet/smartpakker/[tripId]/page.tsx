@@ -11,6 +11,8 @@ import { parseTripRequirements } from "@/lib/packing/requirements";
 import { parseGearCategory } from "@/lib/packing/gear";
 import { deriveOccasion, isDailyWear } from "@/lib/packing/occasion";
 import type { LookLayoutPrefs } from "@/lib/packing/look";
+import { categoryAncestryPath, getCategoryParentsFromPrefs } from "@/lib/category-tree";
+import { getCategoriesListFromPrefs } from "@/lib/categories";
 import {
   sanitizeComboLayouts,
   sanitizeLayerArrangements,
@@ -146,6 +148,14 @@ export default async function TripPage({ params }: { params: { tripId: string } 
     comboLayouts: sanitizeComboLayouts(outfitPrefs.outfitComboLayouts),
     layerArrangements: sanitizeLayerArrangements(outfitPrefs.outfitLayerArrangements),
     layerOrder: sanitizeLayerOrder(outfitPrefs.outfitLayerOrder),
+    // Nested categories inherit the built-in size of the category they sit
+    // under, the same way the outfits tab resolves it.
+    ancestryOf: (category: string) =>
+      categoryAncestryPath(
+        category,
+        getCategoryParentsFromPrefs(outfitPrefs),
+        getCategoriesListFromPrefs(outfitPrefs),
+      ),
   };
 
   const tripView: PlannerTrip = {

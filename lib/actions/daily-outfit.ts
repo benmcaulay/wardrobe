@@ -23,6 +23,8 @@ import { prisma } from "@/lib/db";
 import { decode, encode, parseStylePrefs, type Color, type Season } from "@/lib/json";
 import { buildSlate, slotsForBand, SLATE_POLICY_ID, type Proposal } from "@/lib/outfit/slate";
 import { getClimateSummary, weatherEnabled, type ClimateBand } from "@/lib/services/weather";
+import { searchPlaces } from "@/lib/services/geocode";
+import { placeLabel, type Place } from "@/lib/places";
 import { loadStyleRules } from "@/lib/wear/style-rules-server";
 import { buildAffinity } from "@/lib/wear/affinity-server";
 import { recordPreference, recordWear } from "@/lib/wear/record";
@@ -157,6 +159,20 @@ export async function getDailyContext(localISODate?: string): Promise<DailyConte
     rainChance: summary.rainChance,
     source: summary.source,
   };
+}
+
+/**
+ * Place candidates for the home-location picker.
+ *
+ * Same provider the trip destination picker uses, exposed here so the outfits
+ * weather card can offer real places instead of a free-text box that only
+ * geocodes after you remember to press Save.
+ */
+export async function searchHomePlaces(query: string): Promise<Place[]> {
+  await requireUser();
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+  return searchPlaces(trimmed);
 }
 
 export async function setHomeLocation(

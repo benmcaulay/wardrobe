@@ -10,6 +10,7 @@ import {
   sanitizeComboLayouts,
   sanitizeOutfitSlotDefaults,
 } from "../lib/outfit-slot-defaults";
+import { categoryAncestryPath } from "../lib/category-tree";
 
 describe("outfitSlotDefaultKey", () => {
   it("matches categoryListSignature for OR rules", () => {
@@ -101,5 +102,73 @@ describe("sanitizeComboLayouts", () => {
       "jacket@jacket,shirt": { scale: 1.5 },
     });
     expect(sanitizeComboLayouts(null)).toEqual({});
+  });
+});
+
+describe("builtinCategoryScale inheritance", () => {
+  // The real closet that surfaced this: jeans nested under pants, jacket under
+  // outerwear. Substring matching alone gave the parent 2 and the child 1.
+  const parents = {
+    jacket: "outerwear",
+    "t shirt": "shirt",
+    sweater: "outerwear",
+    hoodie: "outerwear",
+    pants: "bottom",
+    jeans: "pants",
+    shorts: "bottom",
+  };
+  const list = [
+    "hat",
+    "shirt",
+    "t shirt",
+    "outerwear",
+    "jacket",
+    "sweater",
+    "hoodie",
+    "bottom",
+    "pants",
+    "jeans",
+    "shorts",
+    "shoes",
+  ];
+  const ancestryOf = (c: string) => categoryAncestryPath(c, parents, list);
+
+  it("gives a nested category its parent's built-in size", () => {
+    // The bug: "jeans" does not contain "pant", so it rendered half-size while
+    // "pants" rendered at 2 — in the carousel and the builder both.
+    expect(builtinCategoryScale(["jeans"])).toBe(1);
+    expect(builtinCategoryScale(["jeans"], ancestryOf)).toBe(2);
+    expect(builtinCategoryScale(["pants"], ancestryOf)).toBe(2);
+  });
+
+  it("does not inflate small garments that share a parent", () => {
+    // shorts sit under "bottom", which has no rule — they must stay small.
+    expect(builtinCategoryScale(["shorts"], ancestryOf)).toBe(1);
+    expect(builtinCategoryScale(["bottom"], ancestryOf)).toBe(1);
+  });
+
+  it("leaves unrelated categories alone", () => {
+    for (const c of ["t shirt", "shirt", "shoes", "hat", "hoodie", "sweater"]) {
+      expect(builtinCategoryScale([c], ancestryOf)).toBe(1);
+    }
+  });
+
+  it("keeps a direct match working with and without ancestry", () => {
+    expect(builtinCategoryScale(["jacket"])).toBe(2);
+    expect(builtinCategoryScale(["jacket"], ancestryOf)).toBe(2);
+  });
+
+  it("prefers the label's own rule over an ancestor's", () => {
+    // A small garment nested under a large one must not inherit upward.
+    const nested = (c: string) => (c === "belt" ? ["belt", "pants"] : [c]);
+    expect(builtinCategoryScale(["belt"], nested)).toBe(2); // inherits, no own rule
+    const ownRule = (c: string) => (c === "jacket" ? ["jacket", "shirt"] : [c]);
+    expect(builtinCategoryScale(["jacket"], ownRule)).toBe(2);
+  });
+
+  it("falls back cleanly on empty input or an empty chain", () => {
+    expect(builtinCategoryScale([])).toBe(1);
+    expect(builtinCategoryScale([""], ancestryOf)).toBe(1);
+    expect(builtinCategoryScale(["jeans"], () => [])).toBe(1);
   });
 });

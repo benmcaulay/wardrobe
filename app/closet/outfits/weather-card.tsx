@@ -17,7 +17,14 @@
 import { useEffect, useState, useTransition } from "react";
 import { wornOnFromLocalDate, wornOnToISODate } from "@/lib/wear/rollup";
 import { formatTemperature, type TemperatureUnit } from "@/lib/temperature";
-import { getDailyContext, setHomeLocation, type DailyContext } from "@/lib/actions/daily-outfit";
+import {
+  getDailyContext,
+  searchHomePlaces,
+  setHomeLocation,
+  type DailyContext,
+} from "@/lib/actions/daily-outfit";
+import { CityPicker } from "@/components/city-picker";
+import { placeLabel } from "@/lib/places";
 
 const BAND_COPY: Record<string, string> = {
   hot: "Hot",
@@ -149,12 +156,26 @@ export function WeatherCard({
             : "Tell me where you get dressed and I'll factor in the weather."}
       </p>
       <div className="mt-2 flex gap-2">
-        <input
+        {/*
+         * Picking a place is the save. The forecast is the whole point of
+         * naming a location, so making the user choose a city and *then*
+         * remember a button left the card sitting on "I'll factor in the
+         * weather" while factoring in nothing. Free text still needs the
+         * button, because a place the geocoder has never heard of is still
+         * where you got dressed.
+         */}
+        <CityPicker
+          className="min-w-0 flex-1"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
+          onPick={(place) => {
+            const label = placeLabel(place);
+            setDraft(label);
+            setEditing(false);
+            onSave(label);
+          }}
+          search={searchHomePlaces}
           placeholder={context.location ?? "San Diego"}
-          aria-label="Home location"
-          className="min-w-0 flex-1 rounded-xl border border-ink/15 bg-surface px-3 py-1.5 text-sm focus:border-ink/40 focus:outline-none"
         />
         <button
           type="button"

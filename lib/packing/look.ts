@@ -58,6 +58,12 @@ export type LookLayoutPrefs = {
   comboLayouts: Record<string, ComboLayout>;
   layerArrangements: Record<string, string[]>;
   layerOrder: string[];
+  /**
+   * Category -> its ancestry, most specific first. Without it a nested
+   * category misses the built-in size of the parent it inherits from and the
+   * carousel draws the same look at a different size than the builder.
+   */
+  ancestryOf?: (category: string) => string[];
 };
 
 export const EMPTY_LOOK_PREFS: LookLayoutPrefs = {
@@ -107,7 +113,8 @@ export function composeLook(
   prefs: LookLayoutPrefs = EMPTY_LOOK_PREFS,
 ): PlacedPiece[] {
   if (pieces.length === 0) return [];
-  const { slotDefaults, visualLayers, comboLayouts, layerArrangements, layerOrder } = prefs;
+  const { slotDefaults, visualLayers, comboLayouts, layerArrangements, layerOrder, ancestryOf } =
+    prefs;
 
   // 1. Base placement, counting repeats of the same category signature.
   const usedBySignature = new Map<string, number>();
@@ -139,7 +146,7 @@ export function composeLook(
   const pinned = new Set<string>();
   const laid = base.map((slot, i) => {
     const saved = comboLayouts[comboKeyFor(slot, pieces, visualLayers)];
-    const scale = saved?.scale ?? builtinCategoryScale(slot.categories);
+    const scale = saved?.scale ?? builtinCategoryScale(slot.categories, ancestryOf);
     if (saved?.x != null && saved?.y != null) {
       pinned.add(slot.id);
       return { ...slot, x: saved.x, y: saved.y, scale, z: i + 1 };

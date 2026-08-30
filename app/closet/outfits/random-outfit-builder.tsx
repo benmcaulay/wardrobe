@@ -648,7 +648,8 @@ export function RandomOutfitBuilder({
     : "";
   const selectedScale = selected
     ? comboLayoutForSlot(selected, slots, activeLayers, itemCategoryOf, ancestryOf, comboLayouts)
-        ?.scale ?? builtinCategoryScale(slotIdentityCategories(selected, itemCategoryOf))
+        ?.scale ??
+      builtinCategoryScale(slotIdentityCategories(selected, itemCategoryOf), ancestryOf)
     : 1;
 
   const assignableItems = useMemo(() => {
@@ -2039,7 +2040,8 @@ function syncSlotsWithRules(
       comboLayouts,
     );
     const scale =
-      layout?.scale ?? builtinCategoryScale(slotIdentityCategories(slot, itemCategoryOf));
+      layout?.scale ??
+      builtinCategoryScale(slotIdentityCategories(slot, itemCategoryOf), ancestryOf);
     if (layout?.x != null && layout?.y != null) {
       pinnedIds.add(slot.id);
       return { ...slot, x: layout.x, y: layout.y, scale, z: i + 1 };

@@ -227,13 +227,38 @@ export function clampItemScale(raw: unknown): number {
   return Math.min(MAX_ITEM_SCALE, Math.max(MIN_ITEM_SCALE, raw));
 }
 
+/** Substring rule for one label, before any ancestry is considered. */
+function labelScale(label: string): number {
+  const c = label.trim().toLowerCase();
+  if (c.includes("jacket") || c.includes("pant")) return 2;
+  return DEFAULT_ITEM_SCALE;
+}
+
 /**
  * Built-in size multiplier for a category before any user override. Jackets and
  * pants are large garments that read better rendered twice as big by default.
+ *
+ * `ancestryOf` makes that inheritable, and without it the rule is a substring
+ * lottery: a closet nesting "jeans" under "pants" got 2 for the parent and 1
+ * for the child, because "jeans" does not contain "pant". The jeans then
+ * rendered half-size everywhere a look was drawn, which is the same
+ * subcategory-inherits-from-parent model the combination keys already use
+ * (see lib/outfit/layout-identity.ts).
+ *
+ * Most specific first: an explicit rule on the label itself wins over its
+ * parent's, so nesting a small garment under a large one stays correct.
  */
-export function builtinCategoryScale(categories: readonly string[]): number {
-  const c = (categories[0] ?? "").trim().toLowerCase();
-  if (c.includes("jacket") || c.includes("pant")) return 2;
+export function builtinCategoryScale(
+  categories: readonly string[],
+  ancestryOf?: (category: string) => string[],
+): number {
+  const first = (categories[0] ?? "").trim();
+  if (!first) return DEFAULT_ITEM_SCALE;
+  const chain = ancestryOf?.(first);
+  for (const label of chain && chain.length > 0 ? chain : [first]) {
+    const scale = labelScale(label);
+    if (scale !== DEFAULT_ITEM_SCALE) return scale;
+  }
   return DEFAULT_ITEM_SCALE;
 }
 
