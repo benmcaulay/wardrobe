@@ -4,12 +4,15 @@
  * returns — usable from a serverless cron too; `runWorker` is the long-lived
  * polling loop for a dedicated worker process.
  */
-import { claimNextJob } from "./queue";
+import { claimNextJob, failExpiredJobs } from "./queue";
 import { runJob } from "./runner";
 import { log } from "../log";
 
 /** Claim and run jobs until the queue is empty. Returns how many ran. */
 export async function drainOnce(max = Infinity): Promise<number> {
+  // Retire anything a dead worker abandoned past its retries, so no job can
+  // sit in "running" forever with the UI showing it as still in flight.
+  await failExpiredJobs().catch((err) => log.error("jobs.lease-sweep.failed", err));
   let ran = 0;
   while (ran < max) {
     const job = await claimNextJob();

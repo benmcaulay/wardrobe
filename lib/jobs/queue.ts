@@ -6,6 +6,7 @@
 import type { GenerationJob } from "@prisma/client";
 import { prisma } from "../db";
 import { encode, decode } from "../json";
+import { log } from "../log";
 import type { ObservedScene, ScanSceneType } from "../scan-scene";
 
 export type GenerationJobType =
@@ -149,17 +150,69 @@ export async function enqueueJob(
 }
 
 /**
- * Atomically claim the oldest queued job (or a failed job due for retry),
- * marking it running. SKIP LOCKED makes this safe under concurrent workers.
+ * How long a claimed job may go without progress before another worker may
+ * take it.
+ *
+ * A worker that dies mid-job leaves the row in "running" forever. Nothing else
+ * ever moved it: the claim below only looked at "queued", so the job was not
+ * retried, not failed, and not visible as broken — the item just said
+ * "Generating…" indefinitely with its controls disabled and no way to recover
+ * from the UI. That happened three times during development, once by killing
+ * the dev server mid-generation.
+ *
+ * The lease is a heartbeat, not a timeout: `updateJobProgress` bumps
+ * `updatedAt`, so a legitimately slow job (a camera-roll scan working through
+ * 50 photos) keeps renewing it and is never stolen. It only has to exceed the
+ * longest gap between two progress writes — a single ghost generation, whose
+ * own request timeout is 120s. Ten minutes is generous against that.
+ */
+export const JOB_LEASE_MINUTES = 10;
+
+/** Pure: may a claimed job be reclaimed, given how long it has been silent? */
+export function leaseExpired(updatedAt: Date, now: Date, leaseMinutes = JOB_LEASE_MINUTES): boolean {
+  return now.getTime() - updatedAt.getTime() >= leaseMinutes * 60_000;
+}
+
+/**
+ * Atomically claim the oldest runnable job, marking it running. SKIP LOCKED
+ * makes this safe under concurrent workers.
+ *
+ * Runnable is "queued", or "running" whose lease has expired — see
+ * JOB_LEASE_MINUTES. Reclaiming still increments `attempts`, so a job that
+ * reliably kills its worker exhausts `maxAttempts` and fails properly rather
+ * than looping forever.
+ *
  * Returns null when nothing is runnable.
  */
 export async function claimNextJob(): Promise<GenerationJob | null> {
+  /*
+   * Cutoff computed here rather than with MAKE_INTERVAL: Prisma binds a JS
+   * number as bigint, and make_interval(mins => bigint) does not resolve.
+   *
+   * The AT TIME ZONE 'UTC' below is load-bearing, not decoration. These
+   * columns are `timestamp without time zone`, and the two writers have to
+   * agree on what naive means: Prisma's own @updatedAt writes naive UTC, while
+   * a bare NOW() assigned to that column writes naive *local*. Mixing them put
+   * a freshly-claimed job seven hours in the past on read, which would make
+   * this lease steal live jobs on the very next poll.
+   */
+  const leaseCutoff = new Date(Date.now() - JOB_LEASE_MINUTES * 60_000);
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     UPDATE "GenerationJob"
-    SET status = 'running', "startedAt" = NOW(), attempts = attempts + 1, "updatedAt" = NOW()
+    SET status = 'running',
+        "startedAt" = (NOW() AT TIME ZONE 'UTC'),
+        attempts = attempts + 1,
+        "updatedAt" = (NOW() AT TIME ZONE 'UTC')
     WHERE id = (
       SELECT id FROM "GenerationJob"
-      WHERE status = 'queued'
+      WHERE (
+        status = 'queued'
+        OR (
+          status = 'running'
+          AND "updatedAt" < ${leaseCutoff}
+          AND attempts < "maxAttempts"
+        )
+      )
       ORDER BY "createdAt" ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
@@ -169,6 +222,33 @@ export async function claimNextJob(): Promise<GenerationJob | null> {
   const id = rows[0]?.id;
   if (!id) return null;
   return prisma.generationJob.findUnique({ where: { id } });
+}
+
+/**
+ * Terminally fail jobs whose lease expired with no attempts left.
+ *
+ * The claim above deliberately only reclaims jobs that still have a retry in
+ * them, which would otherwise leave an exhausted job stuck in "running"
+ * forever — the exact state this whole mechanism exists to prevent, reached by
+ * a longer route. Sweeping them into "failed" means every job ends somewhere.
+ */
+export async function failExpiredJobs(leaseMinutes = JOB_LEASE_MINUTES): Promise<number> {
+  // Raw, because this has to compare two columns (attempts vs maxAttempts) and
+  // must be the exact complement of the claim's reclaim condition — anything
+  // the claim would retry must not be failed here.
+  const cutoff = new Date(Date.now() - leaseMinutes * 60_000);
+  const count = await prisma.$executeRaw`
+    UPDATE "GenerationJob"
+    SET status = 'failed',
+        error = 'Worker stopped before this finished and it ran out of retries.',
+        "finishedAt" = (NOW() AT TIME ZONE 'UTC'),
+        "updatedAt" = (NOW() AT TIME ZONE 'UTC')
+    WHERE status = 'running'
+      AND "updatedAt" < ${cutoff}
+      AND attempts >= "maxAttempts"
+  `;
+  if (count > 0) log.info("jobs.lease-expired.failed", { count });
+  return count;
 }
 
 /** Pure retry decision: a job retries while it has attempts left. */
