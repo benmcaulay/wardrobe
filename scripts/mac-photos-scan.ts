@@ -93,8 +93,8 @@ Options:
   --help               Show this help
 
 Examples:
-  pnpm mac-photos:scan -- --person "Ben" --owner me
-  pnpm mac-photos:scan -- --person "Ben" --from-date 2025-01-01 --limit 200
+  pnpm mac-photos:scan -- --person "Your Name" --owner me
+  pnpm mac-photos:scan -- --person "Your Name" --from-date 2025-01-01 --limit 200
 `);
       process.exit(0);
     }
