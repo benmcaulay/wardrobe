@@ -77,7 +77,8 @@ function parseArgs(): CliOptions {
       console.log(`Usage: pnpm mac-photos:scan -- [options]
 
 Options:
-  --email <addr>       Wardrobe account email (or set WARDROBE_USER_EMAIL)
+  --email <addr>       Wardrobe account email. Optional when only one
+                       account exists (or set WARDROBE_USER_EMAIL)
   --limit <n>          Max photos to export (default: all matching)
   --from-date <YYYY-MM-DD>
   --to-date <YYYY-MM-DD>
@@ -151,10 +152,32 @@ function queryPhotos(opts: CliOptions): OsxPhoto[] {
   if (!opts.includeScreenshots) args.push("--not-screenshot");
   if (opts.limit && opts.limit > 0) args.push("--limit", String(opts.limit));
 
-  const out = execFileSync("osxphotos", args, {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  let out: string;
+  try {
+    out = execFileSync("osxphotos", args, {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch (err) {
+    /*
+     * The Photos database is readable by file mode and blocked by TCC, so the
+     * failure surfaces as a copy error buried in a Python traceback rather
+     * than anything resembling "permission denied". Name it, because the fix
+     * is one checkbox and the traceback points nowhere near it.
+     */
+    const detail = err instanceof Error ? err.message : String(err);
+    if (/Photos\.sqlite|Error copying|operation not permitted/i.test(detail)) {
+      console.error(
+        "\nCould not read the Photos library.\n\n" +
+          "This needs Full Disk Access for the app running this command:\n" +
+          "  System Settings → Privacy & Security → Full Disk Access\n\n" +
+          "Grant it, then fully quit and reopen that app — macOS only applies\n" +
+          "the change to newly launched processes.",
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
   if (!out.trim()) return [];
   const parsed = JSON.parse(out) as OsxPhoto[] | OsxPhoto;
   return Array.isArray(parsed) ? parsed : [parsed];
@@ -200,14 +223,37 @@ async function uploadExportedFiles(userId: string, filePaths: string[]): Promise
 async function main() {
   const opts = parseArgs();
   const email = opts.email ?? process.env.WARDROBE_USER_EMAIL;
-  if (!email) {
-    console.error("Set WARDROBE_USER_EMAIL or pass --email you@example.com");
-    process.exit(1);
-  }
 
   requireOsxphotos();
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  /*
+   * Resolve the account, defaulting to the only one when there is only one.
+   *
+   * Demanding --email on a single-account install is friction with nothing
+   * behind it: there is exactly one answer and the script already knows it.
+   * Ambiguity still has to be resolved by hand, and the error lists the
+   * candidates rather than making you go and look them up.
+   */
+  const user = email
+    ? await prisma.user.findUnique({ where: { email } })
+    : await (async () => {
+        const all = await prisma.user.findMany({ select: { id: true, email: true } });
+        if (all.length === 1) {
+          console.log(`[mac-photos] Using the only account: ${all[0]!.email}`);
+          return prisma.user.findUnique({ where: { id: all[0]!.id } });
+        }
+        if (all.length === 0) {
+          console.error("No wardrobe accounts exist yet.");
+        } else {
+          console.error(
+            `Several accounts exist — pass --email to pick one:\n  ${all
+              .map((u) => u.email)
+              .join("\n  ")}`,
+          );
+        }
+        process.exit(1);
+      })();
+
   if (!user) {
     console.error(`No wardrobe user found for ${email}`);
     process.exit(1);
