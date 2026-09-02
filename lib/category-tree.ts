@@ -539,3 +539,33 @@ export function toggleCategoryOptionRow(
   for (const value of subtree) if (!next.includes(value)) next.push(value);
   return next;
 }
+
+/** A depth-ordered row rebuilt into a tree for rendering. */
+export type NestedRow<T> = T & { children: NestedRow<T>[] };
+
+/**
+ * Rebuild a depth-ordered flat list into the tree it was flattened from.
+ *
+ * `flattenCategoryTree` emits parents immediately before their descendants with
+ * a `depth`, which is enough to draw an indent guide but not enough to draw
+ * containment — a chip row can only prefix each label with "↳" and hope the
+ * reader infers the shape. This puts the nesting back so a renderer can group
+ * children inside their parent.
+ *
+ * A row whose depth jumps by more than one (possible from hand-edited prefs)
+ * attaches to the nearest shallower ancestor rather than being dropped.
+ */
+export function nestDepthRows<T extends { depth: number }>(rows: readonly T[]): NestedRow<T>[] {
+  const roots: NestedRow<T>[] = [];
+  const stack: NestedRow<T>[] = [];
+
+  for (const row of rows) {
+    const node: NestedRow<T> = { ...row, children: [] };
+    while (stack.length > 0 && stack[stack.length - 1]!.depth >= row.depth) stack.pop();
+    const parent = stack[stack.length - 1];
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+    stack.push(node);
+  }
+  return roots;
+}

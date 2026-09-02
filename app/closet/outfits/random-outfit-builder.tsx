@@ -56,6 +56,8 @@ import {
 import {
   buildCategoryTree,
   categoryAncestryPath,
+  nestDepthRows,
+  type NestedRow,
   descendantKeys,
   flattenCategoryTree,
   type CategoryParents,
@@ -597,6 +599,52 @@ export function RandomOutfitBuilder({
     }
     return rows;
   }, [items, categoryList, categoryParents]);
+
+  /** The same rows as a tree, so children can render inside their parent. */
+  const nestedCategoryRows = useMemo(() => nestDepthRows(categoryRows), [categoryRows]);
+
+  /**
+   * Everything a chip needs to draw itself, resolved once per category.
+   *
+   * Pulled out of the JSX because the parent chip and its nested children run
+   * identical logic — inlining it twice is how the two drift apart.
+   */
+  const categoryChipState = useCallback(
+    (cat: string) => {
+      const key = normalizeCategoryName(cat);
+      const rule = categoryRules.find((r) =>
+        r.categories.some((c) => normalizeCategoryName(c) === key),
+      );
+      const active = !!rule;
+      const locked = !!rule && !(rule.categories.length === 1 && rule.count === 1);
+      /*
+       * Already satisfiable by a rule further up the tree: a rule for "shirt"
+       * will happily take this t shirt. Marked rather than disabled — asking
+       * for a shirt *and* a t shirt is two pieces, which is reasonable.
+       */
+      const coveredBy = !active
+        ? categoryAncestryPath(cat, categoryParents, categoryList)
+            .slice(1)
+            .find((ancestor) =>
+              categoryRules.some((r) =>
+                r.categories.some(
+                  (c) => normalizeCategoryName(c) === normalizeCategoryName(ancestor),
+                ),
+              ),
+            )
+        : undefined;
+      return {
+        active,
+        locked,
+        coveredBy,
+        count: rule && rule.count > 1 ? rule.count : 0,
+        onToggle: () => toggleSimpleCategory(cat),
+        onDragStart: () => setDragCategory(cat),
+        onDragEnd: () => setDragCategory(null),
+      };
+    },
+    [categoryRules, categoryParents, categoryList],
+  );
 
   const colorNameOptions = useMemo(() => {
     const fromItems = [
@@ -1449,76 +1497,35 @@ export function RandomOutfitBuilder({
               Your closet has no categorized pieces yet.
             </p>
           ) : (
-            // Single row, scrolled: the number of categories is user-controlled,
-            // so any fixed-width assumption eventually wraps.
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {categoryRows.map((row) => {
-                const cat = row.name;
-                const key = normalizeCategoryName(cat);
-                const rule = categoryRules.find((r) =>
-                  r.categories.some((c) => normalizeCategoryName(c) === key),
-                );
-                const active = !!rule;
-                const locked = !!rule && !(rule.categories.length === 1 && rule.count === 1);
-                /*
-                 * Already satisfiable by a rule further up the tree: a rule for
-                 * "shirt" will happily take this t shirt. Marked rather than
-                 * disabled — asking for a shirt *and* a t shirt is two pieces,
-                 * which is a reasonable thing to want.
-                 */
-                const coveredBy = !active
-                  ? categoryAncestryPath(cat, categoryParents, categoryList)
-                      .slice(1)
-                      .find((ancestor) =>
-                        categoryRules.some((r) =>
-                          r.categories.some(
-                            (c) => normalizeCategoryName(c) === normalizeCategoryName(ancestor),
-                          ),
-                        ),
-                      )
-                  : undefined;
-                const title = locked
-                  ? "Managed in multi-select below"
-                  : [
-                      coveredBy ? `Already covered by the ${coveredBy} rule` : null,
-                      row.nested > 0
-                        ? `Includes ${row.nested} nested ${row.nested === 1 ? "category" : "categories"}`
-                        : null,
-                      "Tap to include · drag into a layer",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ");
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    draggable
-                    onDragStart={() => setDragCategory(cat)}
-                    onDragEnd={() => setDragCategory(null)}
-                    onClick={() => toggleSimpleCategory(cat)}
-                    disabled={locked}
-                    title={title}
-                    className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs uppercase tracking-wide border transition capitalize disabled:cursor-not-allowed ${
-                      active
-                        ? "bg-ink text-paper border-ink"
-                        : coveredBy
-                          ? "bg-paper border-ink/30 border-dashed text-ink"
-                          : "bg-paper border-ink/10 text-ink-muted hover:border-ink/25"
-                    } ${locked ? "opacity-60" : ""}`}
+            /*
+             * Grouped, not a scrolling strip.
+             *
+             * These chips used to be one horizontally-scrolled row where the
+             * only sign of hierarchy was a "↳" glyph and a "+3" count, so the
+             * shape of the closet had to be inferred from punctuation and half
+             * the categories were off-screen. Children now sit inside their
+             * parent, against a rail, and the whole tree wraps into view.
+             */
+            // items-start: without it a childless root chip stretches to the
+            // height of the tallest group card beside it.
+            <div className="flex flex-wrap items-start gap-2">
+              {nestedCategoryRows.map((root) =>
+                root.children.length === 0 ? (
+                  // Padded to match the group cards so every root chip shares
+                  // one baseline, without giving a leaf their visual weight.
+                  <div key={root.name} className="border border-transparent p-1.5">
+                    <CategoryRuleChip row={root} state={categoryChipState(root.name)} />
+                  </div>
+                ) : (
+                  <div
+                    key={root.name}
+                    className="rounded-2xl border border-ink/10 bg-paper-warm/60 p-1.5 space-y-1.5"
                   >
-                    {row.depth > 0 && (
-                      <span aria-hidden className="mr-1 opacity-50">
-                        ↳
-                      </span>
-                    )}
-                    {cat}
-                    {row.nested > 0 ? (
-                      <span className="ml-1 opacity-60 normal-case">+{row.nested}</span>
-                    ) : null}
-                    {rule && rule.count > 1 ? ` ×${rule.count}` : ""}
-                  </button>
-                );
-              })}
+                    <CategoryRuleChip row={root} state={categoryChipState(root.name)} />
+                    <CategoryRuleChildren rows={root.children} stateOf={categoryChipState} />
+                  </div>
+                ),
+              )}
             </div>
           )}
 
@@ -2081,4 +2088,100 @@ function formatFillIssue(issue: OutfitFillIssue): string {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
+}
+
+/** Row shape the category rule chips render from. */
+type CategoryChipRow = { name: string; depth: number; nested: number };
+
+type CategoryChipState = {
+  active: boolean;
+  locked: boolean;
+  coveredBy: string | undefined;
+  count: number;
+  onToggle: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+};
+
+/**
+ * One category rule chip.
+ *
+ * `size` is the only difference between a parent and its children: nesting is
+ * carried by the container and the rail, not by the chip restating its own
+ * depth. That is what lets the "↳" prefix go away.
+ */
+function CategoryRuleChip({
+  row,
+  state,
+  size = "base",
+}: {
+  row: CategoryChipRow;
+  state: CategoryChipState;
+  size?: "base" | "sm";
+}) {
+  const { active, locked, coveredBy, count } = state;
+  const title = locked
+    ? "Managed in multi-select below"
+    : [
+        coveredBy ? `Already covered by the ${coveredBy} rule` : null,
+        row.nested > 0
+          ? `Includes ${row.nested} nested ${row.nested === 1 ? "category" : "categories"}`
+          : null,
+        "Tap to include · drag into a layer",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={state.onDragStart}
+      onDragEnd={state.onDragEnd}
+      onClick={state.onToggle}
+      disabled={locked}
+      title={title}
+      aria-pressed={active}
+      className={`shrink-0 whitespace-nowrap rounded-full border uppercase tracking-wide transition capitalize disabled:cursor-not-allowed ${
+        size === "sm" ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-xs"
+      } ${
+        active
+          ? "bg-ink text-paper border-ink"
+          : coveredBy
+            ? "border-dashed border-ink/30 bg-paper text-ink"
+            : "border-ink/10 bg-paper text-ink-muted hover:border-ink/25 hover:text-ink"
+      } ${locked ? "opacity-60" : ""}`}
+    >
+      {row.name}
+      {row.nested > 0 ? <span className="ml-1 opacity-60 normal-case">+{row.nested}</span> : null}
+      {count > 1 ? ` ×${count}` : ""}
+    </button>
+  );
+}
+
+/**
+ * A parent's children, on a rail, recursing for grandchildren.
+ *
+ * The rail is the containment cue that the flat row had to spell out with a
+ * glyph; depth costs an indent rather than a character in the label.
+ */
+function CategoryRuleChildren({
+  rows,
+  stateOf,
+}: {
+  rows: NestedRow<CategoryChipRow>[];
+  stateOf: (cat: string) => CategoryChipState;
+}) {
+  return (
+    <div className="ml-1.5 border-l border-ink/15 pl-2 space-y-1.5">
+      {rows.map((row) => (
+        <div key={row.name} className="space-y-1.5">
+          <CategoryRuleChip row={row} state={stateOf(row.name)} size="sm" />
+          {row.children.length > 0 ? (
+            <CategoryRuleChildren rows={row.children} stateOf={stateOf} />
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
 }
