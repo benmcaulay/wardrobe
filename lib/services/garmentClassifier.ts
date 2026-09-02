@@ -37,6 +37,8 @@ export type DetectedGarment = {
   colors: Color[];
   pattern?: string;
   material?: string;
+  /** Only when actually legible — a guessed brand is worse than none. */
+  brand?: string;
 };
 
 /** Named-color vocabulary the classifier must choose from, so results map to real swatches. */
@@ -88,6 +90,7 @@ type RawClassifierJson = {
   colors?: unknown;
   pattern?: string;
   material?: string;
+  brand?: string;
   reason?: string;
   garments?: Array<{
     category?: string;
@@ -96,6 +99,7 @@ type RawClassifierJson = {
     colors?: unknown;
     pattern?: string;
     material?: string;
+    brand?: string;
   }>;
 };
 
@@ -150,9 +154,12 @@ Rules:
   - "colors": 1-3 dominant colors, MOST dominant first, chosen ONLY from this list: ${COLOR_VOCAB.join(", ")}. Pick the closest match; omit if unclear.
   - "pattern": e.g. solid, striped, plaid, floral, graphic, checked — or omit if unclear.
   - "material": best guess, e.g. cotton, denim, leather, wool, knit — or omit if unclear.
+  - "brand": ONLY if a logo, wordmark or label is actually legible in the photo.
+    Omit it otherwise. Do not infer a brand from the style of the garment — a
+    wrong brand is worse than no brand, because it looks like a fact.
 
 Reply with ONLY valid JSON (no markdown):
-{"scene":"worn"|"flatlay"|"other","garments":[{"category":"one of the categories above","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material"}],"reason":"why there is nothing to catalogue, when scene is other"}`;
+{"scene":"worn"|"flatlay"|"other","garments":[{"category":"one of the categories above","name":"short product title","confidence":0.0-1.0,"colors":["color"],"pattern":"pattern","material":"material","brand":"brand"}],"reason":"why there is nothing to catalogue, when scene is other"}`;
 }
 
 /** Back-compat export: the default (worn) prompt over the built-in taxonomy. */
@@ -356,6 +363,7 @@ export function normalizeScanDetection(
       colors: resolveColorNames(raw.colors),
       pattern: cleanAttr(raw.pattern),
       material: cleanAttr(raw.material),
+      brand: cleanAttr(raw.brand),
     });
   }
 
@@ -373,6 +381,7 @@ export function normalizeScanDetection(
         colors: resolveColorNames(g.colors),
         pattern: cleanAttr(g.pattern),
         material: cleanAttr(g.material),
+        brand: cleanAttr(g.brand),
       };
     })
     .filter((g) => g.confidence >= 0.35);

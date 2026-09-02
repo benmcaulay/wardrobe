@@ -27,19 +27,35 @@ const ISOLATED_CROP_GHOST_INSTRUCTION =
 type GarmentWorkItem = {
   garment: DetectedGarment;
   garmentImagePath: string;
-  /** Temp crop stored separately from the source photo. */
-  isDerivedCrop: boolean;
+  /**
+   * The image holds other garments too, so the ghost prompt needs the
+   * "ignore any other clothing" instruction. Several work items can share one
+   * hand-framed photo; `discardReviewItem` leaves that file alone because it
+   * only deletes a path that differs from `sourcePhotoPath`.
+   */
+  sharesFrame: boolean;
 };
 
 async function resolveGarmentWorkItems(
   userId: string,
   originalImagePath: string,
   garments: DetectedGarment[],
+  manualCrop = false,
 ): Promise<GarmentWorkItem[]> {
-  if (garments.length <= 1) {
-    const garment = garments[0];
-    if (!garment) return [];
-    return [{ garment, garmentImagePath: originalImagePath, isDerivedCrop: false }];
+  // A hand-framed photo is already the crop. Even with several garments in it,
+  // re-detecting boxes would spend a call per garment to re-derive what the
+  // user just drew — and the ghost prompt's "ignore other pieces" instruction
+  // covers the multi-garment case.
+  if (manualCrop || garments.length <= 1) {
+    if (garments.length === 0) return [];
+    // Every garment points at the same image. A hand-framed photo showing a
+    // shirt and jeans is two catalogue items, not one — dropping the rest
+    // would silently lose half the outfit.
+    return garments.map((garment) => ({
+      garment,
+      garmentImagePath: originalImagePath,
+      sharesFrame: garments.length > 1,
+    }));
   }
 
   const items: GarmentWorkItem[] = [];
@@ -48,11 +64,21 @@ async function resolveGarmentWorkItems(
     if (!bbox) continue;
     const croppedPath = await cropGarmentRegion(userId, originalImagePath, bbox);
     if (!croppedPath) continue;
-    items.push({ garment, garmentImagePath: croppedPath, isDerivedCrop: true });
+    items.push({
+      garment,
+      garmentImagePath: croppedPath,
+      sharesFrame: true,
+    });
   }
 
   if (items.length === 0) {
-    return [{ garment: garments[0]!, garmentImagePath: originalImagePath, isDerivedCrop: false }];
+    return [
+      {
+        garment: garments[0]!,
+        garmentImagePath: originalImagePath,
+        sharesFrame: false,
+      },
+    ];
   }
   return items;
 }
@@ -80,7 +106,7 @@ async function workItemToReview(
     ownerIds,
     // The garment is isolated from a multi-item scene, so its ghost needs the
     // "ignore other pieces" instruction. Persisted so commit can pass it on.
-    isolatedCrop: work.isDerivedCrop || undefined,
+    isolatedCrop: work.sharesFrame || undefined,
     dHash: hash ?? undefined,
     alreadyInCloset: match ? true : undefined,
     duplicateOfName: match?.name,
@@ -90,6 +116,7 @@ async function workItemToReview(
     colors: work.garment.colors.length > 0 ? work.garment.colors : undefined,
     pattern: work.garment.pattern,
     material: work.garment.material,
+    brand: work.garment.brand,
   };
 }
 
@@ -111,6 +138,12 @@ export async function processScanPhotoForReview(
     ownerIds?: string[];
     /** The user's own category labels, so the classifier answers in their taxonomy. */
     categoryOptions?: readonly string[];
+    /**
+     * The user already framed this photo in the picker, so its garment bounds
+     * are decided. Skips detectGarmentBounds — a Gemini call per garment, for
+     * a box worse than the one a human drew.
+     */
+    manualCrop?: boolean;
   } = {},
 ): Promise<CameraRollScanItemResult[]> {
   const sceneType = options.sceneType ?? DEFAULT_SCAN_SCENE;
@@ -162,7 +195,12 @@ export async function processScanPhotoForReview(
   }
 
   const splitGroupId = detection.garments.length > 1 ? crypto.randomUUID() : undefined;
-  const workItems = await resolveGarmentWorkItems(userId, originalImagePath, detection.garments);
+  const workItems = await resolveGarmentWorkItems(
+    userId,
+    originalImagePath,
+    detection.garments,
+    options.manualCrop,
+  );
   return Promise.all(
     workItems.map((work) =>
       workItemToReview(work, originalImagePath, closetIndex, ownerIds, splitGroupId),
@@ -177,6 +215,8 @@ export type CommitScanReviewSelection = {
   include: boolean;
   /** Owner roster ids chosen in review; falls back to the batch declaration. */
   ownerIds?: string[];
+  /** Brand as corrected in review. */
+  brand?: string;
 };
 
 export type CommitScanReviewResult = {
@@ -226,6 +266,7 @@ export async function commitScanReview(
     const owners = sanitizeOwnerIds(sel?.ownerIds ?? item.ownerIds ?? [], validOwnerIds, [
       primaryOwnerId,
     ]);
+    const brand = (sel?.brand ?? item.brand)?.trim() || null;
 
     if (!include) {
       await discardReviewItem(userId, item);
@@ -244,6 +285,7 @@ export async function commitScanReview(
         userId,
         name,
         category,
+        brand,
         colors: encode(item.colors ?? []),
         pattern: item.pattern ?? null,
         material: item.material ?? null,

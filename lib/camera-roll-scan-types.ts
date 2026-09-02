@@ -25,6 +25,7 @@ export type CommitScanReviewItemInput = {
   category: string;
   include: boolean;
   ownerIds?: string[];
+  brand?: string;
 };
 
 /** What the user declared before the picker opened (Mode A). */

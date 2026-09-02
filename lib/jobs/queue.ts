@@ -81,6 +81,11 @@ export type CameraRollScanPayload = {
    * ever persisted. Absent means Mode A (the user already filtered by hand).
    */
   references?: { ownerId: string; paths: string[] }[];
+  /**
+   * Photos the user framed by hand in the picker. Their garment bounds are
+   * already decided, so `detectGarmentBounds` is skipped for them.
+   */
+  manualCropPaths?: string[];
 };
 
 export type CameraRollScanItemResult = {
@@ -116,6 +121,8 @@ export type CameraRollScanItemResult = {
   scene?: ObservedScene;
   /** Mode B: cosine against the matched owner's reference centroid. */
   faceSimilarity?: number;
+  /** Brand read off the garment, editable in review before commit. */
+  brand?: string;
   reason?: string;
   error?: string;
 };

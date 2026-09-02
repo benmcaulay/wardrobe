@@ -20,17 +20,21 @@
 
 import { useState } from "react";
 import type { Owner } from "@/lib/json";
+import { PhotosPicker } from "./photos-picker";
 import { ScanClient } from "./scan-client";
 import { WearScanClient } from "./wear-scan-client";
 
-type Mode = "import" | "wears";
+type Mode = "browse" | "import" | "wears";
 
 const MODE_LABELS: Record<Mode, string> = {
+  browse: "Browse photos of me",
   import: "Add to closet",
   wears: "Find past wears",
 };
 
 const MODE_BLURB: Record<Mode, string> = {
+  browse:
+    "Photos Apple has already tagged as you, browsable here. Pick the ones with a clear garment, crop to yourself if it helps, and only those get classified.",
   import:
     "Bulk-import clothing from Apple Photos or your camera roll — we detect garments and let you review before anything hits your closet, then ghost the pieces you keep.",
   wears:
@@ -66,7 +70,7 @@ export function ScanModes({
         aria-label="What are these photos of?"
         className="flex w-fit gap-1 rounded-full border border-ink/10 bg-paper-warm p-1"
       >
-        {(["import", "wears"] as const).map((option) => (
+        {(["browse", "import", "wears"] as const).map((option) => (
           <button
             key={option}
             type="button"
@@ -84,6 +88,10 @@ export function ScanModes({
 
       {/* Both stay mounted: a half-finished import review is expensive to lose,
           and flipping over to check the other mode shouldn't discard it. */}
+      <div hidden={mode !== "browse"}>
+        <PhotosPicker owners={owners} onStarted={() => setMode("import")} />
+      </div>
+
       <div hidden={mode !== "import"}>
         <ScanClient
           credits={credits}

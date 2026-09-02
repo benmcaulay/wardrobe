@@ -57,6 +57,7 @@ type ReviewDraft = {
   alreadyInCloset?: boolean;
   duplicateOfName?: string;
   ownerIds: string[];
+  brand: string;
 };
 
 type ReviewSection = {
@@ -129,6 +130,7 @@ function draftsFromResult(
       // A resumed scan carries its own declaration; a fresh one uses what is
       // selected on screen right now.
       ownerIds: item.ownerIds?.length ? item.ownerIds : fallbackOwnerIds,
+      brand: item.brand ?? "",
     };
   });
 }
@@ -331,6 +333,7 @@ export function ScanClient({
           category: d.category,
           include: d.include,
           ownerIds: d.ownerIds,
+          brand: d.brand,
         })),
       );
       if (!res.ok) {
@@ -1015,6 +1018,13 @@ function ReviewFields({ draft, categories, owners, onPatch }: ReviewFieldProps) 
         onChange={(e) => onPatch(draft.reviewId, { name: e.target.value })}
         className="w-full rounded-lg border border-ink/15 px-2 py-1.5 text-sm bg-paper focus:outline-none focus:border-ink/40"
         placeholder="Name"
+      />
+      <input
+        type="text"
+        value={draft.brand}
+        onChange={(e) => onPatch(draft.reviewId, { brand: e.target.value })}
+        className="w-full rounded-lg border border-ink/15 px-2 py-1.5 text-sm bg-paper focus:outline-none focus:border-ink/40"
+        placeholder="Brand"
       />
       <select
         value={draft.category}

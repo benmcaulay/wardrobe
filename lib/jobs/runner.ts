@@ -228,6 +228,10 @@ async function runCameraRollScan(
   });
   const categoryOptions = getCategoriesListFromPrefs(parseStylePrefs(scanUser?.stylePrefs));
 
+  // Photos the user framed in the picker: their garment bounds are already
+  // decided, so detectGarmentBounds is skipped for them.
+  const manualCropPaths = new Set(payload.manualCropPaths ?? []);
+
   // Mode B: an in-memory face gate built from the user's hand-picked reference
   // photos. Null when the scan is Mode A, when no reference yielded exactly one
   // face, or when the models are not staged — in every one of those cases the
@@ -261,6 +265,7 @@ async function runCameraRollScan(
         batch = await processScanPhotoForReview(userId, photoPath, closetIndex, {
           sceneType: payload.sceneType,
           categoryOptions,
+          manualCrop: manualCropPaths.has(photoPath),
           // A matched owner overrides the batch declaration: the gate knows
           // whose photo this actually is, the declaration was only a default.
           ownerIds: gated?.ownerId ? [gated.ownerId] : payload.ownerIds,
