@@ -12,7 +12,8 @@ const photo = (uuid: string, over: Partial<LibraryPhoto> = {}): LibraryPhoto => 
   filename: `${uuid}.HEIC`,
   date: "2026-01-01T00:00:00",
   path: `/Users/x/Pictures/Photos Library.photoslibrary/originals/${uuid}.heic`,
-  derivative: `/Users/x/Pictures/Photos Library.photoslibrary/resources/derivatives/${uuid}.jpeg`,
+  derivative: `/Users/x/Pictures/Photos Library.photoslibrary/resources/derivatives/${uuid}_thumb.jpeg`,
+  derivativeFull: `/Users/x/Pictures/Photos Library.photoslibrary/resources/derivatives/${uuid}.jpeg`,
   persons: ["Ben"],
   missing: false,
   favorite: false,
@@ -86,8 +87,10 @@ describe("index cache", () => {
     const found = lookupIndexed("user-a", "CCC");
     expect(found?.missing).toBe(true);
     expect(found?.path).toBeNull();
-    // The derivative survives, which is why the tile still renders.
+    // Both derivatives survive locally, which is why an iCloud-optimised photo
+    // still renders AND can still be imported from the full-size preview.
     expect(found?.derivative).toBeTruthy();
+    expect(found?.derivativeFull).toBeTruthy();
   });
 
   it("lives on globalThis so the route handler sees the action's writes", () => {

@@ -26,19 +26,25 @@ import json
 import sys
 
 
-def smallest_derivative(photo) -> str | None:
+def derivatives_for(photo) -> tuple[str | None, str | None]:
     """
-    The cheapest derivative to send to a browser.
+    (thumbnail, full) from Apple's own previews.
 
-    `path_derivatives` is ordered largest-first in osxphotos, so the last entry
-    is the thumbnail. Grid tiles are ~200px; shipping the 2048px version would
-    be ~20x the bytes for no visible gain.
+    osxphotos documents `path_derivatives` as "sorted by file size (largest
+    first)", so [0] is the biggest and [-1] the thumbnail.
+
+    Both are needed for different jobs: grid tiles are ~200px and shipping the
+    large one there would be ~20x the bytes for no visible gain, while cropping
+    against a thumbnail would upload a ~200px garment and hand the classifier
+    something it cannot read a brand off.
     """
     try:
         derivatives = photo.path_derivatives or []
     except Exception:
-        return None
-    return derivatives[-1] if derivatives else None
+        return None, None
+    if not derivatives:
+        return None, None
+    return derivatives[-1], derivatives[0]
 
 
 def iso_date(value) -> str | None:
@@ -97,16 +103,19 @@ def main() -> int:
         # trashed were excluded on purpose by the user.
         if photo.intrash or photo.hidden or photo.screenshot:
             continue
+        thumb, full = derivatives_for(photo)
         out.append(
             {
                 "uuid": photo.uuid,
                 "filename": photo.original_filename or photo.filename,
                 "date": iso_date(photo.date),
                 # `path` is None when iCloud has optimised the original away.
-                # The derivative usually survives, so the tile still renders and
-                # only the import has to deal with it.
+                # The full-size derivative survives locally and is good enough
+                # to catalogue from, so import falls back to it rather than
+                # refusing the photo.
                 "path": photo.path,
-                "derivative": smallest_derivative(photo),
+                "derivative": thumb,
+                "derivativeFull": full,
                 "persons": [p for p in (photo.persons or []) if p != "_UNKNOWN_"],
                 "missing": bool(photo.ismissing) or not photo.path,
                 "favorite": bool(photo.favorite),

@@ -24,8 +24,13 @@ export type LibraryPhoto = {
   date: string | null;
   /** Full-resolution original. Null when iCloud has optimised it away. */
   path: string | null;
-  /** Photos-generated JPEG preview, read in place — nothing is exported. */
+  /** Smallest Photos-generated preview, for grid tiles. Read in place. */
   derivative: string | null;
+  /**
+   * Largest Photos-generated preview. Used for cropping, and as the import
+   * source when iCloud has optimised the original away.
+   */
+  derivativeFull: string | null;
   persons: string[];
   missing: boolean;
   favorite: boolean;

@@ -26,7 +26,9 @@ export default async function CameraRollScanPage() {
   const realGhost = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
 
   return (
-    <main className="max-w-2xl mx-auto px-6 py-12">
+    <main className="max-w-6xl mx-auto px-6 py-12">
+      {/* Wide enough for the photo grid; the form-shaped modes keep their own
+          narrow measure inside — see ScanModes. */}
       <nav className="mb-6 text-xs text-ink-muted">
         <Link href="/closet" className="hover:text-ink">
           ← Closet

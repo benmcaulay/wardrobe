@@ -239,7 +239,13 @@ export function PhotosPicker({
             </button>
           </div>
 
-          <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+          {/*
+            * auto-fill + minmax rather than fixed column counts: the number of
+            * columns follows the available width, so zooming in gives fewer,
+            * larger tiles and zooming out gives more — without a breakpoint per
+            * zoom level. 200px is the floor at which a garment is judgeable.
+            */}
+          <ul className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             {visible.map((photo) => {
               const pick = selected.get(photo.uuid);
               return (
@@ -269,14 +275,6 @@ export function PhotosPicker({
                       {pick.croppedDataUrl ? "Cropped ✓" : "Crop"}
                     </button>
                   )}
-                  {photo.missing && (
-                    <span
-                      className="absolute right-1 top-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] text-amber-900"
-                      title="Original isn't downloaded from iCloud — it can't be imported"
-                    >
-                      iCloud
-                    </span>
-                  )}
                 </li>
               );
             })}
@@ -291,7 +289,9 @@ export function PhotosPicker({
               Crop to just the person wearing the piece. Skipping the crop uses the whole photo.
             </p>
             <ImageCropper
-              src={`/api/photos-preview/${cropping.uuid}`}
+              // Full size, not the grid thumbnail: cropping a 360px preview
+              // would upload a garment too small to classify or ghost well.
+              src={`/api/photos-preview/${cropping.uuid}?size=full`}
               aspect={1}
               onCancel={() => setCropping(null)}
               onConfirm={(blob) => void onCropConfirmed(blob)}

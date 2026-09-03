@@ -126,14 +126,23 @@ export async function importSelectedPhotos(input: {
         const saved = await saveImageBuffer(Buffer.from(base64, "base64"), user.id);
         photoPaths.push(saved.originalImagePath);
         manualCropPaths.push(saved.originalImagePath);
-      } else if (photo.path) {
-        const bytes = await readFile(photo.path);
+      } else {
+        /*
+         * Prefer the original, fall back to the full-size derivative.
+         *
+         * iCloud's "Optimise Mac Storage" removes originals but leaves Apple's
+         * large preview behind, and that preview is easily good enough to
+         * catalogue a garment from. Refusing those photos would have made most
+         * of a real library unimportable for no benefit.
+         */
+        const source = photo.path ?? photo.derivativeFull ?? photo.derivative;
+        if (!source) {
+          skipped.push(`${photo.filename}: no image available locally`);
+          continue;
+        }
+        const bytes = await readFile(source);
         const saved = await saveImageBuffer(bytes, user.id);
         photoPaths.push(saved.originalImagePath);
-      } else {
-        // iCloud has optimised the original away. The thumbnail is too small to
-        // catalogue from, so say so rather than importing something unusable.
-        skipped.push(`${photo.filename}: original not downloaded from iCloud`);
       }
     } catch (err) {
       skipped.push(`${photo.filename}: ${err instanceof Error ? err.message : "upload failed"}`);

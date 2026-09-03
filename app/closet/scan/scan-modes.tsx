@@ -60,7 +60,7 @@ export function ScanModes({
 
   return (
     <div className="space-y-6">
-      <header>
+      <header className="max-w-2xl">
         <h1 className="font-serif text-4xl tracking-tight">Scan camera roll</h1>
         <p className="text-ink-muted mt-2">{MODE_BLURB[mode]}</p>
       </header>
@@ -92,7 +92,7 @@ export function ScanModes({
         <PhotosPicker owners={owners} onStarted={() => setMode("import")} />
       </div>
 
-      <div hidden={mode !== "import"}>
+      <div hidden={mode !== "import"} className="max-w-2xl">
         <ScanClient
           credits={credits}
           realGhost={realGhost}
@@ -100,7 +100,7 @@ export function ScanModes({
           owners={owners}
         />
       </div>
-      <div hidden={mode !== "wears"}>
+      <div hidden={mode !== "wears"} className="max-w-2xl">
         <WearScanClient embedded={embedded} total={total} />
       </div>
     </div>
