@@ -198,6 +198,42 @@ describe("cutOutBackdrop", () => {
     expect(cutOutBackdrop(px, size, size)).toBe(false);
   });
 
+  it("still cuts out when the garment touches a frame edge", () => {
+    /*
+     * The Arc'teryx jacket: a product photo whose hood met the top of the
+     * frame. The border was 96% pure white, but one dark run pushed max spread
+     * to 202, the old veto rejected it outright, and the item drew as a white
+     * rectangle over everything behind it on the outfit canvas.
+     */
+    const size = 20;
+    const px = onBackdrop(size, [255, 255, 255], [30, 30, 40]);
+    // Bleed the garment up to the top edge across a quarter of the width.
+    for (let x = 8; x < 13; x += 1) {
+      for (let y = 0; y < 6; y += 1) {
+        const i = (y * size + x) * 4;
+        px[i] = 30;
+        px[i + 1] = 30;
+        px[i + 2] = 40;
+      }
+    }
+    const detected = detectBorderBackground(px, size, size)!;
+    expect(detected.spread).toBeGreaterThan(34); // the old veto would have fired
+    expect(detected.color).toEqual({ r: 255, g: 255, b: 255 }); // median ignores the intrusion
+    expect(cutOutBackdrop(px, size, size)).toBe(true);
+    // The corner clears; the garment that reaches the edge is kept.
+    expect(alphaAt(px, size, 0, 0)).toBe(0);
+    expect(alphaAt(px, size, 10, 1)).toBe(255);
+  });
+
+  it("still refuses when no single colour covers most of the border", () => {
+    // Half backdrop, half something else is not a backdrop.
+    const size = 16;
+    const px = image(size, size, (x, y) =>
+      y < size / 2 ? [255, 255, 255] : [(x * 31) % 256, (y * 17) % 256, 90],
+    );
+    expect(cutOutBackdrop(px, size, size)).toBe(false);
+  });
+
   it("reports false rather than throwing on a degenerate image", () => {
     expect(cutOutBackdrop(new Uint8ClampedArray(4), 1, 1)).toBe(false);
   });

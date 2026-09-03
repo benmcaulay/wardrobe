@@ -43,8 +43,22 @@ const BLACK_MAX = 32;
  */
 const TOLERANCE = 20;
 
-/** Below this, the border isn't one flat colour and nothing should be removed. */
-const MAX_BORDER_SPREAD = 34;
+/**
+ * How much of the border must actually be the backdrop colour.
+ *
+ * This replaced a max-spread veto, which rejected any border containing a
+ * single off-colour pixel. Product photos routinely have the garment touching
+ * a frame edge — an Arc'teryx jacket whose hood met the top of a 1536px frame
+ * measured a border average of (253,253,253) and a max spread of 202, so the
+ * cutout refused outright and the item drew as a white rectangle over
+ * everything behind it on the outfit canvas.
+ *
+ * Coverage is the right question: is most of this border one flat colour? The
+ * removal itself is a flood fill seeded from the border, so a garment reaching
+ * the edge simply stays connected and is kept. A real photographic background
+ * still fails, because no single colour covers most of its border.
+ */
+const MIN_BORDER_COVERAGE = 0.7;
 
 function channelDistance(px: Uint8ClampedArray, i: number, c: Rgb): number {
   // Chebyshev rather than Euclidean: a backdrop that drifts on one channel
@@ -68,7 +82,7 @@ export function detectBorderBackground(
   px: Uint8ClampedArray,
   width: number,
   height: number,
-): { color: Rgb; spread: number } | null {
+): { color: Rgb; spread: number; coverage: number } | null {
   if (width < 2 || height < 2) return null;
 
   const at = (x: number, y: number) => (y * width + x) * 4;
@@ -89,18 +103,31 @@ export function detectBorderBackground(
     g += px[i + 1];
     b += px[i + 2];
   }
+  /*
+   * Median per channel, not mean. A garment intruding on one edge drags an
+   * average off the backdrop — enough of it and a white border reads as grey
+   * and fails `isRemovableBackdrop`. The median ignores the intrusion as long
+   * as it is the minority, which is the same assumption coverage makes.
+   */
   const color = {
-    r: Math.round(r / indices.length),
-    g: Math.round(g / indices.length),
-    b: Math.round(b / indices.length),
+    r: medianChannel(px, indices, 0),
+    g: medianChannel(px, indices, 1),
+    b: medianChannel(px, indices, 2),
   };
 
   let spread = 0;
+  let near = 0;
   for (const i of indices) {
     const d = channelDistance(px, i, color);
     if (d > spread) spread = d;
+    if (d <= TOLERANCE) near += 1;
   }
-  return { color, spread };
+  return { color, spread, coverage: near / indices.length };
+}
+
+function medianChannel(px: Uint8ClampedArray, indices: readonly number[], offset: number): number {
+  const values = indices.map((i) => px[i + offset]!).sort((a, b) => a - b);
+  return values[Math.floor(values.length / 2)] ?? 0;
 }
 
 /** Whether a detected backdrop is one we're willing to remove. */
@@ -211,7 +238,7 @@ export function cutOutBackdrop(
 ): boolean {
   const detected = detectBorderBackground(px, width, height);
   if (!detected) return false;
-  if (detected.spread > MAX_BORDER_SPREAD) return false;
+  if (detected.coverage < MIN_BORDER_COVERAGE) return false;
   if (!isRemovableBackdrop(detected.color)) return false;
   return knockOutBackdrop(px, width, height, detected.color) > 0;
 }
