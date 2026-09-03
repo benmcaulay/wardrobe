@@ -139,7 +139,22 @@ export function queryPersonPhotos(query: PersonQuery): LibraryPhoto[] {
 
 type CachedIndex = { photos: Map<string, LibraryPhoto>; at: number };
 
-const indexByUser = new Map<string, CachedIndex>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __photosIndex: Map<string, CachedIndex> | undefined;
+}
+
+/*
+ * On globalThis, for the same reason `lib/db.ts` puts Prisma there.
+ *
+ * Next compiles server actions and route handlers into separate bundles, so a
+ * plain module-level Map is not one Map — the action writes to its copy and the
+ * preview route reads an empty one. That failed as every thumbnail 404ing with
+ * "Not indexed" while the grid itself loaded fine, which points at the route
+ * rather than at the cache it is actually about.
+ */
+const indexByUser: Map<string, CachedIndex> = globalThis.__photosIndex ?? new Map();
+globalThis.__photosIndex = indexByUser;
 
 /** Long enough to browse and select; short enough not to pin stale paths. */
 const INDEX_TTL_MS = 60 * 60 * 1000;

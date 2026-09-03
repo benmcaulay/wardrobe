@@ -90,6 +90,16 @@ describe("index cache", () => {
     expect(found?.derivative).toBeTruthy();
   });
 
+  it("lives on globalThis so the route handler sees the action's writes", () => {
+    // Next compiles server actions and route handlers separately, so a plain
+    // module-level Map is two Maps: the action fills one, the preview route
+    // reads the other, and every thumbnail 404s "Not indexed".
+    cacheIndex("user-a", [photo("AAA")]);
+    const held = (globalThis as { __photosIndex?: Map<string, unknown> }).__photosIndex;
+    expect(held).toBeDefined();
+    expect(held!.has("user-a")).toBe(true);
+  });
+
   it("caps the index at a size the grid can render", () => {
     expect(MAX_INDEXED_PHOTOS).toBeGreaterThan(0);
     expect(MAX_INDEXED_PHOTOS).toBeLessThanOrEqual(5000);
