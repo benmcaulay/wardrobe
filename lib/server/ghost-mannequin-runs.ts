@@ -14,6 +14,33 @@ import {
 
 const REAL_GHOST = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
 
+
+/**
+ * The image a new render should be built from.
+ *
+ * Always the photograph, never a previous render — see the note at the call
+ * site. Exported and pure so the rule is stated in one place and pinned by a
+ * test, because the failure it prevents is silent: renders that quietly
+ * converge on copies of each other.
+ */
+export function resolveListingSource(item: {
+  originalImagePath: string;
+  ghostImagePath?: string | null;
+}): string {
+  return item.originalImagePath;
+}
+
+/** Image paths that are AI output, for telling a render source from a photo. */
+export function existingViewPaths(ghostViews: string | null): string[] {
+  if (!ghostViews) return [];
+  try {
+    const parsed = JSON.parse(ghostViews) as Array<{ imagePath?: string }>;
+    return parsed.map((v) => v.imagePath).filter((p): p is string => !!p);
+  } catch {
+    return [];
+  }
+}
+
 export type CompositionHint = "default" | "rear";
 
 export type PreviewGhostInput = {
@@ -194,21 +221,34 @@ export async function runGenerateGhostViewFor(
   }
 
   /*
-   * Render from whatever is currently the thumbnail, not from the original.
+   * Render from the photograph, never from a previous render.
    *
-   * `ghostImagePath` is the thumbnail pointer and null means "the original is
-   * the thumbnail" (see setPrimaryThumbnailFor). Reading it here is what makes
-   * the button do what the page shows: the tile you picked as the thumbnail is
-   * the cleanest image of the garment, and it is the one a second render should
-   * build on. Anchoring to the original instead meant that after whitening a
-   * photo or generating a good front view, every later render went back to the
-   * messy phone snap and repeated the work.
+   * This used to read `ghostImagePath ?? originalImagePath` — the thumbnail —
+   * on the reasoning that a second render should build on the cleanest image
+   * rather than "the messy phone snap". The effect was that once one ghost
+   * existed, every later generation was handed that ghost as its reference and
+   * reproduced it almost exactly: new views were copies, a bad pose could never
+   * be corrected by regenerating, and a prompt improvement did nothing until
+   * the old image was deleted. AI output was feeding AI input.
    *
-   * It also lets the original be deleted (deleteOriginalPhotoFor) without
-   * changing what generation reads — the promoted image is already the
-   * thumbnail.
+   * Both cases the old comment cited are already covered by
+   * `originalImagePath` itself, which is why dropping the ghost costs nothing:
+   *
+   *   - Whitening or cropping calls `replaceOriginalImageWithEdit`, which
+   *     repoints `originalImagePath` at the edited file. The improved photo IS
+   *     the original; there is no messy snap to fall back to.
+   *   - Deleting the original calls `deleteOriginalPhotoFor`, which promotes a
+   *     surviving view into `originalImagePath` (see lib/ghost-view-promote.ts),
+   *     so the pointer is always valid.
+   *
+   * After that promotion the "photograph" can itself be a render, but only
+   * because the user deleted the real one — an explicit choice, and by then
+   * there is nothing else left to draw from.
+   *
+   * An explicit `primaryGarmentPath` still wins, so deliberately generating
+   * from a particular view remains possible; it just is not the default.
    */
-  const listing = item.ghostImagePath ?? item.originalImagePath;
+  const listing = resolveListingSource(item);
   const primary =
     primaryGarmentPath?.trim() && primaryGarmentPath.trim() !== listing
       ? primaryGarmentPath.trim()
@@ -233,15 +273,21 @@ export async function runGenerateGhostViewFor(
   /*
    * Which image the render actually started from.
    *
-   * Worth a line of its own: the source is now the thumbnail rather than the
-   * original, `stack` can reorder it again when a primary override is passed,
-   * and a render that came out wrong is nearly impossible to diagnose without
-   * knowing which of an item's four images went in.
+   * Worth a line of its own: `stack` can reorder the source when a primary
+   * override is passed, and a render that came out wrong is nearly impossible
+   * to diagnose without knowing which of an item's four images went in.
+   *
+   * `fromRender` is the one to watch. It should be false almost always; true
+   * means this generation was seeded by earlier AI output, which is how renders
+   * used to converge on copies of each other.
    */
+  const knownRenders = new Set(
+    [item.ghostImagePath, ...existingViewPaths(item.ghostViews)].filter(Boolean) as string[],
+  );
   log.info("ghost.view.source", {
     itemId,
     garmentImagePath: stack.garmentImagePath,
-    fromThumbnail: stack.garmentImagePath === item.ghostImagePath,
+    fromRender: knownRenders.has(stack.garmentImagePath),
     extras: stack.extraImagePaths.length,
   });
 
