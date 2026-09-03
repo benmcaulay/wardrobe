@@ -102,6 +102,7 @@ const CATEGORY_LABEL: Record<GhostMannequinCategory, string> = {
   lowerbody: "BOTTOM",
   footwear: "FOOTWEAR",
   dress: "DRESS",
+  headwear: "HEADWEAR",
   accessory: "ACCESSORY",
   /** Fallback mapping — not “full outfit”; avoid misleading dev stub label. */
   full: "GENERAL",
@@ -357,7 +358,23 @@ const TYPE_FOOTWEAR = `TYPE — footwear:
 - They sit side by side and close together, the near one slightly forward.
 - The frame contains the shoes alone.`;
 
-const TYPE_ACCESSORY = `TYPE — accessory (hat, bag, scarf, belt, or similar):
+/*
+ * Hats get the footwear treatment: an explicit pose, not "a catalog pose".
+ *
+ * Under the accessory prompt a cap only had the global camera tenet, which
+ * says head-on at 0° yaw — unambiguous for a shirt, meaningless for a cap,
+ * because it does not say which face is the front. Imported hats came out
+ * facing every direction. These lines pin the same shot a shop uses.
+ */
+const TYPE_HEADWEAR = `TYPE — headwear (cap, hat, or beanie):
+- Front panel squarely to the camera, any logo or graphic centred and fully legible.
+- The brim points toward the viewer and tilts slightly down, so a sliver of its underside shows.
+- Crown upright and filled out as if on a head — never crushed, folded, or laid flat.
+- Seen from very slightly above the brim line, the way a shop photographs a cap.
+- A brimless beanie follows the same rule with its front facing the camera and the cuff level.
+- The frame contains the single hat alone.`;
+
+const TYPE_ACCESSORY = `TYPE — accessory (bag, scarf, belt, or similar):
 - Present the exact accessory from the reference in a clean retail catalog pose.
 - No stand, person, or unrelated garments.`;
 
@@ -413,7 +430,8 @@ function apparelLabel(category: Exclude<GhostMannequinCategory, "footwear">): st
     upperbody: "top garment (shirt, sweater, jacket, hoodie, or upper-body piece)",
     lowerbody: "bottom garment (pants, shorts, skirt — not shoes)",
     dress: "dress",
-    accessory: "accessory (hat, bag, scarf, belt, or similar)",
+    headwear: "hat (cap, beanie, or similar headwear)",
+    accessory: "accessory (bag, scarf, belt, or similar)",
     full: "item exactly as shown in the reference",
   }[category];
 }
@@ -424,6 +442,8 @@ function typeBlockFor(category: Exclude<GhostMannequinCategory, "footwear">): st
       return TYPE_BOTTOM;
     case "dress":
       return TYPE_DRESS;
+    case "headwear":
+      return TYPE_HEADWEAR;
     case "accessory":
       return TYPE_ACCESSORY;
     case "full":
@@ -441,9 +461,9 @@ function baseApparelPrompt(
   const identify =
     category === "full"
       ? "Identify the garment or accessory type from the reference, then follow that type's instructions."
-      : category === "accessory"
-        ? // "Fully unfolded garment" is meaningless for a hat or a bag; an
-          // accessory just needs to hold its own worn shape.
+      : category === "accessory" || category === "headwear"
+        ? // "Fully unfolded garment" is meaningless for a hat or a bag; these
+          // just need to hold their own worn shape.
           "Exact item from the reference, holding its natural shape, suspended in empty space with no wearer and no stand."
         : "Exact item from the reference, rebuilt as an upright fully unfolded garment suspended in empty space with no wearer and no stand.";
 

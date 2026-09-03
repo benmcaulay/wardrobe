@@ -92,7 +92,9 @@ export function ScanModes({
         <PhotosPicker owners={owners} onStarted={() => setMode("import")} />
       </div>
 
-      <div hidden={mode !== "import"} className="max-w-2xl">
+      {/* Unconstrained: ScanClient narrows its own form-shaped phases and
+          lets the review grid use the window. */}
+      <div hidden={mode !== "import"}>
         <ScanClient
           credits={credits}
           realGhost={realGhost}

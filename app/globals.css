@@ -3,19 +3,11 @@
 @tailwind utilities;
 
 /*
- * `.light` shares this block rather than repeating it.
+ * The palette. One light theme.
  *
- * Once `.dark` is on <html>, every descendant inherits the night palette and
- * there is no way to ask for paper again — which the mark sheet needs, because
- * comparing a logo on both backdrops means putting both on one screen
- * (app/icons/mark-sheet.tsx). Two selectors on one declaration means the two
- * scopes cannot drift; adding a `.light` block of its own would have been a
- * second copy of the palette to keep in sync.
- *
- * Nesting works in either direction and source order is irrelevant, because
- * these declarations land on *different elements*: a `.light` element inside
- * `html.dark` declares the light values on itself, and inheritance does the
- * rest. Specificity would only matter if both selectors matched one element.
+ * `.light` shares the block so a subtree can restate it explicitly — the mark
+ * sheet (app/icons/mark-sheet.tsx) puts the logo on more than one backdrop on
+ * one screen.
  */
 :root,
 .light {
@@ -30,8 +22,7 @@
   --accent-soft: #c5cfbc;
 
   /* Cards, tiles, and anything that should read as raised off the page.
-     Every one of these used to be a literal `bg-white`, which is a fine
-     colour for paper mode and a hole punched in the page in Space mode. */
+     A token rather than a literal `bg-white` at every call site. */
   --surface: #ffffff;
 
   /* Landing hero fallback before the canvas paints (landing toggles locally). */
@@ -52,31 +43,6 @@
   --room: 3rem;
   --room-loose: 5.5rem;
   --room-vast: 9rem;
-}
-
-/*
- * Space mode.
- *
- * Deep-space indigo with the same periwinkle the landing canvas already paints
- * (components/fabric-warp.tsx) — the app and the hero are finally the same
- * night rather than two unrelated dark themes.
- */
-.dark {
-  color-scheme: dark;
-
-  --ink: #e9e7e3;
-  --ink-soft: #cdcac4;
-  --ink-muted: #8c877f;
-  --paper: #101219;
-  --paper-warm: #191c26;
-  --accent: #93a487;
-  --accent-soft: #33402f;
-
-  /* One step above --paper-warm so a card still reads as lifted off the page.
-     Any closer and the whole app flattens into one indigo field. */
-  --surface: #1f2434;
-
-  --hero-bg: #080b18;
 }
 
 html,
@@ -219,111 +185,3 @@ body {
   background-color: var(--surface);
 }
 
-/* --- Space mode: the tinted alert/notice utilities -----------------------
-   Roughly forty call sites use Tailwind's own `red-50` / `amber-50` /
-   `emerald-100` tints for warnings, destructive actions, and success chips.
-   Those are near-white by construction, so in Space mode each one became a
-   bright rectangle punched into a dark page.
-
-   Remapped here, keyed on the utility class, rather than as forty `dark:`
-   variants at the call sites. Two reasons: the call sites are already long
-   ternaries where a second colour per branch is genuinely unreadable, and a
-   notice tint is a *semantic* choice — "this is a warning" — that should not
-   have to restate its palette in both modes every time somebody adds one.
-   A new `bg-red-50` written next week inherits this for free.
-
-   Unlayered on purpose: unlayered rules beat anything inside `@layer
-   utilities`, so these win over Tailwind's own without `!important`.
-   Saturated tints (`bg-red-600`, `bg-amber-500`) are left alone — they are
-   solid accents and read correctly on either background. */
-.dark .bg-red-50,
-.dark .hover\:bg-red-50:hover {
-  background-color: #2c1518;
-}
-.dark .bg-red-50\/40 {
-  background-color: rgb(44 21 24 / 0.4);
-}
-.dark .bg-rose-50,
-.dark .hover\:bg-rose-50:hover {
-  background-color: #2c1519;
-}
-.dark .bg-amber-50 {
-  background-color: #2a2010;
-}
-.dark .bg-amber-100 {
-  background-color: #38290f;
-}
-.dark .bg-green-50 {
-  background-color: #14251a;
-}
-.dark .bg-green-100 {
-  background-color: #1a3122;
-}
-.dark .bg-emerald-100 {
-  background-color: #173024;
-}
-.dark .bg-sky-100 {
-  background-color: #15273a;
-}
-.dark .bg-neutral-100 {
-  background-color: #23262e;
-}
-
-.dark .text-red-700,
-.dark .text-red-800 {
-  color: #f4a9a5;
-}
-.dark .text-rose-600,
-.dark .text-rose-700,
-.dark .text-rose-800 {
-  color: #f3a8b0;
-}
-.dark .text-amber-700,
-.dark .text-amber-800,
-.dark .text-amber-900 {
-  color: #e9c68a;
-}
-.dark .text-green-700,
-.dark .text-green-900 {
-  color: #a3d4b0;
-}
-.dark .text-green-900\/80 {
-  color: rgb(163 212 176 / 0.8);
-}
-.dark .text-emerald-700,
-.dark .text-emerald-900 {
-  color: #9ed4bb;
-}
-.dark .text-sky-900 {
-  color: #a3c7e8;
-}
-
-.dark .border-red-100,
-.dark .border-red-200,
-.dark .border-red-300 {
-  border-color: #5b2b2f;
-}
-.dark .border-rose-200 {
-  border-color: #5b2b33;
-}
-.dark .border-amber-100,
-.dark .border-amber-200 {
-  border-color: #55401c;
-}
-.dark .border-amber-300\/60 {
-  border-color: rgb(85 64 28 / 0.6);
-}
-.dark .border-green-700\/20 {
-  border-color: rgb(163 212 176 / 0.2);
-}
-
-/* `shadow-tile` is a warm ink shadow — it does real work on paper and none at
-   all against indigo, where a card is distinguished by --surface instead. In
-   Space mode it becomes a deeper cast shadow plus a one-pixel top highlight,
-   which is what actually reads as "lifted" on a dark background. */
-.dark .shadow-tile {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.04),
-    0 1px 2px rgb(0 0 0 / 0.4),
-    0 8px 24px rgb(0 0 0 / 0.35);
-}

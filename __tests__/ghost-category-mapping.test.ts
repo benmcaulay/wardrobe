@@ -14,7 +14,7 @@ import {
  */
 const REAL_CLOSET: Array<[category: string, count: number, expected: string]> = [
   ["shirt", 50, "upperbody"],
-  ["hat", 42, "accessory"],
+  ["hat", 42, "headwear"],
   ["shoes", 28, "footwear"],
   ["sweater/hoodie", 28, "upperbody"],
   ["shorts", 14, "lowerbody"],
@@ -59,7 +59,16 @@ describe("mapCategoryToGhost with real closet vocabulary", () => {
     // shoulders should be level and its sleeves should hang straight down.
     expect(mapCategoryToGhost("hat")).not.toBe("upperbody");
     expect(mapCategoryToGhost("accessory")).not.toBe("upperbody");
-    expect(mapCategoryToGhost("beanie")).toBe("accessory");
+  });
+
+  it("gives hats their own prompt rather than the generic accessory one", () => {
+    // Sharing "a clean retail catalog pose" with belts and bags left the angle
+    // to the model, so a row of imported hats faced a row of directions.
+    expect(mapCategoryToGhost("hat")).toBe("headwear");
+    expect(mapCategoryToGhost("beanie")).toBe("headwear");
+    // Everything else in the accessory bucket is unaffected.
+    expect(mapCategoryToGhost("accessory")).toBe("accessory");
+    expect(mapCategoryToGhost("belt")).toBe("accessory");
   });
 
   it("respects specificity: a dress shirt is a top, sweatpants are a bottom", () => {

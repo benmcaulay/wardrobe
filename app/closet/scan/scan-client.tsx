@@ -58,6 +58,8 @@ type ReviewDraft = {
   duplicateOfName?: string;
   ownerIds: string[];
   brand: string;
+  /** Split out of a "same item?" group by hand, so it sorts to the end. */
+  ungrouped?: boolean;
 };
 
 type ReviewSection = {
@@ -66,34 +68,47 @@ type ReviewSection = {
   drafts: ReviewDraft[];
 };
 
+/**
+ * Order: untouched items, then "same item?" groups, then anything split out of
+ * one by hand.
+ *
+ * Splitting used to shuffle the list. Clearing `duplicateGroupId` turned a
+ * draft into a plain single, singles render first, so the piece you just
+ * separated jumped to the top and everything below it shifted — while you were
+ * mid-way through naming things. Split items now sink to the end, where new
+ * work belongs and nothing you have already dealt with moves.
+ */
 function buildReviewSections(drafts: ReviewDraft[]): ReviewSection[] {
   const groups = new Map<string, ReviewDraft[]>();
   const singles: ReviewDraft[] = [];
+  const split: ReviewDraft[] = [];
   for (const draft of drafts) {
     if (draft.duplicateGroupId) {
       const list = groups.get(draft.duplicateGroupId) ?? [];
       list.push(draft);
       groups.set(draft.duplicateGroupId, list);
+    } else if (draft.ungrouped) {
+      split.push(draft);
     } else {
       singles.push(draft);
     }
   }
-  const sections: ReviewSection[] = singles.map((draft) => ({
+  const asSection = (draft: ReviewDraft): ReviewSection => ({
     key: draft.reviewId,
     isDuplicateGroup: false,
     drafts: [draft],
-  }));
+  });
+
+  const sections: ReviewSection[] = singles.map(asSection);
   for (const [groupId, list] of groups) {
-    // A group of one (after removals/ungrouping) is just a single item.
+    // A group of one (after removals) is just a single item.
     if (list.length <= 1) {
-      for (const d of list) {
-        sections.push({ key: d.reviewId, isDuplicateGroup: false, drafts: [d] });
-      }
+      for (const d of list) sections.push(asSection(d));
     } else {
       sections.push({ key: groupId, isDuplicateGroup: true, drafts: list });
     }
   }
-  return sections;
+  return [...sections, ...split.map(asSection)];
 }
 
 function imageFilesFromList(list: FileList | File[]): File[] {
@@ -459,7 +474,9 @@ export function ScanClient({
   function ungroupItem(reviewId: string) {
     setDrafts((prev) =>
       prev.map((d) =>
-        d.reviewId === reviewId ? { ...d, duplicateGroupId: undefined, include: true } : d,
+        d.reviewId === reviewId
+          ? { ...d, duplicateGroupId: undefined, ungrouped: true, include: true }
+          : d,
       ),
     );
   }
@@ -468,7 +485,9 @@ export function ScanClient({
   function ungroupGroup(groupId: string) {
     setDrafts((prev) =>
       prev.map((d) =>
-        d.duplicateGroupId === groupId ? { ...d, duplicateGroupId: undefined, include: true } : d,
+        d.duplicateGroupId === groupId
+          ? { ...d, duplicateGroupId: undefined, ungrouped: true, include: true }
+          : d,
       ),
     );
     setSplitGroups((prev) => {
@@ -493,7 +512,9 @@ export function ScanClient({
     [];
 
   return (
-    <div className="space-y-8">
+    // Review is a grid of photographs and wants the whole window; the
+    // form-shaped phases stay at a readable measure.
+    <div className={phase === "review" ? "space-y-8" : "space-y-8 max-w-2xl"}>
       {phase === "declare" && (
         <section className="rounded-2xl border border-ink/10 bg-surface p-8 space-y-8">
           <div className="space-y-2">
@@ -841,7 +862,16 @@ export function ScanClient({
                   Select none
                 </button>
               </div>
-              <ul className="space-y-3 max-h-[32rem] overflow-auto pr-1">
+              {/*
+                * A grid of big cards, scrolling with the page.
+                *
+                * This was a single narrow column of 64x80 thumbnails inside its
+                * own 32rem scroll box — three items visible at a time, each too
+                * small to tell a navy tee from a black one, which is the whole
+                * judgement being asked for. Cards now carry a real photograph
+                * and the grid reflows to the window.
+                */}
+              <ul className="grid items-start gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
                 {reviewSections.map((section) =>
                   section.isDuplicateGroup ? (
                     <DuplicateGroupReview
@@ -1079,29 +1109,38 @@ function SingleReviewItem({
 }: ReviewFieldProps & { onRemove: (reviewId: string) => void }) {
   return (
     <li
-      className={`relative rounded-xl border p-3 space-y-2 transition ${
-        draft.include ? "border-ink/15 bg-surface" : "border-ink/10 bg-paper-warm/50 opacity-80"
+      className={`relative rounded-xl border p-3 space-y-3 transition ${
+        draft.include ? "border-ink/15 bg-surface" : "border-ink/10 bg-paper-warm/50 opacity-70"
       }`}
     >
       <RemoveButton onClick={() => onRemove(draft.reviewId)} />
-      <div className="flex gap-3">
+      {/* The photo is the thing being judged, so it gets the card. Clicking it
+          toggles inclusion — the checkbox alone was a 16px target next to a
+          picture nobody could read. */}
+      <button
+        type="button"
+        onClick={() => onPatch(draft.reviewId, { include: !draft.include })}
+        aria-pressed={draft.include}
+        aria-label={draft.include ? "Don't import this piece" : "Import this piece"}
+        className="block w-full overflow-hidden rounded-lg bg-paper-warm"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imageUrl(draft.ghostImagePath ?? draft.originalImagePath)}
+          alt=""
+          className="aspect-[3/4] w-full object-cover"
+        />
+      </button>
+      <label className="flex items-center gap-2 text-xs text-ink-muted">
         <input
           type="checkbox"
           checked={draft.include}
           onChange={(e) => onPatch(draft.reviewId, { include: e.target.checked })}
-          className="mt-1 accent-ink"
-          aria-label="Import this piece"
+          className="accent-ink"
         />
-        <div className="w-16 h-20 rounded-lg overflow-hidden bg-paper-warm shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageUrl(draft.ghostImagePath ?? draft.originalImagePath)}
-            alt=""
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <ReviewFields draft={draft} categories={categories} owners={owners} onPatch={onPatch} />
-      </div>
+        Import this piece
+      </label>
+      <ReviewFields draft={draft} categories={categories} owners={owners} onPatch={onPatch} />
     </li>
   );
 }
@@ -1139,7 +1178,10 @@ function DuplicateGroupReview({
 
   return (
     <li
-      className={`rounded-xl border p-3 space-y-3 transition ${
+      // Spans two columns: a "same item?" group shows several candidates side
+      // by side, and squeezing that into one column is what made them
+      // unreadable in the old list.
+      className={`sm:col-span-2 rounded-xl border p-3 space-y-3 transition ${
         anyIncluded ? "border-accent/30 bg-accent-soft/10" : "border-ink/10 bg-paper-warm/50 opacity-80"
       }`}
     >
@@ -1219,7 +1261,7 @@ function DuplicateGroupReview({
                     onChange={() => onSelectPrimary(draft.reviewId)}
                     className="sr-only"
                   />
-                  <div className="w-16 h-20 rounded-md overflow-hidden bg-paper-warm">
+                  <div className="w-28 h-36 rounded-md overflow-hidden bg-paper-warm">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={imageUrl(draft.ghostImagePath ?? draft.originalImagePath)}
@@ -1241,7 +1283,7 @@ function DuplicateGroupReview({
             ))}
           </div>
           <div className="flex gap-3">
-            <div className="w-16 h-20 rounded-lg overflow-hidden bg-paper-warm shrink-0 opacity-0 pointer-events-none" />
+            <div className="w-28 h-36 rounded-lg overflow-hidden bg-paper-warm shrink-0 opacity-0 pointer-events-none" />
             <ReviewFields
               draft={selected}
               categories={categories}

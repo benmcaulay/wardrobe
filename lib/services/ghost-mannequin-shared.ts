@@ -9,9 +9,32 @@ export type GhostMannequinCategory =
   | "upperbody"
   | "lowerbody"
   | "footwear"
+  | "headwear"
   | "dress"
   | "accessory"
   | "full";
+
+/**
+ * Hats need their own prompt shape, for the same reason footwear does.
+ *
+ * `GarmentKind` puts a cap under "accessory" alongside bags, belts and
+ * watches, so it got the accessory prompt: "a clean retail catalog pose", with
+ * nothing about orientation. The global camera tenet says head-on at 0° yaw,
+ * which is unambiguous for a shirt and meaningless for a cap — head-on to the
+ * front panel, the crown, or the profile? The model picked differently every
+ * time, which is why a row of imported hats faces a row of different ways.
+ *
+ * Detected from text rather than by adding a GarmentKind, because the
+ * distinction only matters to the ghost prompt. `outfitRegion` already treats
+ * hats separately for its own reasons; adding a sixth kind would ripple through
+ * packing, slots and the stylist for no gain.
+ */
+const HEADWEAR_RE =
+  /\b(hat|hats|cap|caps|beanie|snapback|trucker|fitted|bucket hat|visor|headwear|balaclava|beret)\b/;
+
+function looksLikeHeadwear(text: string): boolean {
+  return HEADWEAR_RE.test(text.trim().toLowerCase());
+}
 
 /** GarmentKind is the shared taxonomy; this is the prompt-shape it selects. */
 const KIND_TO_GHOST: Record<GarmentKind, GhostMannequinCategory> = {
@@ -47,7 +70,9 @@ const KIND_TO_GHOST: Record<GarmentKind, GhostMannequinCategory> = {
  * synonym table here.
  */
 export function mapCategoryToGhost(category: string): GhostMannequinCategory {
-  return KIND_TO_GHOST[classifyGarmentKind({ category })];
+  const kind = classifyGarmentKind({ category });
+  if (kind === "accessory" && looksLikeHeadwear(category)) return "headwear";
+  return KIND_TO_GHOST[kind];
 }
 
 /**
@@ -62,7 +87,14 @@ export function mapItemToGhost(item: {
   /** User-assigned shapes by normalised category name; beats text inference. */
   categoryShapes?: Record<string, GarmentKind> | null;
 }): GhostMannequinCategory {
-  return KIND_TO_GHOST[classifyGarmentKind(item)];
+  const kind = classifyGarmentKind(item);
+  if (kind === "accessory") {
+    // Category first, then the name: "Hat" as a category is a stronger signal
+    // than the word "cap" happening to appear in a product title.
+    const text = `${item.category ?? ""} ${item.subcategory ?? ""} ${item.name ?? ""}`;
+    if (looksLikeHeadwear(text)) return "headwear";
+  }
+  return KIND_TO_GHOST[kind];
 }
 
 export type GhostCategoryCheck =
