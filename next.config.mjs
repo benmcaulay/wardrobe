@@ -23,7 +23,48 @@ const nextConfig = {
       "onnxruntime-node",
     ],
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, webpack }) => {
+    /*
+     * Don't re-minify vendor bundles that ship pre-minified as ESM.
+     *
+     * `@huggingface/transformers` imports `onnxruntime-web/webgpu`, which emits
+     * `ort.webgpu.bundle.min.<hash>.mjs` into static/media. Next's Terser
+     * plugin sets `terserOptions.module = true` for `.mjs` — but only on its
+     * worker path. The swcMinify path (the 14.x default) calls swc.minify()
+     * without forwarding that flag, so the file is parsed as a *script*, and
+     * `import.meta` inside it is a syntax error. The whole production build
+     * fails with "'import.meta' cannot be used outside of module code".
+     *
+     * The plugin skips any asset already flagged `minimized`, and these are
+     * genuinely already minified — the flag is accurate, not a dodge. Marking
+     * them keeps swcMinify on for everything we actually author.
+     *
+     * Revisit when Next forwards `module` to swc.minify, or when the WebGPU
+     * entry stops being imported at all (lib/wear/encoder.ts pins the wasm
+     * backend, so nothing here needs it).
+     */
+    config.plugins.push({
+      apply(compiler) {
+        compiler.hooks.compilation.tap("MarkPreMinifiedVendorEsm", (compilation) => {
+          compilation.hooks.processAssets.tap(
+            {
+              name: "MarkPreMinifiedVendorEsm",
+              stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_SIZE - 1,
+            },
+            (assets) => {
+              for (const name of Object.keys(assets)) {
+                // The content hash is injected before the extension, so the
+                // emitted name is `…bundle.min.<hash>.mjs`, not `….min.mjs`.
+                if (/\.min\.[^/]*\.mjs$/i.test(name)) {
+                  compilation.updateAsset(name, (source) => source, { minimized: true });
+                }
+              }
+            },
+          );
+        });
+      },
+    });
+
     if (!isServer) {
       // transformers.js ships Node-only backends alongside the browser ones and
       // imports them unconditionally. Without these aliases webpack tries to
