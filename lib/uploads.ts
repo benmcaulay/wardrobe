@@ -62,9 +62,23 @@ export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<S
   let thumb: Buffer;
   let meta: sharp.OutputInfo;
   try {
+    /*
+     * keepIccProfile: an iPhone photo is Display P3, and sharp strips metadata
+     * by default while NOT converting the pixels. Measured here: three very
+     * different embedded profiles over identical pixel values all come out
+     * byte-identical, so libvips is not transforming through the input
+     * profile — it only drops the tag. The result is P3-encoded pixels emitted
+     * untagged, which every consumer then reads as sRGB. Same numbers, wrong
+     * colour, and the classifier maps that onto FAVORITE_COLOR_OPTIONS.
+     *
+     * Keeping the profile costs ~500 bytes and makes the pixels mean what they
+     * were authored to mean. Tagging the output sRGB instead
+     * (`withIccProfile("srgb")`) would be the same mistake written down.
+     */
     const out = await sharp(buffer)
       .rotate()
       .resize({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "inside", withoutEnlargement: true })
+      .keepIccProfile()
       .jpeg({ quality: 88, mozjpeg: true })
       .toBuffer({ resolveWithObject: true });
     original = out.data;
@@ -72,6 +86,7 @@ export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<S
     thumb = await sharp(buffer)
       .rotate()
       .resize({ width: THUMB_EDGE_PX, height: THUMB_EDGE_PX, fit: "inside", withoutEnlargement: true })
+      .keepIccProfile()
       .jpeg({ quality: 78, mozjpeg: true })
       .toBuffer();
   } catch (err) {
