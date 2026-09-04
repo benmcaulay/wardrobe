@@ -13,6 +13,7 @@ import {
 } from "@/lib/jobs/queue";
 import { getOwnersFromPrefs, getPrimaryOwnerId, sanitizeOwnerIds } from "@/lib/owners";
 import { parseScanSceneType } from "@/lib/scan-scene";
+import { checkScanQuota } from "@/lib/ai-guardrails";
 import { commitScanReview } from "@/lib/server/camera-roll-scan";
 import { assignDuplicateGroups } from "@/lib/server/scan-duplicate-groups";
 import { saveUpload, UploadError } from "@/lib/uploads";
@@ -77,6 +78,11 @@ export async function startCameraRollScan(
       return { ok: false, error: "One or more photos do not belong to you" };
     }
   }
+
+  // Classification has no ledger row, so the generation quota cannot see it.
+  // Cap scans per day instead — each is bounded by MAX_SCAN_PHOTOS.
+  const scanQuota = await checkScanQuota(user.id);
+  if (!scanQuota.ok) return { ok: false, error: scanQuota.error };
 
   // Resolve the declared owners against the live roster here rather than
   // trusting the client: the job payload outlives the tab that created it, and

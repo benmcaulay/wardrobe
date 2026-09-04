@@ -11,6 +11,7 @@
 
 import { readFile } from "node:fs/promises";
 import { requireUser } from "@/lib/auth";
+import { checkScanQuota } from "@/lib/ai-guardrails";
 import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getOwnersFromPrefs, getPrimaryOwnerId, sanitizeOwnerIds } from "@/lib/owners";
@@ -97,6 +98,9 @@ export async function importSelectedPhotos(input: {
   const user = await requireUser();
   const selections = input.selections.slice(0, MAX_SCAN_PHOTOS);
   if (selections.length === 0) return { ok: false, error: "Nothing selected" };
+
+  const scanQuota = await checkScanQuota(user.id);
+  if (!scanQuota.ok) return { ok: false, error: scanQuota.error };
 
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
