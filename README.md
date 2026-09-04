@@ -98,7 +98,7 @@ where in dev it is only a warning.
 | --- | --- |
 | `NEXTAUTH_SECRET` | Signs session tokens. Generate one per environment: `openssl rand -base64 32`. Rotating it invalidates every existing session. |
 | `NEXTAUTH_URL` | The deployed origin, e.g. `https://wardrobe.example.com`. Wrong value breaks the OAuth callback. |
-| `AUTH_DEMO_MODE` | **Must be `"false"` or unset.** `"true"` puts a one-click, passwordless button on the landing page that signs everyone into a *single shared account* holding 1,000,000 credits — every visitor lands in the same closet. |
+| `AUTH_DEMO_MODE` | Ignored in production — demo mode refuses to run there whatever this says, so a stray `"true"` cannot open the shared account. Leave it unset on a host anyway. |
 | `DATABASE_URL` | Postgres. |
 | `GEMINI_API_KEY` | The only paid AI provider. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Real sign-in. Authorized redirect URI is `<origin>/api/auth/callback/google`. |
@@ -227,9 +227,13 @@ in Postgres (Prisma adapter). Register an OAuth app in Google Cloud Console
 For keyless local dev there's an explicit **demo mode**
 (`AUTH_DEMO_MODE="true"`, on in `.env.example`): the landing page shows an
 "Enter demo" button that sets a cookie pointing at a single shared user
-(`demo@local.test`). The demo cookie is not a credential — never enable
-demo mode on a deployment with real users. Sign-out (both kinds) is
-`POST /api/logout`, which also revokes the database session row.
+(`demo@local.test`). The cookie is not a credential and the account is shared,
+so `demoModeEnabled()` returns false under `NODE_ENV=production` whatever the
+variable says — the button disappears, `/api/demo/enter` 404s, and an existing
+cookie stops counting as a session. There is deliberately no override; a demo
+real people can reach needs a throwaway account per visitor, which is a
+different feature. Sign-out (both kinds) is `POST /api/logout`, which also
+revokes the database session row.
 
 ## Replacing the rest of the stubs
 

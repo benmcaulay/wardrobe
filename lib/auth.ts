@@ -5,17 +5,8 @@ import { getServerSession } from "next-auth";
 import { prisma } from "./db";
 import { authOptions } from "./auth-options";
 
-export { DEMO_USER_COOKIE, DEMO_USER_EMAIL } from "./auth-shared";
-import { DEMO_USER_COOKIE, DEMO_USER_EMAIL } from "./auth-shared";
-
-/**
- * Demo mode is an explicit opt-in (AUTH_DEMO_MODE="true"): a single shared
- * user behind a plain cookie, for local dev and keyless demos. Never enable
- * it on a deployment with real users — the cookie is not a credential.
- */
-export function demoModeEnabled(): boolean {
-  return process.env.AUTH_DEMO_MODE === "true";
-}
+export { DEMO_USER_COOKIE, DEMO_USER_EMAIL, demoModeEnabled } from "./auth-shared";
+import { DEMO_USER_COOKIE, DEMO_USER_EMAIL, demoModeEnabled } from "./auth-shared";
 
 /**
  * Returns the demo user (creating it on first run). Only meaningful in demo

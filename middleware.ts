@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { DEMO_USER_COOKIE } from "@/lib/auth-shared";
+import { DEMO_USER_COOKIE, demoModeEnabled } from "@/lib/auth-shared";
 
 const PUBLIC_PATHS = ["/", "/api/demo/enter", "/api/logout"];
 const PUBLIC_PREFIXES = [
@@ -34,10 +34,18 @@ export function middleware(req: NextRequest) {
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
+  /*
+   * The demo cookie counts as a session only while demo mode is on.
+   *
+   * It used to count purely by existing. getCurrentUser() checks demo mode
+   * before honouring it, so a stale cookie never actually authenticated
+   * anyone — but it did get them past this gate and into pages that then
+   * failed further in, which reads as a broken app rather than a locked one.
+   */
   const hasSession =
     req.cookies.has("__Secure-next-auth.session-token") ||
     req.cookies.has("next-auth.session-token") ||
-    req.cookies.has(DEMO_USER_COOKIE);
+    (demoModeEnabled() && req.cookies.has(DEMO_USER_COOKIE));
   if (!hasSession) {
     const url = req.nextUrl.clone();
     url.pathname = "/";
