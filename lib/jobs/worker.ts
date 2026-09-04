@@ -8,13 +8,37 @@ import { claimNextJob, failExpiredJobs } from "./queue";
 import { runJob } from "./runner";
 import { log } from "../log";
 
-/** Claim and run jobs until the queue is empty. Returns how many ran. */
-export async function drainOnce(max = Infinity): Promise<number> {
+export type DrainOptions = {
+  /** Stop after this many jobs. */
+  max?: number;
+  /**
+   * Stop *starting* jobs once this many ms have elapsed.
+   *
+   * Serverless is the reason this exists. A platform kills the invocation at
+   * its own deadline with no warning, and a job killed mid-flight stays
+   * `running` until its lease expires — so the drain has to stop itself before
+   * the platform does. The budget is checked before claiming, never mid-job,
+   * because abandoning a half-finished generation is the thing being avoided.
+   */
+  budgetMs?: number;
+};
+
+/** Claim and run jobs until the queue is empty, the cap, or the budget. */
+export async function drainOnce(options: number | DrainOptions = {}): Promise<number> {
+  const { max = Infinity, budgetMs = Infinity } =
+    typeof options === "number" ? { max: options } : options;
+
   // Retire anything a dead worker abandoned past its retries, so no job can
   // sit in "running" forever with the UI showing it as still in flight.
   await failExpiredJobs().catch((err) => log.error("jobs.lease-sweep.failed", err));
+
+  const startedAt = Date.now();
   let ran = 0;
   while (ran < max) {
+    if (Date.now() - startedAt >= budgetMs) {
+      log.info("jobs.drain.budget-reached", { ran, budgetMs });
+      break;
+    }
     const job = await claimNextJob();
     if (!job) break;
     await runJob(job);

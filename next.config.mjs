@@ -22,6 +22,28 @@ const nextConfig = {
       "@huggingface/transformers",
       "onnxruntime-node",
     ],
+    /*
+     * Keep the native ML binaries out of hosted function bundles.
+     *
+     * onnxruntime-node is 283 MB of platform binaries and @huggingface/
+     * transformers drags its own copy. Both exist for features that only work
+     * on the machine holding the Photos library — the Mode B face gate needs
+     * locally staged models — so on Vercel they are pure weight, and they push
+     * a function past the 250 MB unzipped limit that applies to any project
+     * not enrolled in large-functions support.
+     *
+     * Safe because both are reached through a lazy `await import()` guarded by
+     * an availability check, so a deployment without them degrades to the
+     * behaviour it already has when the models are unstaged.
+     */
+    outputFileTracingExcludes: {
+      "**": [
+        "./node_modules/onnxruntime-node/**",
+        "./node_modules/@huggingface/transformers/**",
+        "./node_modules/.pnpm/onnxruntime-node*/**",
+        "./node_modules/.pnpm/@huggingface+transformers*/**",
+      ],
+    },
   },
   webpack: (config, { isServer, webpack }) => {
     /*

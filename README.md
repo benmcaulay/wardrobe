@@ -104,6 +104,35 @@ where in dev it is only a warning.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Real sign-in. Authorized redirect URI is `<origin>/api/auth/callback/google`. |
 | S3/R2 vars | Object storage; the local disk driver does not survive a redeploy. |
 
+`CRON_SECRET` is also required on any host where Vercel Cron drains the queue —
+see below.
+
+#### Vercel
+
+`vercel.json` schedules `/api/cron/drain` every minute. That endpoint *is* the
+worker: Vercel has nowhere to run `pnpm worker`, and `kickJobDrain` is
+fire-and-forget after the response, which a serverless function may freeze
+before finishing. The route reuses the same claim/lease/`runJob` path as the
+CLI worker rather than reimplementing it.
+
+- **A per-minute cron needs Pro.** Hobby allows one cron run per day and
+  *fails the deployment* on anything more frequent. On Hobby either change the
+  schedule to `"0 * * * *"`-or-slower and accept the latency, or drive
+  `/api/cron/drain` from an external pinger.
+- **`CRON_SECRET` must be set.** Vercel sends it as `Authorization: Bearer`.
+  Without it the route returns 503 and drains nothing — draining spends Gemini
+  credits, so it fails closed rather than running open.
+- **`STORAGE_DRIVER="s3"`** with the S3/R2 variables. The local disk driver
+  writes under `./uploads`, which does not survive a deploy.
+- **`maxDuration` is 300s** for the drain (`vercel.json`). One ghost is
+  ~12–48s against a 120s ceiling; the route stops *starting* jobs at 240s so
+  the last one finishes inside the limit, and reports `more: true` when the
+  queue still holds work.
+- The native ML packages are excluded from function bundles via
+  `outputFileTracingExcludes` — onnxruntime-node alone is 283 MB against a
+  250 MB unzipped limit. They are reached through a guarded lazy import, so a
+  host without them behaves exactly as it does when the models are unstaged.
+
 Two things do **not** work off this machine, by construction:
 
 - **Browse photos of me** shells out to `osxphotos` against the local Photos

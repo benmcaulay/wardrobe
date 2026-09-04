@@ -24,7 +24,6 @@ import {
   tallyScanProgress,
 } from "../server/camera-roll-scan";
 import { assignDuplicateGroups } from "../server/scan-duplicate-groups";
-import { buildFaceGate, faceSkipReason } from "../face/gate";
 import { loadClosetHashIndex } from "../server/scan-closet-index";
 import {
   markJobSucceeded,
@@ -232,12 +231,20 @@ async function runCameraRollScan(
   // decided, so detectGarmentBounds is skipped for them.
   const manualCropPaths = new Set(payload.manualCropPaths ?? []);
 
-  // Mode B: an in-memory face gate built from the user's hand-picked reference
-  // photos. Null when the scan is Mode A, when no reference yielded exactly one
-  // face, or when the models are not staged — in every one of those cases the
-  // scan proceeds unfiltered rather than silently importing nothing.
+  /*
+   * Mode B: an in-memory face gate built from the user's hand-picked reference
+   * photos. Null when the scan is Mode A, when no reference yielded exactly one
+   * face, or when the models are not staged — in every one of those cases the
+   * scan proceeds unfiltered rather than silently importing nothing.
+   *
+   * Imported lazily, and only when a scan actually carries references. The
+   * module pulls in onnxruntime-node, which is 283 MB of native binaries; a
+   * static import puts all of it in every serverless function that can reach
+   * the runner. Mode B needs a local Photos library and staged models, so on a
+   * hosted deployment that weight would buy nothing at all.
+   */
   const faceGate = payload.references?.length
-    ? await buildFaceGate(payload.references)
+    ? await import("../face/gate").then((m) => m.buildFaceGate(payload.references!))
     : null;
 
   // Bounded-concurrency pool: each worker pulls the next photo until drained,
@@ -257,7 +264,7 @@ async function runCameraRollScan(
             reviewId: randomUUID(),
             originalImagePath: photoPath,
             status: "skipped",
-            reason: faceSkipReason(gated),
+            reason: (await import("../face/gate")).faceSkipReason(gated),
             faceSimilarity: gated.similarity || undefined,
           },
         ];
