@@ -87,6 +87,34 @@ pnpm start                     # http://localhost:3000
 
 For a quick LAN demo to your phone: `pnpm start -- -H 0.0.0.0`.
 
+### Deploying somewhere other than this machine
+
+`.env` is gitignored and never leaves the laptop, so a host needs these set in
+its own environment. The first two are not optional — NextAuth throws
+`[next-auth][error][NO_SECRET]` on every page in production without a secret,
+where in dev it is only a warning.
+
+| Variable | Why |
+| --- | --- |
+| `NEXTAUTH_SECRET` | Signs session tokens. Generate one per environment: `openssl rand -base64 32`. Rotating it invalidates every existing session. |
+| `NEXTAUTH_URL` | The deployed origin, e.g. `https://wardrobe.example.com`. Wrong value breaks the OAuth callback. |
+| `AUTH_DEMO_MODE` | **Must be `"false"` or unset.** `"true"` puts a one-click, passwordless button on the landing page that signs everyone into a *single shared account* holding 1,000,000 credits — every visitor lands in the same closet. |
+| `DATABASE_URL` | Postgres. |
+| `GEMINI_API_KEY` | The only paid AI provider. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Real sign-in. Authorized redirect URI is `<origin>/api/auth/callback/google`. |
+| S3/R2 vars | Object storage; the local disk driver does not survive a redeploy. |
+
+Two things do **not** work off this machine, by construction:
+
+- **Browse photos of me** shells out to `osxphotos` against the local Photos
+  library. It hides itself behind `photosAvailable()` elsewhere, so the mode
+  degrades to a message rather than erroring.
+- **The job worker** (`pnpm worker`) is a separate process with no supervision.
+  Nothing generates ghosts while it is down, and `claimNextJob` has no job-type
+  affinity, so a worker that cannot reach this machine's models will still
+  claim work that needs them.
+
+
 To smoke-test the fal.ai round-trip without the UI:
 
 ```bash
