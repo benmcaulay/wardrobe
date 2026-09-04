@@ -18,6 +18,7 @@
  */
 
 import { categoryListSignature } from "@/lib/outfit-random";
+import { categoryAncestryPath, type CategoryParents } from "@/lib/category-tree";
 import {
   builtinCategoryScale,
   combinationKey,
@@ -59,11 +60,17 @@ export type LookLayoutPrefs = {
   layerArrangements: Record<string, string[]>;
   layerOrder: string[];
   /**
-   * Category -> its ancestry, most specific first. Without it a nested
-   * category misses the built-in size of the parent it inherits from and the
-   * carousel draws the same look at a different size than the builder.
+   * The category tree, as data rather than a resolver.
+   *
+   * A nested category has to inherit the built-in size of the category it sits
+   * under, or the carousel draws the same look at a different size than the
+   * builder. That needs the ancestry — but these prefs are built in a server
+   * component and handed to a client one, and a function cannot cross that
+   * boundary ("Functions cannot be passed directly to Client Components").
+   * So the tree travels as plain data and the resolver is built here.
    */
-  ancestryOf?: (category: string) => string[];
+  categoryParents?: CategoryParents;
+  categoryList?: string[];
 };
 
 export const EMPTY_LOOK_PREFS: LookLayoutPrefs = {
@@ -113,8 +120,19 @@ export function composeLook(
   prefs: LookLayoutPrefs = EMPTY_LOOK_PREFS,
 ): PlacedPiece[] {
   if (pieces.length === 0) return [];
-  const { slotDefaults, visualLayers, comboLayouts, layerArrangements, layerOrder, ancestryOf } =
-    prefs;
+  const {
+    slotDefaults,
+    visualLayers,
+    comboLayouts,
+    layerArrangements,
+    layerOrder,
+    categoryParents,
+    categoryList,
+  } = prefs;
+
+  const ancestryOf = categoryParents
+    ? (category: string) => categoryAncestryPath(category, categoryParents, categoryList ?? [])
+    : undefined;
 
   // 1. Base placement, counting repeats of the same category signature.
   const usedBySignature = new Map<string, number>();

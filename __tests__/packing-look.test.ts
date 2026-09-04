@@ -200,3 +200,43 @@ describe("lookBounds", () => {
     expect(b.height).toBeGreaterThan(0);
   });
 });
+
+describe("LookLayoutPrefs crosses the server/client boundary", () => {
+  /**
+   * These prefs are built in a server component (smartpakker/[tripId]/page.tsx)
+   * and handed to a client one. A function on the object throws at runtime with
+   * "Functions cannot be passed directly to Client Components", which no type
+   * check catches — an `ancestryOf: (c) => string[]` field did exactly that and
+   * took the whole trip page down.
+   */
+  it("carries no function-valued fields", () => {
+    const prefs = prefsWith({
+      categoryParents: { jeans: "pants", pants: "bottom" },
+      categoryList: ["bottom", "pants", "jeans"],
+    });
+    for (const [key, value] of Object.entries(prefs)) {
+      expect(typeof value, `${key} must be serialisable`).not.toBe("function");
+    }
+  });
+
+  it("survives a JSON round trip", () => {
+    const prefs = prefsWith({
+      categoryParents: { jeans: "pants", pants: "bottom" },
+      categoryList: ["bottom", "pants", "jeans"],
+    });
+    expect(JSON.parse(JSON.stringify(prefs))).toEqual(prefs);
+  });
+
+  it("still inherits a nested category's built-in size from the tree", () => {
+    // "jeans" does not contain "pant", so it only reaches scale 2 by walking up
+    // to "pants" — the reason the tree has to travel at all.
+    const withTree = composeLook([piece("a", "jeans")], {
+      ...EMPTY_LOOK_PREFS,
+      categoryParents: { jeans: "pants", pants: "bottom" },
+      categoryList: ["bottom", "pants", "jeans"],
+    });
+    const withoutTree = composeLook([piece("a", "jeans")]);
+    expect(withTree[0]!.scale).toBe(2);
+    expect(withoutTree[0]!.scale).toBe(1);
+  });
+});
