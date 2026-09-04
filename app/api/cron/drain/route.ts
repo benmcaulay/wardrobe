@@ -11,6 +11,12 @@
  * response, and a serverless function can be frozen the instant it responds,
  * so work started that way may simply never finish.
  *
+ * On Vercel Hobby this runs once a day, because Hobby rejects any more
+ * frequent expression at deploy time. That makes it a backstop, not a worker:
+ * imports rely on the best-effort inline drain and anything it misses waits
+ * for the nightly sweep. Pro allows minute-level cron, which is what turns
+ * this back into a real worker.
+ *
  * Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET` when that
  * variable is set. Without a secret configured the route refuses rather than
  * running open — draining costs real Gemini credits, so an unauthenticated
