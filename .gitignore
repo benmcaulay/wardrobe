@@ -48,3 +48,6 @@ pnpm-debug.log*
 
 # staged face models (pnpm face:fetch)
 .models/
+
+# npm lockfile — this project is pnpm (see packageManager)
+package-lock.json
