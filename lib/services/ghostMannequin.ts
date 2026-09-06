@@ -292,6 +292,8 @@ const TENET_LINING = `Openings — visible interior / back lining when applicabl
 const TENET_REFERENCE_POSE = `Reference is for identity only — never for pose:
 - Copy only what the item IS: its cut, colors, stripes, prints, logos, trims, and fabric.
 - Ignore entirely HOW the reference is presented. It may be folded, stacked, laid flat, crumpled, draped, on a hanger, in a box, or worn by a person — none of that carries over.
+- Its framing does not carry over either. The reference may be a tight close-up, a crop, or a shot where the item runs off the edge — never reproduce that zoom or crop. Re-frame from scratch around the whole garment.
+- Its lighting does not carry over. Ignore the reference's light direction, shadows, and hotspots, and relight the item evenly as studio stock.
 - Always rebuild the item into an upright, fully unfolded, worn-looking shape, as if an invisible body were inside it, floating in empty space.
 - A folded or flat-laid reference must still produce an upright, unfolded, three-dimensional garment. Never reproduce fold lines, stacked layers, or a flat-lay layout.`;
 
@@ -387,6 +389,12 @@ const TENET_SHADOWS = `No shadows on the background:
 - The garment itself may carry very soft, broad self-shading where the fabric turns away from the light — just enough to read as three-dimensional, never enough to look wrinkled.
 - No harsh contrast, no spotlighting, no rim light, no bright hotspots.`;
 
+const TENET_FRAMING = `Frame the whole garment with room around it:
+- The ENTIRE garment sits inside the frame with clear empty background on all four sides — collar, both sleeve cuffs, side seams and hem all fully visible with white space beyond them.
+- Nothing touches or crosses the frame edge. If any part would be cut off, zoom OUT until it is not.
+- The garment fills roughly 80% of the frame height, centered, leaving a margin of at least 10% of the frame on every side.
+- Frame the complete item at full length even when the reference showed only part of it. A cropped render is a failed render — err toward too much empty background rather than too little.`;
+
 const TENET_CAMERA = `Straight-on camera only:
 - Item facing the lens head-on (0° yaw), centered, symmetric, fully in frame.
 - Not three-quarter, not angled, not tilted.`;
@@ -410,6 +418,8 @@ ${TENET_LINING}
 ${TENET_VOLUME}
 
 ${TENET_BG}
+
+${TENET_FRAMING}
 
 ${TENET_SHADOWS}`;
 
@@ -487,6 +497,8 @@ ${TENET_REFERENCE_POSE}
 ${TENET_EXPOSURE}
 
 ${TENET_BG}
+
+${TENET_FRAMING}
 
 ${TENET_SHADOWS}
 
