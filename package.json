@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "tsx scripts/fetch-embedding-model.ts && next build",
+    "bags:backfill": "tsx scripts/backfill-bag-closet-items.ts",
     "embedding:fetch": "tsx scripts/fetch-embedding-model.ts",
     "start": "next start",
     "worker": "tsx scripts/worker.ts",

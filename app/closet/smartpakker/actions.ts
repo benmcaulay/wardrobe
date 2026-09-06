@@ -11,7 +11,8 @@ import {
   parseStylePrefs,
   type Season,
 } from "@/lib/json";
-import { getCategoriesListFromPrefs, suggestCategoryFromItem } from "@/lib/categories";
+import { classifyGarmentKind, getCategoriesListFromPrefs } from "@/lib/categories";
+import { resolveBagCategory } from "@/lib/packing/bag-category";
 import { getPrimaryOwnerId } from "@/lib/owners";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
@@ -66,9 +67,16 @@ export type BagInput = {
   maxWeightKg?: number | null;
   silhouette: string;
   imagePath?: string | null;
+  /**
+   * Adopt an accessory already in the closet as this bag, rather than creating
+   * a second entry for something the user has clearly already catalogued.
+   */
+  wardrobeItemId?: string | null;
 };
 
-function normalizeBagInput(input: BagInput): Result<{ data: Required<BagInput> }> {
+function normalizeBagInput(
+  input: BagInput,
+): Result<{ data: Required<Omit<BagInput, "wardrobeItemId">> }> {
   const name = input.name.trim().slice(0, NAME_MAX);
   if (!name) return { ok: false, error: "Bag name is required" };
   const volumeLiters = Number(input.volumeLiters);
@@ -95,6 +103,94 @@ function normalizeBagInput(input: BagInput): Result<{ data: Required<BagInput> }
   };
 }
 
+
+
+
+/**
+ * Check a closet item may be adopted as this bag.
+ *
+ * Two ways this is rejected: the item is not the caller's, or another bag
+ * already claims it. Both matter — the first is a straightforward ownership
+ * check, and the second would otherwise surface as a unique-constraint crash
+ * instead of a sentence the user can act on.
+ */
+async function resolveAdoptedItem(
+  userId: string,
+  wardrobeItemId: string | null | undefined,
+  bagId: string | null,
+): Promise<Result<{ item: { id: string; name: string; originalImagePath: string } | null }>> {
+  if (!wardrobeItemId) return { ok: true, item: null };
+  const item = await prisma.wardrobeItem.findFirst({
+    where: { id: wardrobeItemId, userId },
+    select: { id: true, name: true, originalImagePath: true },
+  });
+  if (!item) return { ok: false, error: "That closet item was not found" };
+  const claimed = await prisma.packingBag.findFirst({
+    where: { userId, wardrobeItemId, ...(bagId ? { id: { not: bagId } } : {}) },
+    select: { name: true },
+  });
+  if (claimed) {
+    return { ok: false, error: `"${claimed.name}" is already using that closet item` };
+  }
+  return { ok: true, item };
+}
+
+/**
+ * Closet accessories that could be a piece of luggage.
+ *
+ * Filtered by the same kind classifier the closet uses, so a wardrobe naming
+ * things "bags" or "accessories" both surface. Items already linked to a bag
+ * are excluded — the link is one-to-one, and offering a taken item would fail
+ * on the unique index rather than explain itself.
+ */
+export async function listClosetBagCandidates(): Promise<
+  Result<{ items: { id: string; name: string; category: string; imagePath: string }[] }>
+> {
+  const user = await requireUser();
+  const [taken, items] = await Promise.all([
+    prisma.packingBag.findMany({
+      where: { userId: user.id, wardrobeItemId: { not: null } },
+      select: { wardrobeItemId: true },
+    }),
+    prisma.wardrobeItem.findMany({
+      where: { userId: user.id },
+      select: { id: true, name: true, category: true, subcategory: true, originalImagePath: true },
+      orderBy: { createdAt: "desc" },
+      take: 400,
+    }),
+  ]);
+  const takenIds = new Set(taken.map((t) => t.wardrobeItemId));
+  const candidates = items
+    .filter((i) => !takenIds.has(i.id))
+    .filter((i) => classifyGarmentKind(i) === "accessory")
+    .map((i) => ({
+      id: i.id,
+      name: i.name,
+      category: i.category,
+      imagePath: i.originalImagePath,
+    }));
+  return { ok: true, items: candidates };
+}
+
+/**
+ * Is this upload still the closet item's picture?
+ *
+ * The bag and its closet entry deliberately share one file, and a bag can be
+ * assigned *from* an existing closet item — so the bag is not always the owner
+ * of the photo. Deleting it on the bag's behalf would blank the closet item,
+ * which is why both updateBag and deleteBag ask this before cleaning up.
+ */
+async function photoStillUsedByClosetItem(
+  userId: string,
+  wardrobeItemId: string | null,
+  imagePath: string | null,
+): Promise<boolean> {
+  if (!wardrobeItemId || !imagePath) return false;
+  const count = await prisma.wardrobeItem.count({
+    where: { id: wardrobeItemId, userId, originalImagePath: imagePath },
+  });
+  return count > 0;
+}
 
 /**
  * Keep the closet's copy of a bag in step with the bag itself.
@@ -135,11 +231,7 @@ async function syncBagClosetItem(
   // File it under whatever the user calls accessories; "bag" in the name is
   // what classifyGarmentKind keys off, so a closet using "bags" or
   // "accessories" both resolve without a synonym table here.
-  const category =
-    suggestCategoryFromItem(
-      { category: "bag", name: bag.name },
-      getCategoriesListFromPrefs(prefs),
-    ) ?? "accessory";
+  const category = resolveBagCategory(getCategoriesListFromPrefs(prefs));
 
   const created = await prisma.wardrobeItem.create({
     data: {
@@ -164,17 +256,31 @@ export async function createBag(input: BagInput): Promise<Result<{ id: string }>
   if (norm.data.imagePath && !norm.data.imagePath.startsWith(`${user.id}/`)) {
     return { ok: false, error: "Image does not belong to this user" };
   }
+  const adopted = await resolveAdoptedItem(user.id, input.wardrobeItemId, null);
+  if (!adopted.ok) return adopted;
   const bag = await prisma.packingBag.create({
     data: { userId: user.id, ...norm.data },
     select: { id: true },
   });
-  const wardrobeItemId = await syncBagClosetItem(user.id, {
-    name: norm.data.name,
-    imagePath: norm.data.imagePath,
-    wardrobeItemId: null,
-  });
+  // An adopted item supplies the photo, so a bag assigned from the closet needs
+  // no upload of its own.
+  const wardrobeItemId = adopted.item
+    ? adopted.item.id
+    : await syncBagClosetItem(user.id, {
+        name: norm.data.name,
+        imagePath: norm.data.imagePath,
+        wardrobeItemId: null,
+      });
   if (wardrobeItemId) {
-    await prisma.packingBag.update({ where: { id: bag.id }, data: { wardrobeItemId } });
+    await prisma.packingBag.update({
+      where: { id: bag.id },
+      data: {
+        wardrobeItemId,
+        ...(adopted.item && !norm.data.imagePath
+          ? { imagePath: adopted.item.originalImagePath }
+          : {}),
+      },
+    });
   }
   revalidatePath("/closet/smartpakker");
   revalidatePath("/closet");
@@ -193,14 +299,22 @@ export async function updateBag(input: BagInput & { id: string }): Promise<Resul
   if (norm.data.imagePath && !norm.data.imagePath.startsWith(`${user.id}/`)) {
     return { ok: false, error: "Image does not belong to this user" };
   }
-  // Clean up a replaced silhouette photo.
+  // Clean up a replaced silhouette photo — unless the closet item is still
+  // showing it, in which case removing the bag's photo would blank the closet.
   if (existing.imagePath && existing.imagePath !== norm.data.imagePath) {
-    await deleteUpload(existing.imagePath);
+    const shared = await photoStillUsedByClosetItem(
+      user.id,
+      existing.wardrobeItemId,
+      existing.imagePath,
+    );
+    if (!shared) await deleteUpload(existing.imagePath);
   }
+  const adopted = await resolveAdoptedItem(user.id, input.wardrobeItemId, input.id);
+  if (!adopted.ok) return adopted;
   const wardrobeItemId = await syncBagClosetItem(user.id, {
     name: norm.data.name,
-    imagePath: norm.data.imagePath,
-    wardrobeItemId: existing.wardrobeItemId,
+    imagePath: norm.data.imagePath || adopted.item?.originalImagePath || null,
+    wardrobeItemId: adopted.item?.id ?? existing.wardrobeItemId,
   });
   await prisma.packingBag.update({
     where: { id: input.id },
@@ -222,12 +336,8 @@ export async function deleteBag(id: string): Promise<Result> {
   // so the closet item stays. That makes the photo shared, and deleting the
   // upload here would blank the closet item — only delete what nothing else
   // still points at.
-  const stillReferenced = bag.wardrobeItemId
-    ? (await prisma.wardrobeItem.count({
-        where: { id: bag.wardrobeItemId, userId: user.id, originalImagePath: bag.imagePath ?? "" },
-      })) > 0
-    : false;
-  if (bag.imagePath && !stillReferenced) await deleteUpload(bag.imagePath);
+  const shared = await photoStillUsedByClosetItem(user.id, bag.wardrobeItemId, bag.imagePath);
+  if (bag.imagePath && !shared) await deleteUpload(bag.imagePath);
   await prisma.packingBag.delete({ where: { id } });
   revalidatePath("/closet/smartpakker");
   return { ok: true };

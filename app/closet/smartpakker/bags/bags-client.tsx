@@ -5,7 +5,13 @@ import { imageUrl } from "@/lib/image-paths";
 import { BAG_SILHOUETTES, getSilhouette } from "@/lib/packing/silhouettes";
 import { formatVolume } from "@/lib/packing/estimate";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
-import { createBag, deleteBag, updateBag, uploadBagImage } from "../actions";
+import {
+  createBag,
+  deleteBag,
+  listClosetBagCandidates,
+  updateBag,
+  uploadBagImage,
+} from "../actions";
 
 export type BagView = {
   id: string;
@@ -14,6 +20,7 @@ export type BagView = {
   maxWeightKg: number | null;
   silhouette: string;
   imagePath: string | null;
+  wardrobeItemId?: string | null;
 };
 
 type Draft = {
@@ -22,6 +29,8 @@ type Draft = {
   volumeLiters: string;
   maxWeightKg: string;
   imagePath: string | null;
+  /** Set when this bag was assigned from an accessory already in the closet. */
+  wardrobeItemId: string | null;
 };
 
 function emptyDraft(): Draft {
@@ -32,6 +41,7 @@ function emptyDraft(): Draft {
     volumeLiters: String(def.typicalLiters),
     maxWeightKg: "",
     imagePath: null,
+    wardrobeItemId: null,
   };
 }
 
@@ -42,6 +52,7 @@ function bagToDraft(bag: BagView): Draft {
     volumeLiters: String(bag.volumeLiters),
     maxWeightKg: bag.maxWeightKg == null ? "" : String(bag.maxWeightKg),
     imagePath: bag.imagePath,
+    wardrobeItemId: bag.wardrobeItemId ?? null,
   };
 }
 
@@ -128,6 +139,7 @@ function toInput(draft: Draft) {
     volumeLiters: Number(draft.volumeLiters),
     maxWeightKg: draft.maxWeightKg.trim() === "" ? null : Number(draft.maxWeightKg),
     imagePath: draft.imagePath,
+    wardrobeItemId: draft.wardrobeItemId,
   };
 }
 
@@ -207,7 +219,23 @@ function BagForm({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const [candidates, setCandidates] = useState<
+    { id: string; name: string; category: string; imagePath: string }[] | null
+  >(null);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function openClosetPicker() {
+    setLoadingCandidates(true);
+    setError(null);
+    const res = await listClosetBagCandidates();
+    setLoadingCandidates(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setCandidates(res.items);
+  }
 
   function pickSilhouette(id: string) {
     const sil = getSilhouette(id);
@@ -329,6 +357,14 @@ function BagForm({
           />
           <button
             type="button"
+            onClick={() => void openClosetPicker()}
+            disabled={uploading || loadingCandidates}
+            className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+          >
+            {loadingCandidates ? "Loading…" : "From closet"}
+          </button>
+          <button
+            type="button"
             onClick={() => setCapturing(true)}
             disabled={uploading}
             className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
@@ -353,6 +389,63 @@ function BagForm({
             </button>
           ) : null}
         </div>
+        {candidates ? (
+          <div className="mt-3 rounded-xl border border-ink/10 bg-paper-warm/40 p-3">
+            {candidates.length === 0 ? (
+              <p className="text-xs text-ink-muted">
+                No closet accessories with a photo yet. Add one to the closet first, or
+                photograph the bag here.
+              </p>
+            ) : (
+              <>
+                <p className="mb-2 text-[11px] uppercase tracking-wide text-ink-muted">
+                  Pick the accessory this bag already is
+                </p>
+                <ul className="max-h-56 space-y-1 overflow-y-auto">
+                  {candidates.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Adopting supplies both the name and the photo, so the
+                          // bag stops being a second record of the same object.
+                          setDraft((d) => ({
+                            ...d,
+                            wardrobeItemId: c.id,
+                            name: d.name.trim() || c.name,
+                            imagePath: c.imagePath,
+                          }));
+                          setCandidates(null);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-paper"
+                      >
+                        <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-paper">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={imageUrl(c.imagePath)}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm">{c.name}</span>
+                          <span className="block text-[11px] text-ink-muted">{c.category}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setCandidates(null)}
+              className="mt-2 text-xs text-ink-muted underline hover:text-ink"
+            >
+              Close
+            </button>
+          </div>
+        ) : null}
         <WebcamCaptureModal
           open={capturing}
           // Rear camera: you photograph a bag sitting in front of you, not
