@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { imageUrl } from "@/lib/image-paths";
 import { BAG_SILHOUETTES, getSilhouette } from "@/lib/packing/silhouettes";
 import { formatVolume } from "@/lib/packing/estimate";
+import { PhotoSourcePicker } from "@/components/photo-source-picker";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
 import {
   createBag,
@@ -223,7 +224,6 @@ function BagForm({
     { id: string; name: string; category: string; imagePath: string }[] | null
   >(null);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   async function openClosetPicker() {
     setLoadingCandidates(true);
@@ -333,61 +333,52 @@ function BagForm({
         <label className="block text-[11px] uppercase tracking-wide text-ink-muted">
           Photo (optional)
         </label>
-        <div className="mt-1 flex items-center gap-3">
-          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-paper-warm">
-            {draft.imagePath ? (
-              // eslint-disable-next-line @next/next/no-img-element
+        {draft.imagePath ? (
+          <div className="mt-1 flex items-center gap-3">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-paper-warm">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={imageUrl(draft.imagePath)}
                 alt=""
                 className="h-full w-full object-cover"
               />
-            ) : null}
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => void openClosetPicker()}
-            disabled={uploading || loadingCandidates}
-            className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
-          >
-            {loadingCandidates ? "Loading…" : "From closet"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setCapturing(true)}
-            disabled={uploading}
-            className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
-          >
-            Take photo
-          </button>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
-          >
-            {uploading ? "Uploading…" : draft.imagePath ? "Replace" : "Upload"}
-          </button>
-          {draft.imagePath ? (
+            </div>
             <button
               type="button"
-              onClick={() => setDraft((d) => ({ ...d, imagePath: null }))}
+              onClick={() =>
+                setDraft((d) => ({ ...d, imagePath: null, wardrobeItemId: null }))
+              }
               className="text-xs text-ink-muted underline hover:text-ink"
             >
               Remove
             </button>
-          ) : null}
+          </div>
+        ) : (
+          <div className="mt-1">
+            <PhotoSourcePicker
+              onFile={(file) => void handleFile(file)}
+              onTakePhoto={() => setCapturing(true)}
+              title="Photograph the bag"
+              subtitle="Drop, paste, snap, or click to choose a file"
+              compact
+              disabled={uploading}
+              error={null}
+            />
+          </div>
+        )}
+
+        {/* Not a photo source: adopting says this bag *is* that accessory, and
+            the photo comes along as a consequence. Kept out of the picker so
+            the distinction survives. */}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => void openClosetPicker()}
+            disabled={uploading || loadingCandidates}
+            className="text-xs text-ink-muted underline hover:text-ink disabled:opacity-50"
+          >
+            {loadingCandidates ? "Loading…" : "Or assign one from your closet"}
+          </button>
         </div>
         {candidates ? (
           <div className="mt-3 rounded-xl border border-ink/10 bg-paper-warm/40 p-3">
