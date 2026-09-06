@@ -34,6 +34,15 @@ type Props = {
   realGhost: boolean;
   categories: string[];
   owners?: Owner[];
+  /**
+   * A scan started elsewhere on the page — currently the Apple Photos picker,
+   * which enqueues its own job and then hands the id over.
+   *
+   * Needed because the resume check below runs on mount, and this component
+   * mounts with the page, before any such job exists. Without this the review
+   * for a picker-started scan appears only after a reload.
+   */
+  resumeJobId?: string | null;
 };
 
 /**
@@ -155,6 +164,7 @@ export function ScanClient({
   realGhost,
   categories,
   owners = DEFAULT_OWNERS,
+  resumeJobId = null,
 }: Props) {
   const ownerRoster = owners.length > 0 ? owners : DEFAULT_OWNERS;
   const [phase, setPhase] = useState<Phase>("declare");
@@ -249,6 +259,19 @@ export function ScanClient({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /*
+   * Pick up a scan handed over from the Photos picker.
+   *
+   * Guarded on phase: if the user is already mid-review, a late id must not
+   * yank them out of it. Polling resolves to the review screen on its own.
+   */
+  useEffect(() => {
+    if (!resumeJobId) return;
+    if (phase === "review" || phase === "scanning") return;
+    startPolling(resumeJobId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeJobId]);
 
   async function processFiles(files: File[]) {
     if (files.length === 0) {
