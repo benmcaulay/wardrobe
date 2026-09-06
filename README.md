@@ -109,16 +109,18 @@ see below.
 
 #### Vercel
 
-`vercel.json` schedules `/api/cron/drain` every minute. That endpoint *is* the
+`vercel.json` schedules `/api/cron/drain` nightly at 03:00. That endpoint *is* the
 worker: Vercel has nowhere to run `pnpm worker`, and `kickJobDrain` is
 fire-and-forget after the response, which a serverless function may freeze
 before finishing. The route reuses the same claim/lease/`runJob` path as the
 CLI worker rather than reimplementing it.
 
-- **A per-minute cron needs Pro.** Hobby allows one cron run per day and
-  *fails the deployment* on anything more frequent. On Hobby either change the
-  schedule to `"0 * * * *"`-or-slower and accept the latency, or drive
-  `/api/cron/drain` from an external pinger.
+- **A per-minute cron needs Pro.** Hobby allows one cron run *per day* and
+  *fails the deployment* on anything more frequent — including hourly. That is
+  why the committed schedule is `"0 3 * * *"`. On Hobby the cron is a nightly
+  backstop rather than a worker: imports lean on the best-effort inline drain,
+  and whatever it misses waits until 03:00. To close that gap without Pro,
+  drive `/api/cron/drain` from an external pinger with the `CRON_SECRET`.
 - **`CRON_SECRET` must be set.** Vercel sends it as `Authorization: Bearer`.
   Without it the route returns 503 and drains nothing — draining spends Gemini
   credits, so it fails closed rather than running open.
@@ -132,6 +134,49 @@ CLI worker rather than reimplementing it.
   `outputFileTracingExcludes` — onnxruntime-node alone is 283 MB against a
   250 MB unzipped limit. They are reached through a guarded lazy import, so a
   host without them behaves exactly as it does when the models are unstaged.
+
+#### Google sign-in
+
+The one step no script can do for you — the OAuth client has to be created by
+hand in a browser. The console moved this out of *APIs & Services > Credentials*
+into **Google Auth Platform**, so older instructions point at pages that no
+longer exist.
+
+1. **Project** — <https://console.cloud.google.com/projectcreate>, or reuse one.
+2. **Branding** — <https://console.cloud.google.com/auth/branding>. Set an app
+   name, user support email and developer contact, then save. Clients cannot be
+   created until this exists.
+3. **Audience** — <https://console.cloud.google.com/auth/audience>. User type
+   **External**. Leave publishing status on *Testing*.
+4. **Clients** — <https://console.cloud.google.com/auth/clients> → **Create
+   client** → application type **Web application**. Fill in only:
+
+   | Field | Value |
+   | --- | --- |
+   | Authorized redirect URIs | `<origin>/api/auth/callback/google` |
+   | Authorized redirect URIs | `http://localhost:3000/api/auth/callback/google` |
+   | Authorized JavaScript origins | *leave empty* |
+
+   Matching is exact: no trailing slash, and `http` vs `https` matters. Only the
+   canonical origin needs registering — if `www` 308-redirects to the apex, the
+   callback always lands on the apex.
+
+   JavaScript origins are for the browser-side implicit flow. NextAuth uses the
+   server-side authorization-code flow, so leaving that field empty is correct,
+   not an omission.
+
+5. Copy the client ID and secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+**Testing mode is not a limitation here.** Its usual costs — 100 test users,
+consent warnings, 7-day token expiry — apply to apps requesting sensitive
+scopes. `next-auth/providers/google` requests `openid email profile` and
+nothing else, which Google treats as non-sensitive: no test users to enrol, no
+"Google hasn't verified this app" screen, no expiring authorizations, and no
+verification review. Publish the app only if you want it listed; it is not
+needed for sign-in to work.
+
+Who may actually sign in is enforced by `AUTH_ALLOWED_EMAILS`, not by Google.
+
 
 Two things do **not** work off this machine, by construction:
 
