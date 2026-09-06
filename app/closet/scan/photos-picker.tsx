@@ -148,7 +148,7 @@ export function PhotosPicker({
         <h2 className="font-serif text-lg">Photos browsing isn&apos;t available here</h2>
         <p className="text-sm text-ink-muted whitespace-pre-line">{error}</p>
         <p className="text-xs text-ink-muted">
-          You can still use “Add to closet” to pick files by hand.
+          Use “Add to closet” to choose photos yourself.
         </p>
       </section>
     );

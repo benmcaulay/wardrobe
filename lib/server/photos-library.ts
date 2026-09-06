@@ -80,7 +80,7 @@ export class PhotosPermissionError extends Error {
 
 function runIndex(args: string[]): unknown {
   const python = osxphotosPython();
-  if (!python) throw new Error("osxphotos is not installed (brew install osxphotos)");
+  if (!python) throw new Error("Photos browsing is not available on this machine");
 
   let stdout: string;
   try {

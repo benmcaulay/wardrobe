@@ -1,11 +1,15 @@
 "use client";
 
 /**
- * Two things you can do with your camera roll, on one page.
+ * What you can do with your camera roll, on one page.
  *
  *   Add to closet    — bulk-import garments you own but haven't logged.
  *   Find past wears  — match photos of yourself against the closet you already
  *                      have, to recover wear history you never recorded.
+ *   Browse photos of me — the same import, sourced from Apple's own face
+ *                      tagging instead of a file picker. Only appears on a Mac
+ *                      running the server next to its Photos library; on a
+ *                      hosted deploy the tab is absent rather than broken.
  *
  * They were separate pages, which put the same first step ("pick photos from
  * your camera roll") behind two different nav entries and made you guess which
@@ -48,6 +52,7 @@ export function ScanModes({
   owners,
   embedded,
   total,
+  photosBrowsing,
 }: {
   credits: number;
   realGhost: boolean;
@@ -55,8 +60,11 @@ export function ScanModes({
   owners: Owner[];
   embedded: number;
   total: number;
+  /** False on any host without a local Photos library; hides the browse mode. */
+  photosBrowsing: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("import");
+  const modes: Mode[] = photosBrowsing ? ["browse", "import", "wears"] : ["import", "wears"];
 
   return (
     <div className="space-y-6">
@@ -70,7 +78,7 @@ export function ScanModes({
         aria-label="What are these photos of?"
         className="flex w-fit gap-1 rounded-full border border-ink/10 bg-paper-warm p-1"
       >
-        {(["browse", "import", "wears"] as const).map((option) => (
+        {modes.map((option) => (
           <button
             key={option}
             type="button"
@@ -88,9 +96,11 @@ export function ScanModes({
 
       {/* Both stay mounted: a half-finished import review is expensive to lose,
           and flipping over to check the other mode shouldn't discard it. */}
-      <div hidden={mode !== "browse"}>
-        <PhotosPicker owners={owners} onStarted={() => setMode("import")} />
-      </div>
+      {photosBrowsing && (
+        <div hidden={mode !== "browse"}>
+          <PhotosPicker owners={owners} onStarted={() => setMode("import")} />
+        </div>
+      )}
 
       {/* Unconstrained: ScanClient narrows its own form-shaped phases and
           lets the review grid use the window. */}

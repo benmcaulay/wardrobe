@@ -1298,6 +1298,13 @@ function DuplicateGroupReview({
 }
 
 function MacPhotosHelp() {
+  /*
+   * This used to carry a full command-line walkthrough for `mac-photos:scan`.
+   * It was written before the in-app picker existed, and it aged into advice
+   * nobody can follow: instructions to install a package and run a script are
+   * meaningless to someone using a deployed web app, and the flow it described
+   * is now a tab. What survives is the part that is still true in a browser.
+   */
   return (
     <details className="rounded-2xl border border-ink/10 bg-surface p-4 text-sm">
       <summary className="cursor-pointer font-medium text-ink select-none">
@@ -1305,40 +1312,14 @@ function MacPhotosHelp() {
       </summary>
       <div className="mt-3 space-y-3 text-ink-muted text-xs leading-relaxed">
         <p>
-          <strong className="text-ink">Quick pick:</strong> drag photos from Photos onto the drop
-          zone, or use Choose photos and select <strong className="text-ink">Photos</strong> in the
-          sidebar (up to {MAX_SCAN_PHOTOS} at a time).
+          Drag photos straight from Photos onto the drop zone, or press Choose photos and
+          pick <strong className="text-ink">Photos</strong> in the sidebar — up to{" "}
+          {MAX_SCAN_PHOTOS} at a time.
         </p>
-        <div className="rounded-xl bg-paper-warm/80 border border-ink/10 p-3 space-y-2">
-          <p className="font-medium text-ink">Scan your whole library (Mac CLI)</p>
-          <p>
-            Browsers can&apos;t read the Photos library directly. On this Mac, install{" "}
-            <a
-              href="https://github.com/RhetTbull/osxphotos"
-              className="text-ink underline underline-offset-2"
-              target="_blank"
-              rel="noreferrer"
-            >
-              osxphotos
-            </a>{" "}
-            (<code className="text-[11px]">pip install osxphotos</code>), grant Terminal access under{" "}
-            <strong className="text-ink">System Settings → Privacy → Photos</strong>, then run:
-          </p>
-          <pre className="text-[11px] bg-surface border border-ink/10 rounded-lg p-3 overflow-x-auto text-left">
-            {`WARDROBE_USER_EMAIL=you@example.com pnpm mac-photos:scan
-
-# optional filters:
-pnpm mac-photos:scan -- --limit 200 --from-date 2023-01-01`}
-          </pre>
-          <p>
-            The script exports batches from Photos, uploads them, and enqueues scan jobs. Open{" "}
-            <Link href="/closet/scan" className="text-ink underline underline-offset-2">
-              Scan
-            </Link>{" "}
-            in the browser to review results (make sure <code className="text-[11px]">pnpm worker</code>{" "}
-            is running).
-          </p>
-        </div>
+        <p>
+          Photos taken on your phone sync to Photos on your Mac automatically, so anything
+          shot today is usually already here.
+        </p>
       </div>
     </details>
   );

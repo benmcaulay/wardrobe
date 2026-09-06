@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { parseStylePrefs } from "@/lib/json";
 import { getOwnersFromPrefs } from "@/lib/owners";
 import { getScanReadiness } from "@/lib/actions/wear-scan";
+import { photosAvailable } from "@/lib/server/photos-library";
 import { ScanModes } from "./scan-modes";
 
 // The wear-scan mode reports how much of the closet is embedded, which changes
@@ -24,6 +25,13 @@ export default async function CameraRollScanPage() {
   const categories = [NONE_CATEGORY, ...getCategoriesListFromPrefs(prefs)];
   const owners = getOwnersFromPrefs(prefs);
   const realGhost = process.env.USE_REAL_GHOST_MANNEQUIN === "true";
+  /*
+   * Browsing Apple Photos shells out to osxphotos against the library on this
+   * machine, so it cannot work on a hosted deploy — there is no library and no
+   * shell. Decide here rather than inside the mode: offering a tab that always
+   * fails, and then explaining the failure, is worse than not offering it.
+   */
+  const photosBrowsing = photosAvailable();
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12">
@@ -41,6 +49,7 @@ export default async function CameraRollScanPage() {
         owners={owners}
         embedded={readiness.embedded}
         total={readiness.total}
+        photosBrowsing={photosBrowsing}
       />
     </main>
   );

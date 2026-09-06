@@ -38,9 +38,13 @@ export async function getPhotosLibraryStatus(): Promise<PhotosAvailability> {
   if (!photosAvailable()) {
     return {
       ok: false,
-      error:
-        "Browsing your Photos library needs osxphotos on this machine. " +
-        "Install it with: brew tap RhetTbull/osxphotos && brew install osxphotos",
+      /*
+       * No install instructions here. This string reaches the screen, and a
+       * shell command is not something a user of a web app can act on — on a
+       * hosted deploy it is not even true, since there is no machine of theirs
+       * to install anything on. The setup step belongs in the README.
+       */
+      error: "This only works on a Mac running the app next to its own Photos library.",
     };
   }
   try {
@@ -61,7 +65,7 @@ export async function loadPersonPhotos(input: {
   toDate?: string;
 }): Promise<LoadPhotosResponse> {
   const user = await requireUser();
-  if (!photosAvailable()) return { ok: false, error: "osxphotos is not installed" };
+  if (!photosAvailable()) return { ok: false, error: "Photos browsing is not available here." };
   if (input.persons.length === 0) return { ok: false, error: "Pick a person first" };
 
   try {
