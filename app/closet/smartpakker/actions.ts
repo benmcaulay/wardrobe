@@ -120,11 +120,16 @@ async function resolveAdoptedItem(
   bagId: string | null,
 ): Promise<Result<{ item: { id: string; name: string; originalImagePath: string } | null }>> {
   if (!wardrobeItemId) return { ok: true, item: null };
-  const item = await prisma.wardrobeItem.findFirst({
+  const found = await prisma.wardrobeItem.findFirst({
     where: { id: wardrobeItemId, userId },
-    select: { id: true, name: true, originalImagePath: true },
+    select: { id: true, name: true, originalImagePath: true, ghostImagePath: true },
   });
-  if (!item) return { ok: false, error: "That closet item was not found" };
+  if (!found) return { ok: false, error: "That closet item was not found" };
+  const item = {
+    id: found.id,
+    name: found.name,
+    originalImagePath: found.ghostImagePath ?? found.originalImagePath,
+  };
   const claimed = await prisma.packingBag.findFirst({
     where: { userId, wardrobeItemId, ...(bagId ? { id: { not: bagId } } : {}) },
     select: { name: true },
@@ -154,7 +159,14 @@ export async function listClosetBagCandidates(): Promise<
     }),
     prisma.wardrobeItem.findMany({
       where: { userId: user.id },
-      select: { id: true, name: true, category: true, subcategory: true, originalImagePath: true },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        subcategory: true,
+        originalImagePath: true,
+        ghostImagePath: true,
+      },
       orderBy: { createdAt: "desc" },
       take: 400,
     }),
@@ -167,7 +179,10 @@ export async function listClosetBagCandidates(): Promise<
       id: i.id,
       name: i.name,
       category: i.category,
-      imagePath: i.originalImagePath,
+      // The closet's own thumbnail: a ghost render if there is one, else the
+      // source photo. Showing the source here offered a mirror selfie as the
+      // picture of a backpack.
+      imagePath: i.ghostImagePath ?? i.originalImagePath,
     }));
   return { ok: true, items: candidates };
 }
@@ -187,7 +202,14 @@ async function photoStillUsedByClosetItem(
 ): Promise<boolean> {
   if (!wardrobeItemId || !imagePath) return false;
   const count = await prisma.wardrobeItem.count({
-    where: { id: wardrobeItemId, userId, originalImagePath: imagePath },
+    where: {
+      id: wardrobeItemId,
+      userId,
+      // Either field: an adopted bag carries the item's *thumbnail*, which is
+      // the ghost render when one exists. Checking only originalImagePath would
+      // have let deleteBag remove a generated ghost.
+      OR: [{ originalImagePath: imagePath }, { ghostImagePath: imagePath }],
+    },
   });
   return count > 0;
 }
@@ -212,10 +234,14 @@ async function syncBagClosetItem(
   if (!bag.imagePath) return bag.wardrobeItemId;
 
   if (bag.wardrobeItemId) {
+    // Name only. The bag's photo may be the item's *ghost render* (adopting
+    // pulls the thumbnail), and writing that into originalImagePath would
+    // overwrite the real source photo with a generated one — losing the input
+    // every future render is built from. The closet item owns its pictures.
     // Scope by userId so a stale id cannot be used to write someone else's row.
     const updated = await prisma.wardrobeItem.updateMany({
       where: { id: bag.wardrobeItemId, userId },
-      data: { name: bag.name, originalImagePath: bag.imagePath },
+      data: { name: bag.name },
     });
     if (updated.count === 1) return bag.wardrobeItemId;
     // The user deleted the closet item by hand. Respect that rather than

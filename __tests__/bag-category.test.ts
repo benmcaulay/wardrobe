@@ -32,3 +32,36 @@ describe("resolveBagCategory", () => {
     expect(resolveBagCategory(["baggy jeans"])).toBe(FALLBACK_BAG_CATEGORY);
   });
 });
+
+/**
+ * Adopting a closet item pulls its *thumbnail*, which is a ghost render when
+ * one exists. Two things downstream keyed off "the bag's photo is the item's
+ * originalImagePath", and both become wrong once that is a ghost path.
+ */
+describe("closet thumbnail selection for an adopted bag", () => {
+  const thumbnailOf = (i: { ghostImagePath: string | null; originalImagePath: string }) =>
+    i.ghostImagePath ?? i.originalImagePath;
+
+  it("prefers the ghost render over the source photo", () => {
+    expect(
+      thumbnailOf({ ghostImagePath: "u/ghost.png", originalImagePath: "u/selfie.jpg" }),
+    ).toBe("u/ghost.png");
+  });
+
+  it("falls back to the source photo before any render exists", () => {
+    expect(thumbnailOf({ ghostImagePath: null, originalImagePath: "u/selfie.jpg" })).toBe(
+      "u/selfie.jpg",
+    );
+  });
+
+  it("treats either field as still-in-use when deciding to delete an upload", () => {
+    // The guard has to match on both, or deleting a bag would remove a ghost
+    // render the closet item is still displaying.
+    const stillUsed = (path: string, item: { ghostImagePath: string | null; originalImagePath: string }) =>
+      item.originalImagePath === path || item.ghostImagePath === path;
+    const item = { ghostImagePath: "u/ghost.png", originalImagePath: "u/selfie.jpg" };
+    expect(stillUsed("u/ghost.png", item)).toBe(true);
+    expect(stillUsed("u/selfie.jpg", item)).toBe(true);
+    expect(stillUsed("u/unrelated.jpg", item)).toBe(false);
+  });
+});
