@@ -617,7 +617,7 @@ People page, no vector index, no recall cliff.
     Zellmer and it costs nothing.
   - **Key management.** The stated mitigation everywhere in the research is
     "envelope-encrypt under a key derived from the user's passphrase." **There is
-    no passphrase** — auth is Google OAuth only. Either accept a device-local
+    no passphrase** — auth is a magic link only. Either accept a device-local
     gallery with explicit re-enroll on a new device, or introduce a real recovery
     code and own the lost-code UX.
   - **Aging.** Enrolling from today's face and verifying against a three-year roll
@@ -1303,7 +1303,7 @@ Score every candidate photo's faces against it. **Then discard every vector.**
 persisted enrolled gallery and died on two objections that this kills outright:
 
 - *Key management.* I1's blocker was "envelope-encrypt under a passphrase — but
-  auth is Google OAuth and there is no passphrase." Nothing is stored, so there
+  auth is a magic link and there is no passphrase." Nothing is stored, so there
   is nothing to encrypt and no recovery-code UX to own.
 - *Biometric retention.* This is precisely the *Zellmer v. Meta* fact pattern —
   face signatures that are "simply numbers," deleted immediately after matching,

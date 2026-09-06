@@ -43,7 +43,7 @@ API keys** and can be switched to real providers one file at a time.
 | Virtual try-on | **Working w/ real provider** | Fashn or fal.ai (idm-vton); runs as a queued background job |
 | Background removal | **Production (client-side)** | Free WASM, no per-call cost |
 | Swipe-to-sell (strategic core) | **Working, manual hand-off** | Drafts + deep-links; no marketplace API posting yet (§6.4) |
-| Auth | **Production-shaped** | NextAuth + Google OAuth, DB sessions in Postgres; demo mode is an explicit dev flag (§9.1) |
+| Auth | **Production-shaped** | NextAuth + email magic links, DB sessions in Postgres; demo mode is an explicit dev flag (§9.1) |
 | Persistence | **Production-shaped** | PostgreSQL 16; JSON columns still TEXT (§11.1) |
 | File storage | **Production-shaped** | Storage seam: local disk (dev) or S3/R2 with signed URLs (§11.2) |
 | Payments / monetization | **Production-shaped** | Stripe Checkout credit packs, idempotent webhook fulfillment (§10) |
@@ -101,7 +101,7 @@ pricing intelligence, and an in-app transaction layer) is the path from
 | Server logic | React Server Components + Server Actions ("use server") |
 | Data access | Prisma ORM |
 | Database | PostgreSQL 16 (Docker Compose for local dev) |
-| Auth | NextAuth v4 — Google OAuth, database sessions (Prisma adapter) |
+| Auth | NextAuth v4 — email magic links, database sessions (Prisma adapter) |
 | Image processing | `sharp` (server), `@imgly/background-removal` (client WASM) |
 | Generative AI | fal.ai (`@fal-ai/client`), Fashn (REST) |
 | Styling | Tailwind CSS |
@@ -482,9 +482,9 @@ and lifecycle controls. It's the staging area until cross-listing is automated
 
 ## 9. Security & Privacy
 
-### 9.1 Authentication — NextAuth (Google OAuth, database sessions)
+### 9.1 Authentication — NextAuth (email magic links, database sessions)
 
-Sign-in is **NextAuth v4 with Google OAuth**. Sessions use the **database
+Sign-in is **NextAuth v4 with email magic links**. Sessions use the **database
 strategy** — session rows live in the application's own Postgres via the Prisma
 adapter (revocable server-side; no JWT secrets to rotate), keeping identity in
 the same database as the credit ledger with no per-MAU vendor cost. New users
@@ -678,7 +678,7 @@ buyer-grade catalog that competitors starting from raw photos cannot easily matc
 `PUBLIC_APP_URL`/`IMAGE_SECRET`, `ENABLE_WEB_MATCH_AUTOFILL`,
 `DATABASE_URL`,
 `DIRECT_DATABASE_URL`, `AUTH_DEMO_MODE`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`,
-`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `STORAGE_DRIVER`, `S3_BUCKET`,
+`EMAIL_SERVER`/`EMAIL_FROM`, `AUTH_ALLOWED_EMAILS`, `STORAGE_DRIVER`, `S3_BUCKET`,
 `S3_ENDPOINT`/`S3_ACCOUNT_ID`, `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`,
 `S3_REGION`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_BASE_URL`. Full list in
 `.env.example`.

@@ -4,12 +4,12 @@ import { APP_NAME } from "@/lib/brand";
 import { useCallback, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { FabricWarp, type FabricTheme } from "@/components/fabric-warp";
-import { GoogleSignInButton } from "@/components/google-signin-button";
+import { EmailSignInForm } from "@/components/email-signin-form";
 import { easeOutExpo, fadeUp, springSnappy, staggerContainer } from "@/lib/ui-motion";
 
 type Props = {
   demo: boolean;
-  googleConfigured: boolean;
+  emailConfigured: boolean;
 };
 
 const HERO_BG: Record<FabricTheme, string> = {
@@ -17,7 +17,7 @@ const HERO_BG: Record<FabricTheme, string> = {
   dark: "#080b18",
 };
 
-export function LandingHero({ demo, googleConfigured }: Props) {
+export function LandingHero({ demo, emailConfigured }: Props) {
   /** Landing-only backdrop — does not affect app chrome (always day). */
   const [fabricTheme, setFabricTheme] = useState<FabricTheme>("light");
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
@@ -81,9 +81,9 @@ export function LandingHero({ demo, googleConfigured }: Props) {
             className="flex flex-col items-center gap-3"
             transition={{ duration: 0.5, ease: easeOutExpo, delay: 0.08 }}
           >
-            {googleConfigured && (
+            {emailConfigured && (
               <motion.div whileHover={reduce ? undefined : { scale: 1.03 }} whileTap={reduce ? undefined : { scale: 0.97 }} transition={springSnappy}>
-                <GoogleSignInButton />
+                <EmailSignInForm />
               </motion.div>
             )}
             {demo && (
@@ -97,7 +97,7 @@ export function LandingHero({ demo, googleConfigured }: Props) {
                 <button
                   type="submit"
                   className={
-                    googleConfigured
+                    emailConfigured
                       ? "rounded-full border border-ink/20 bg-ink/5 text-ink backdrop-blur-sm px-8 py-3 text-sm tracking-wide hover:bg-ink/10 transition"
                       : "rounded-full bg-ink text-paper px-8 py-3 text-sm tracking-wide hover:bg-ink-soft transition"
                   }
@@ -106,11 +106,10 @@ export function LandingHero({ demo, googleConfigured }: Props) {
                 </button>
               </motion.form>
             )}
-            {!googleConfigured && !demo && (
+            {!emailConfigured && !demo && (
               <p className="text-sm text-ink-muted">
-                No sign-in method is configured. Set GOOGLE_CLIENT_ID /
-                GOOGLE_CLIENT_SECRET, or AUTH_DEMO_MODE=&quot;true&quot; for a
-                local demo.
+                No sign-in method is configured. Set EMAIL_SERVER / EMAIL_FROM,
+                or AUTH_DEMO_MODE=&quot;true&quot; for a local demo.
               </p>
             )}
           </motion.div>

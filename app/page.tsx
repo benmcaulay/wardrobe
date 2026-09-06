@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { User } from "@prisma/client";
 import { getCurrentUser, demoModeEnabled } from "@/lib/auth";
+import { emailAuthConfigured } from "@/lib/auth-shared-email";
 import { LandingHero } from "@/app/landing-hero";
 
 export default async function LandingPage() {
@@ -16,9 +17,9 @@ export default async function LandingPage() {
   if (user) redirect("/closet");
 
   const demo = demoModeEnabled();
-  const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID);
+  const emailConfigured = emailAuthConfigured();
 
   return (
-    <LandingHero demo={demo} googleConfigured={googleConfigured} />
+    <LandingHero demo={demo} emailConfigured={emailConfigured} />
   );
 }

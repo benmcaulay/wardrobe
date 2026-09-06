@@ -101,7 +101,7 @@ where in dev it is only a warning.
 | `AUTH_DEMO_MODE` | Ignored in production — demo mode refuses to run there whatever this says, so a stray `"true"` cannot open the shared account. Leave it unset on a host anyway. |
 | `DATABASE_URL` | Postgres. |
 | `GEMINI_API_KEY` | The only paid AI provider. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Real sign-in. Authorized redirect URI is `<origin>/api/auth/callback/google` — see [Google sign-in](#google-sign-in). |
+| `EMAIL_SERVER` / `EMAIL_FROM` | Magic-link sign-in — see [Sign-in](#sign-in-magic-link). Both required. |
 | `AUTH_ALLOWED_EMAILS` | Comma-separated roster of addresses allowed to sign in. Unset means anyone with a Google account can, which on a public URL means strangers creating accounts against your Gemini budget. |
 | S3/R2 vars | Object storage; the local disk driver does not survive a redeploy. |
 
@@ -136,47 +136,33 @@ CLI worker rather than reimplementing it.
   250 MB unzipped limit. They are reached through a guarded lazy import, so a
   host without them behaves exactly as it does when the models are unstaged.
 
-#### Google sign-in
+#### Sign-in (magic link)
 
-The one step no script can do for you — the OAuth client has to be created by
-hand in a browser. The console moved this out of *APIs & Services > Credentials*
-into **Google Auth Platform**, so older instructions point at pages that no
-longer exist.
+No OAuth provider and no passwords. Enter an email, get a link, click it.
 
-1. **Project** — <https://console.cloud.google.com/projectcreate>, or reuse one.
-2. **Branding** — <https://console.cloud.google.com/auth/branding>. Set an app
-   name, user support email and developer contact, then save. Clients cannot be
-   created until this exists.
-3. **Audience** — <https://console.cloud.google.com/auth/audience>. User type
-   **External**. Leave publishing status on *Testing*.
-4. **Clients** — <https://console.cloud.google.com/auth/clients> → **Create
-   client** → application type **Web application**. Fill in only:
+Two variables, both required — either alone fails at send time, *after* the
+user has been told to check their inbox:
 
-   | Field | Value |
-   | --- | --- |
-   | Authorized redirect URIs | `<origin>/api/auth/callback/google` |
-   | Authorized redirect URIs | `http://localhost:3000/api/auth/callback/google` |
-   | Authorized JavaScript origins | *leave empty* |
+```
+EMAIL_SERVER="smtp://user:password@smtp.example.com:587"
+EMAIL_FROM="Making Space <login@makingspace.cloud>"
+```
 
-   Matching is exact: no trailing slash, and `http` vs `https` matters. Only the
-   canonical origin needs registering — if `www` 308-redirects to the apex, the
-   callback always lands on the apex.
+Any SMTP transport works (Resend, Postmark, SES, a Gmail app password).
 
-   JavaScript origins are for the browser-side implicit flow. NextAuth uses the
-   server-side authorization-code flow, so leaving that field empty is correct,
-   not an omission.
+Why not passwords: NextAuth v4 permits credential auth only with JWT sessions,
+which would give up the database sessions this app uses deliberately — a login
+stays revocable and lives next to the credit ledger. The email provider keeps
+those sessions and stores no user secret at all. `VerificationToken` is already
+in the schema as part of the Prisma adapter, so this needed no migration.
 
-5. Copy the client ID and secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+Links expire after 30 minutes rather than NextAuth's default 24 hours; a
+credential sitting in an inbox for a day is a long window.
 
-**Testing mode is not a limitation here.** Its usual costs — 100 test users,
-consent warnings, 7-day token expiry — apply to apps requesting sensitive
-scopes. `next-auth/providers/google` requests `openid email profile` and
-nothing else, which Google treats as non-sensitive: no test users to enrol, no
-"Google hasn't verified this app" screen, no expiring authorizations, and no
-verification review. Publish the app only if you want it listed; it is not
-needed for sign-in to work.
-
-Who may actually sign in is enforced by `AUTH_ALLOWED_EMAILS`, not by Google.
+Who may sign in is enforced by `AUTH_ALLOWED_EMAILS` in the `signIn` callback,
+which runs when the link is *requested* — an address off the roster never
+receives one. The form says the same thing either way, so it cannot be used to
+test who has an account.
 
 
 Two things do **not** work off this machine, by construction:
@@ -264,11 +250,11 @@ double-grant).
 
 ## Auth
 
-Real sign-in is **NextAuth with Google OAuth** and database sessions stored
-in Postgres (Prisma adapter). Register an OAuth app in Google Cloud Console
-(redirect URI `<origin>/api/auth/callback/google`) and set
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_SECRET`, and
-`NEXTAUTH_URL`. New users get 250 starter credits on first sign-in.
+Real sign-in is **NextAuth email magic links** and database sessions stored
+in Postgres (Prisma adapter). No OAuth provider and no stored passwords: set
+`EMAIL_SERVER`, `EMAIL_FROM`, `NEXTAUTH_SECRET` and `NEXTAUTH_URL`, and
+restrict who may sign in with `AUTH_ALLOWED_EMAILS`. New users get 250 starter
+credits on first sign-in.
 
 For keyless local dev there's an explicit **demo mode**
 (`AUTH_DEMO_MODE="true"`, on in `.env.example`): the landing page shows an

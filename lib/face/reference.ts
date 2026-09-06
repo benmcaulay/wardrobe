@@ -10,7 +10,7 @@
  * **Ephemerality is the architecture, not a nicety.** The enrolled-gallery
  * design this replaces died on key management — the mitigation everyone
  * recommends is envelope-encrypting the gallery under a passphrase, and this
- * app authenticates with Google OAuth and has no passphrase to derive a key
+ * app authenticates with magic links and has no passphrase to derive a key
  * from. Building the set per-scan removes the thing that needed protecting. It
  * is also the *Zellmer v. Meta* fact pattern: face vectors that are "simply
  * numbers", deleted immediately after matching, never retained.
