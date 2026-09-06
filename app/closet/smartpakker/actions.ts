@@ -3,7 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { encode, parseColors, parseSeasons, parseStringArray, type Season } from "@/lib/json";
+import {
+  encode,
+  parseColors,
+  parseSeasons,
+  parseStringArray,
+  parseStylePrefs,
+  type Season,
+} from "@/lib/json";
+import { getCategoriesListFromPrefs, suggestCategoryFromItem } from "@/lib/categories";
+import { getPrimaryOwnerId } from "@/lib/owners";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
 import { buildPackingPlan, type PackableItem, type PackingPlan } from "@/lib/packing/plan";
@@ -86,6 +95,68 @@ function normalizeBagInput(input: BagInput): Result<{ data: Required<BagInput> }
   };
 }
 
+
+/**
+ * Keep the closet's copy of a bag in step with the bag itself.
+ *
+ * A bag is a thing you own, so it should be findable in the closet like any
+ * other accessory — not only inside the packing tool. This links rather than
+ * duplicates: rename the bag or re-photograph it and the closet item follows.
+ *
+ * Requires a photo, because WardrobeItem.originalImagePath is non-null. A bag
+ * added without one simply has no closet item until a photo is attached, at
+ * which point the next save creates it.
+ *
+ * Returns the id to store on the bag, or null when there is nothing to link.
+ */
+async function syncBagClosetItem(
+  userId: string,
+  bag: { name: string; imagePath: string | null; wardrobeItemId: string | null },
+): Promise<string | null> {
+  if (!bag.imagePath) return bag.wardrobeItemId;
+
+  if (bag.wardrobeItemId) {
+    // Scope by userId so a stale id cannot be used to write someone else's row.
+    const updated = await prisma.wardrobeItem.updateMany({
+      where: { id: bag.wardrobeItemId, userId },
+      data: { name: bag.name, originalImagePath: bag.imagePath },
+    });
+    if (updated.count === 1) return bag.wardrobeItemId;
+    // The user deleted the closet item by hand. Respect that rather than
+    // silently recreating it on every save.
+    return null;
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { stylePrefs: true },
+  });
+  const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  // File it under whatever the user calls accessories; "bag" in the name is
+  // what classifyGarmentKind keys off, so a closet using "bags" or
+  // "accessories" both resolve without a synonym table here.
+  const category =
+    suggestCategoryFromItem(
+      { category: "bag", name: bag.name },
+      getCategoriesListFromPrefs(prefs),
+    ) ?? "accessory";
+
+  const created = await prisma.wardrobeItem.create({
+    data: {
+      userId,
+      name: bag.name,
+      category,
+      colors: encode([]),
+      styleTags: encode([]),
+      season: encode([]),
+      owners: encode([getPrimaryOwnerId(prefs)]),
+      originalImagePath: bag.imagePath,
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 export async function createBag(input: BagInput): Promise<Result<{ id: string }>> {
   const user = await requireUser();
   const norm = normalizeBagInput(input);
@@ -97,7 +168,16 @@ export async function createBag(input: BagInput): Promise<Result<{ id: string }>
     data: { userId: user.id, ...norm.data },
     select: { id: true },
   });
+  const wardrobeItemId = await syncBagClosetItem(user.id, {
+    name: norm.data.name,
+    imagePath: norm.data.imagePath,
+    wardrobeItemId: null,
+  });
+  if (wardrobeItemId) {
+    await prisma.packingBag.update({ where: { id: bag.id }, data: { wardrobeItemId } });
+  }
   revalidatePath("/closet/smartpakker");
+  revalidatePath("/closet");
   return { ok: true, id: bag.id };
 }
 
@@ -105,7 +185,7 @@ export async function updateBag(input: BagInput & { id: string }): Promise<Resul
   const user = await requireUser();
   const existing = await prisma.packingBag.findUnique({
     where: { id: input.id },
-    select: { userId: true, imagePath: true },
+    select: { userId: true, imagePath: true, wardrobeItemId: true },
   });
   if (!existing || existing.userId !== user.id) return { ok: false, error: "Bag not found" };
   const norm = normalizeBagInput(input);
@@ -117,8 +197,17 @@ export async function updateBag(input: BagInput & { id: string }): Promise<Resul
   if (existing.imagePath && existing.imagePath !== norm.data.imagePath) {
     await deleteUpload(existing.imagePath);
   }
-  await prisma.packingBag.update({ where: { id: input.id }, data: norm.data });
+  const wardrobeItemId = await syncBagClosetItem(user.id, {
+    name: norm.data.name,
+    imagePath: norm.data.imagePath,
+    wardrobeItemId: existing.wardrobeItemId,
+  });
+  await prisma.packingBag.update({
+    where: { id: input.id },
+    data: { ...norm.data, wardrobeItemId },
+  });
   revalidatePath("/closet/smartpakker");
+  revalidatePath("/closet");
   return { ok: true };
 }
 
@@ -126,10 +215,19 @@ export async function deleteBag(id: string): Promise<Result> {
   const user = await requireUser();
   const bag = await prisma.packingBag.findUnique({
     where: { id },
-    select: { userId: true, imagePath: true },
+    select: { userId: true, imagePath: true, wardrobeItemId: true },
   });
   if (!bag || bag.userId !== user.id) return { ok: false, error: "Bag not found" };
-  if (bag.imagePath) await deleteUpload(bag.imagePath);
+  // Removing a bag from the packing tool does not mean you threw the bag away,
+  // so the closet item stays. That makes the photo shared, and deleting the
+  // upload here would blank the closet item — only delete what nothing else
+  // still points at.
+  const stillReferenced = bag.wardrobeItemId
+    ? (await prisma.wardrobeItem.count({
+        where: { id: bag.wardrobeItemId, userId: user.id, originalImagePath: bag.imagePath ?? "" },
+      })) > 0
+    : false;
+  if (bag.imagePath && !stillReferenced) await deleteUpload(bag.imagePath);
   await prisma.packingBag.delete({ where: { id } });
   revalidatePath("/closet/smartpakker");
   return { ok: true };

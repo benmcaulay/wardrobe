@@ -471,6 +471,11 @@ model PackingBag {
   maxWeightKg  Float?
   silhouette   String   @default("duffel")
   imagePath    String?
+  // A bag is a thing you own, so it also belongs in the closet as an accessory.
+  // Linked rather than duplicated so renaming or re-photographing the bag keeps
+  // the two in step. Null when the bag has no photo yet — WardrobeItem requires
+  // an image — or when the closet item was deleted by hand.
+  wardrobeItemId String? @unique
   createdAt    DateTime @default(now())
 
   @@index([userId])

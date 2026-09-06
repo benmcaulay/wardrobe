@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { imageUrl } from "@/lib/image-paths";
 import { BAG_SILHOUETTES, getSilhouette } from "@/lib/packing/silhouettes";
 import { formatVolume } from "@/lib/packing/estimate";
+import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
 import { createBag, deleteBag, updateBag, uploadBagImage } from "../actions";
 
 export type BagView = {
@@ -205,6 +206,7 @@ function BagForm({
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function pickSilhouette(id: string) {
@@ -327,6 +329,14 @@ function BagForm({
           />
           <button
             type="button"
+            onClick={() => setCapturing(true)}
+            disabled={uploading}
+            className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+          >
+            Take photo
+          </button>
+          <button
+            type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper-warm disabled:opacity-50"
@@ -343,6 +353,18 @@ function BagForm({
             </button>
           ) : null}
         </div>
+        <WebcamCaptureModal
+          open={capturing}
+          // Rear camera: you photograph a bag sitting in front of you, not
+          // yourself. Falls back to whatever the device has.
+          preferredFacing="environment"
+          title="Photograph the bag"
+          onClose={() => setCapturing(false)}
+          onCapture={(file) => {
+            setCapturing(false);
+            void handleFile(file);
+          }}
+        />
       </div>
 
       {error ? <p className="text-xs text-rose-700">{error}</p> : null}
