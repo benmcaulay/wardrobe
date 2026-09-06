@@ -32,7 +32,7 @@ gemini measurably cannot do the job:
   garment but not price or link it — and a fabricated price silently corrupts the
   wishlist budget. `SERPAPI_KEY` alone enables the text lane (Google Shopping);
   the Google Lens photo-match lane also needs `PUBLIC_APP_URL` +
-  `PUBLIC_IMAGE_SECRET`, since SerpAPI has to fetch the image itself and cannot
+  `IMAGE_SECRET`, since SerpAPI has to fetch the image itself and cannot
   reach localhost. Without a key, lookup degrades to gemini identification:
   name and brand, no price, no URL.
 
@@ -245,7 +245,7 @@ signature. Swapping in a real API only edits one file.
 | `lib/services/ghostMannequin.ts` ✅     | Composite a garment as a ghost mannequin      | Gemini Interactions API *(default)* or fal.ai (SeedDream / Flux Kontext) | `USE_REAL_GHOST_MANNEQUIN`, `GHOST_PROVIDER`, `GEMINI_API_KEY`, `FAL_KEY`, `FAL_GHOST_MODEL` |
 | `lib/client/background-removal.ts` ✅   | Transparent-background cutouts (live, client) | `@imgly/background-removal` (already wired)                          | none — runs free in-browser via WASM                         |
 | `lib/services/vision.ts`               | Garment category / color / style tagging      | Anthropic Claude Vision, OpenAI Vision, Google Vision AI             | `USE_REAL_VISION`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`     |
-| `lib/services/reverseImageSearch.ts`   | Find the product in a photo                   | SerpAPI Google Lens (real prices + URLs, needs a public origin), else gemini vision (name/brand only) | `SERPAPI_KEY`, `PUBLIC_APP_URL`, `PUBLIC_IMAGE_SECRET`, `GEMINI_API_KEY` |
+| `lib/services/reverseImageSearch.ts`   | Find the product in a photo                   | SerpAPI Google Lens (real prices + URLs, needs a public origin), else gemini vision (name/brand only) | `SERPAPI_KEY`, `PUBLIC_APP_URL`, `IMAGE_SECRET`, `GEMINI_API_KEY` |
 | `lib/services/productScraper.ts`       | Pull price / brand / material from a URL      | Direct fetch + schema.org/Product JSON-LD. No API key                | `USE_REAL_PRODUCT_SCRAPER`                                   |
 | `lib/services/backgroundRemoval.ts`    | Server-side bg-removal fallback               | remove.bg, Photoroom, Replicate rembg                                | `USE_REAL_BACKGROUND_REMOVAL`, `REMOVE_BG_API_KEY`           |
 

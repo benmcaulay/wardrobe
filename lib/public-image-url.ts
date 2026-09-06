@@ -2,11 +2,11 @@ import crypto from "node:crypto";
 
 /**
  * Short-lived signed URL so SerpAPI Google Lens can fetch an upload.
- * Requires PUBLIC_APP_URL (HTTPS, reachable from the internet) and PUBLIC_IMAGE_SECRET.
+ * Requires PUBLIC_APP_URL (HTTPS, reachable from the internet) and IMAGE_SECRET.
  */
 export function signedPublicImageUrl(relativePath: string): string | null {
   const base = process.env.PUBLIC_APP_URL?.trim().replace(/\/$/, "");
-  const secret = process.env.PUBLIC_IMAGE_SECRET?.trim();
+  const secret = process.env.IMAGE_SECRET?.trim();
   if (!base || !secret) return null;
 
   const exp = Math.floor(Date.now() / 1000) + 600;
@@ -26,7 +26,7 @@ export function verifyPublicImageToken(
   exp: string,
   sig: string,
 ): boolean {
-  const secret = process.env.PUBLIC_IMAGE_SECRET?.trim();
+  const secret = process.env.IMAGE_SECRET?.trim();
   if (!secret) return false;
 
   const expNum = Number(exp);

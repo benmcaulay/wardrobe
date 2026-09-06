@@ -32,7 +32,7 @@ export function serpApiEnabled(): boolean {
  * the text lane is not held back by it.
  */
 export function serpApiLensEnabled(): boolean {
-  return serpApiEnabled() && Boolean(strEnv("PUBLIC_APP_URL") && strEnv("PUBLIC_IMAGE_SECRET"));
+  return serpApiEnabled() && Boolean(strEnv("PUBLIC_APP_URL") && strEnv("IMAGE_SECRET"));
 }
 
 export async function serpApiGet<T extends Record<string, unknown>>(

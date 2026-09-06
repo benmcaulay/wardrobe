@@ -5,7 +5,7 @@
  *
  *  1. **Google Lens via SerpAPI** — a real reverse-image search returning real
  *     listings with real prices and URLs. Needs SERPAPI_KEY *and* a publicly
- *     reachable image URL (PUBLIC_APP_URL + PUBLIC_IMAGE_SECRET), because
+ *     reachable image URL (PUBLIC_APP_URL + IMAGE_SECRET), because
  *     SerpAPI has to fetch the image itself. That rules it out on localhost.
  *  2. **Gemini vision** — recognises the garment from what the model knows
  *     rather than looking it up, so it names the piece but cannot price or link

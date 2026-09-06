@@ -5,7 +5,7 @@ const ENV = { ...process.env };
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
-  for (const v of ["SERPAPI_KEY", "PUBLIC_APP_URL", "PUBLIC_IMAGE_SECRET", "GEMINI_API_KEY"]) {
+  for (const v of ["SERPAPI_KEY", "PUBLIC_APP_URL", "IMAGE_SECRET", "GEMINI_API_KEY"]) {
     delete process.env[v];
   }
 });
@@ -49,13 +49,13 @@ describe("serpApiLensEnabled", () => {
     process.env.PUBLIC_APP_URL = "https://wardrobe.example";
     expect(serpApiLensEnabled()).toBe(false); // secret still missing
 
-    process.env.PUBLIC_IMAGE_SECRET = "s";
+    process.env.IMAGE_SECRET = "s";
     expect(serpApiLensEnabled()).toBe(true);
   });
 
   it("is false without a key even when the origin is public", () => {
     process.env.PUBLIC_APP_URL = "https://wardrobe.example";
-    process.env.PUBLIC_IMAGE_SECRET = "s";
+    process.env.IMAGE_SECRET = "s";
     expect(serpApiLensEnabled()).toBe(false);
   });
 });
