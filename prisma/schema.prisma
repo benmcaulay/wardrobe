@@ -169,6 +169,11 @@ model GenerationJob {
   status      String    @default("queued")
   payload     String
   result      String?
+  // Uncommitted camera-roll review edits (names, brands, owners, which pieces
+  // are checked). Held here rather than only in the browser so a reload, a
+  // crashed tab or a restarted dev server does not discard work the user has
+  // already done by hand. Cleared on commit.
+  reviewDraft String?
   error       String?
   attempts    Int       @default(0)
   maxAttempts Int       @default(3)

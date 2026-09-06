@@ -143,6 +143,11 @@ List every DISTINCT clothing item (garment, shoes, or wearable accessory) that c
 
 Rules:
 - Do NOT merge separate pieces into one entry (e.g. shirt + pants = two garments).
+- Only list a garment whose FULL extent is visible in the frame. Skip anything
+  cut off by the edge of the photo, hidden behind a person or object, or only
+  partly in shot. A partial garment still produces a confident-looking entry,
+  and the ghost-mannequin render invents whatever the frame cropped off — so a
+  missed item costs far less than a fabricated one.
 - "category" MUST be copied verbatim from this list, which is the user's own
   closet taxonomy: ${categoryList.join(", ")}. Pick the most specific one that
   fits. If nothing fits, use "other".

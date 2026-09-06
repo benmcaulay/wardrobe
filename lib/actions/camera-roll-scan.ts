@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
+import { parseSavedDraft, type SavedReviewDraft } from "@/lib/scan-review-drafts";
 import { MAX_SCAN_PHOTOS, MAX_UPLOAD_BATCH } from "@/lib/camera-roll-scan-limits";
 import { prisma } from "@/lib/db";
 import { encode, decode } from "@/lib/json";
@@ -187,6 +188,37 @@ export async function getCameraRollScanStatus(
   };
 }
 
+/**
+ * Persist uncommitted review edits so a reload does not discard them.
+ *
+ * Fire-and-forget from the client's point of view: a failure here costs the
+ * user nothing they had a moment ago, so it reports rather than throws, and
+ * the review carries on against in-memory state either way.
+ */
+export async function saveScanReviewDraft(
+  jobId: string,
+  draft: SavedReviewDraft,
+): Promise<{ ok: boolean }> {
+  const user = await requireUser();
+  // Scope the write by userId in the query itself; a findUnique-then-compare
+  // would let a racing delete slip a write onto someone else's row.
+  const updated = await prisma.generationJob.updateMany({
+    where: { id: jobId, userId: user.id, type: "camera_roll_scan" },
+    data: { reviewDraft: JSON.stringify(draft) },
+  });
+  return { ok: updated.count === 1 };
+}
+
+/** The saved edits for a scan, or null when there are none. */
+export async function loadScanReviewDraft(jobId: string): Promise<SavedReviewDraft | null> {
+  const user = await requireUser();
+  const job = await prisma.generationJob.findFirst({
+    where: { id: jobId, userId: user.id, type: "camera_roll_scan" },
+    select: { reviewDraft: true },
+  });
+  return parseSavedDraft(job?.reviewDraft);
+}
+
 /** Resume an in-flight scan or a finished scan awaiting review. */
 export async function getActiveCameraRollScanJob(): Promise<ActiveScanJobResponse> {
   const user = await requireUser();
@@ -260,7 +292,10 @@ export async function commitScanReviewItems(
 
   await prisma.generationJob.update({
     where: { id: jobId },
-    data: { result: encode(nextResult) },
+    // The draft described work still pending; once committed it is answered by
+    // the closet itself, and leaving it would re-apply stale edits to a scan
+    // that is finished.
+    data: { result: encode(nextResult), reviewDraft: null },
   });
 
   // Kick the worker to process the background ghost jobs enqueued for each

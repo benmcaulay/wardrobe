@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { mergeSavedDrafts, toSavedDraft } from "@/lib/scan-review-drafts";
 import { imageUrl } from "@/lib/image-paths";
 import { CreditMark } from "@/components/credit-mark";
 import {
@@ -10,6 +11,8 @@ import {
   getCameraRollScanStatus,
   startCameraRollScan,
   uploadScanBatch,
+  saveScanReviewDraft,
+  loadScanReviewDraft,
 } from "@/lib/actions/camera-roll-scan";
 import { MAX_SCAN_PHOTOS, MAX_UPLOAD_BATCH } from "@/lib/camera-roll-scan-limits";
 import type { Owner } from "@/lib/json";
@@ -27,6 +30,8 @@ import {
 } from "@/lib/image-upload-accept";
 
 const POLL_INTERVAL_MS = 2000;
+/** Quiet period after the last edit before the draft is written. */
+const SAVE_DEBOUNCE_MS = 700;
 const SCAN_REVIEW_JOB_KEY = "wardrobe:scan-review-job";
 
 type Props = {
@@ -192,16 +197,55 @@ export function ScanClient({
   const [splitGroups, setSplitGroups] = useState<Set<string>>(() => new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef(0);
+  // Saving is suppressed until the stored draft has been merged in. Without
+  // this the first render would persist the classifier's values straight over
+  // the user's saved edits — the exact work this is meant to protect.
+  const draftsHydratedRef = useRef(false);
 
   function enterReview(jobId: string, result: CameraRollScanProgress) {
     setReviewJobId(jobId);
     setScanResult(result);
-    setDrafts(draftsFromResult(result, batchOwnerIds));
+    const fresh = draftsFromResult(result, batchOwnerIds);
+    setDrafts(fresh);
     setSplitGroups(new Set());
     setPhase("review");
     sessionStorage.setItem(SCAN_REVIEW_JOB_KEY, jobId);
     if (typeof result.creditsRemaining === "number") setCredits(result.creditsRemaining);
+
+    // Render the scan first and fold saved edits in when they arrive: the grid
+    // is usable immediately, and a missing or unreadable draft simply leaves
+    // the classifier's values in place.
+    draftsHydratedRef.current = false;
+    void loadScanReviewDraft(jobId)
+      .then((saved) => {
+        if (saved) {
+          setDrafts((current) => mergeSavedDrafts(current, saved));
+          if (saved.splitGroups?.length) setSplitGroups(new Set(saved.splitGroups));
+        }
+      })
+      .catch(() => {
+        /* Edits are a convenience; failing to restore them must not block review. */
+      })
+      .finally(() => {
+        draftsHydratedRef.current = true;
+      });
   }
+
+  // Persist review edits shortly after typing stops. Debounced because this
+  // fires on every keystroke across ~30 rows; the delay is short enough that
+  // an accidental reload loses at most the word in progress.
+  useEffect(() => {
+    if (phase !== "review" || !reviewJobId) return;
+    if (!draftsHydratedRef.current) return;
+    const jobId = reviewJobId;
+    const payload = toSavedDraft(drafts as never, [...splitGroups]);
+    const timer = setTimeout(() => {
+      void saveScanReviewDraft(jobId, payload).catch(() => {
+        /* Best effort: in-memory state is still authoritative for this session. */
+      });
+    }, SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [drafts, splitGroups, phase, reviewJobId]);
 
   const pollScan = useCallback(async (jobId: string, signal: number) => {
     while (pollRef.current === signal) {
