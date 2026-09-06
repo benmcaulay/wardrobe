@@ -101,7 +101,8 @@ where in dev it is only a warning.
 | `AUTH_DEMO_MODE` | Ignored in production — demo mode refuses to run there whatever this says, so a stray `"true"` cannot open the shared account. Leave it unset on a host anyway. |
 | `DATABASE_URL` | Postgres. |
 | `GEMINI_API_KEY` | The only paid AI provider. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Real sign-in. Authorized redirect URI is `<origin>/api/auth/callback/google`. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Real sign-in. Authorized redirect URI is `<origin>/api/auth/callback/google` — see [Google sign-in](#google-sign-in). |
+| `AUTH_ALLOWED_EMAILS` | Comma-separated roster of addresses allowed to sign in. Unset means anyone with a Google account can, which on a public URL means strangers creating accounts against your Gemini budget. |
 | S3/R2 vars | Object storage; the local disk driver does not survive a redeploy. |
 
 `CRON_SECRET` is also required on any host where Vercel Cron drains the queue —
