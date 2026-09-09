@@ -28,6 +28,23 @@ export function cutoutPathFor(ghostPath: string): string {
   return `${base}-cutout.png`;
 }
 
+/**
+ * Derive the full-resolution source path. Convention: foo.jpg -> foo-src.jpg.
+ *
+ * Garment crops used to be cut from the stored original, which is capped at
+ * MAX_EDGE_PX — so a garment filling a quarter of the frame yielded a ~400px
+ * crop, and that was what the ghost renderer got. This sibling holds the
+ * near-native upload just long enough for the scan to crop from it, then the
+ * scan deletes it. Nothing outside the scan should read it, and its absence is
+ * always safe: callers fall back to the stored original.
+ */
+export function sourcePathFor(originalPath: string): string {
+  const dot = originalPath.lastIndexOf(".");
+  const slash = originalPath.lastIndexOf("/");
+  if (dot === -1 || dot < slash) return `${originalPath}-src`;
+  return `${originalPath.slice(0, dot)}-src${originalPath.slice(dot)}`;
+}
+
 /** URL to serve an image through the authenticated route. */
 export function imageUrl(relativePath: string): string {
   return `/api/images/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
@@ -41,6 +58,6 @@ export function thumbnailUrl(originalPath: string): string {
 /** True when the path is a ghost-mannequin render (may have a -cutout.png sibling). */
 export function isGhostImagePath(relativePath: string): boolean {
   const filename = relativePath.slice(relativePath.lastIndexOf("/") + 1);
-  if (filename.includes("-thumb") || filename.includes("-cutout")) return false;
+  if (filename.includes("-thumb") || filename.includes("-cutout") || filename.includes("-src")) return false;
   return /^ghost-[^/]+\.(jpe?g|png)$/i.test(filename);
 }

@@ -14,7 +14,9 @@ import { cropGarmentRegion } from "@/lib/services/garment-crop";
 import { computeDHash } from "@/lib/image-dhash";
 import { findClosetMatch, type ClosetHashEntry } from "@/lib/server/scan-closet-index";
 import { enqueueJob } from "@/lib/jobs/queue";
-import { deleteUpload } from "@/lib/uploads";
+import { deleteUpload,
+  deleteSourceCopy,
+} from "@/lib/uploads";
 import type {
   CameraRollScanItemResult,
   CameraRollScanProgress,
@@ -68,6 +70,15 @@ async function resolveGarmentWorkItems(
       garment,
       garmentImagePath: croppedPath,
       sharesFrame: true,
+    });
+  }
+
+  // The full-resolution copy exists only for the crops above. Drop it as soon
+  // as they are made rather than waiting for commit, so an abandoned review
+  // does not strand 4096px images in the bucket.
+  if (items.length > 0) {
+    await deleteSourceCopy(originalImagePath).catch(() => {
+      /* Best effort: a stranded source is wasted bytes, not a failed scan. */
     });
   }
 

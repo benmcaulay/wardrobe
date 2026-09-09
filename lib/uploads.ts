@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import sharp from "sharp";
-import { thumbnailPathFor } from "./image-paths";
+import { sourcePathFor, thumbnailPathFor } from "./image-paths";
 import { putObject, deleteObject } from "./storage";
 import { isAllowedImageUpload } from "./image-upload-accept";
 
@@ -12,7 +12,23 @@ export { isAllowedImageUpload } from "./image-upload-accept";
 // Re-export storage helpers some callers still import from here.
 export { UPLOADS_ROOT, resolveUploadPath } from "./storage";
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-export const MAX_EDGE_PX = 1536;
+/**
+ * Stored originals. Raised from 1536 because garment crops are cut out of this
+ * image, so it is the ceiling on every downstream render: a garment filling a
+ * quarter of the frame came out ~400px. Measured cost of the change on a real
+ * 112-item closet: originals go from ~34MB to ~95MB against Supabase's 1GB
+ * free tier, and generation cost is unaffected (the ledger records a flat
+ * 67 tenth-cents per flash render regardless of input size).
+ */
+export const MAX_EDGE_PX = 2560;
+
+/**
+ * The temporary near-native copy the camera-roll scan crops from.
+ *
+ * Written only when a caller asks for it, and deleted by the scan as soon as
+ * the crops exist, so it never counts toward steady-state storage.
+ */
+export const SOURCE_EDGE_PX = 4096;
 export const THUMB_EDGE_PX = 400;
 
 export class UploadError extends Error {
@@ -34,7 +50,19 @@ export type SavedUpload = {
  * and write both the full-size JPEG and a 400px thumbnail through the storage
  * seam. Returns the DB-relative paths (which double as storage keys).
  */
-export async function saveUpload(file: File, userId: string): Promise<SavedUpload> {
+export type SaveOptions = {
+  /**
+   * Also write a near-native `-src` sibling for the camera-roll scan to crop
+   * from. The caller that asks for it owns deleting it.
+   */
+  keepSource?: boolean;
+};
+
+export async function saveUpload(
+  file: File,
+  userId: string,
+  options: SaveOptions = {},
+): Promise<SavedUpload> {
   if (!file || file.size === 0) throw new UploadError("empty", "File is empty");
   if (file.size > MAX_UPLOAD_BYTES) {
     throw new UploadError("too_large", `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`);
@@ -44,11 +72,15 @@ export async function saveUpload(file: File, userId: string): Promise<SavedUploa
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  return saveImageBuffer(buffer, userId);
+  return saveImageBuffer(buffer, userId, options);
 }
 
 /** Process raw image bytes the same way as {@link saveUpload}. */
-export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<SavedUpload> {
+export async function saveImageBuffer(
+  buffer: Buffer,
+  userId: string,
+  options: SaveOptions = {},
+): Promise<SavedUpload> {
   if (buffer.length === 0) throw new UploadError("empty", "File is empty");
   if (buffer.length > MAX_UPLOAD_BYTES) {
     throw new UploadError("too_large", `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`);
@@ -61,6 +93,7 @@ export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<S
   let original: Buffer;
   let thumb: Buffer;
   let meta: sharp.OutputInfo;
+  let source: Buffer | null = null;
   try {
     /*
      * keepIccProfile: an iPhone photo is Display P3, and sharp strips metadata
@@ -89,6 +122,14 @@ export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<S
       .keepIccProfile()
       .jpeg({ quality: 78, mozjpeg: true })
       .toBuffer();
+    if (options.keepSource) {
+      source = await sharp(buffer)
+        .rotate()
+        .resize({ width: SOURCE_EDGE_PX, height: SOURCE_EDGE_PX, fit: "inside", withoutEnlargement: true })
+        .keepIccProfile()
+        .jpeg({ quality: 92, mozjpeg: true })
+        .toBuffer();
+    }
   } catch (err) {
     throw new UploadError("decode_failed", `Could not decode image: ${(err as Error).message}`);
   }
@@ -96,6 +137,7 @@ export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<S
   await Promise.all([
     putObject(originalKey, original, "image/jpeg"),
     putObject(thumbKey, thumb, "image/jpeg"),
+    ...(source ? [putObject(sourcePathFor(originalKey), source, "image/jpeg")] : []),
   ]);
 
   return {
@@ -106,10 +148,22 @@ export async function saveImageBuffer(buffer: Buffer, userId: string): Promise<S
   };
 }
 
-/** Best-effort delete of an image and its thumbnail. Ignores missing files. */
+/**
+ * Best-effort delete of an image and its siblings. Ignores missing files.
+ *
+ * Includes the `-src` copy: it is normally removed by the scan once cropping
+ * is done, but a scan that is abandoned mid-flight leaves one behind, and
+ * deleting the item it belongs to is the last chance to collect it.
+ */
 export async function deleteUpload(originalPath: string): Promise<void> {
   await Promise.all([
     deleteObject(originalPath),
     deleteObject(thumbnailPathFor(originalPath)),
+    deleteObject(sourcePathFor(originalPath)),
   ]);
+}
+
+/** Drop just the temporary full-resolution copy, keeping the stored original. */
+export async function deleteSourceCopy(originalPath: string): Promise<void> {
+  await deleteObject(sourcePathFor(originalPath));
 }

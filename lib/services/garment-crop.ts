@@ -40,7 +40,19 @@ export async function cropGarmentRegion(
   box: NormalizedBBox,
 ): Promise<string | null> {
   const { getObject } = await import("../storage");
-  const buf = await getObject(imagePath);
+  const { sourcePathFor } = await import("../image-paths");
+  /*
+   * Crop from the near-native `-src` copy when the scan left one, falling back
+   * to the stored original.
+   *
+   * The bbox is normalized (0..1), so it lands in the same place at any
+   * resolution — but the pixels it yields do not. Cutting a quarter-frame
+   * garment out of a 2560px original gives ~640px; out of the 4096px source it
+   * gives ~1024px, and that is what the ghost renderer sees. The fallback
+   * matters: the source is deleted as soon as the scan finishes with it, and
+   * anything cropping later must still work.
+   */
+  const buf = (await getObject(sourcePathFor(imagePath))) ?? (await getObject(imagePath));
   if (!buf) return null;
 
   const meta = await sharp(buf).metadata();

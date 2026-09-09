@@ -10,8 +10,7 @@ import {
   imageUrl,
   thumbnailUrl,
   UPLOADS_ROOT,
-  MAX_UPLOAD_BYTES,
-} from "../lib/uploads";
+  MAX_UPLOAD_BYTES, MAX_EDGE_PX } from "../lib/uploads";
 import { isGhostImagePath } from "../lib/image-paths";
 
 const TEST_USER = "__test_user__";
@@ -106,8 +105,8 @@ describe("saveUpload", () => {
 
     expect(saved.originalImagePath.startsWith(`${TEST_USER}/`)).toBe(true);
     expect(saved.thumbnailImagePath).toBe(thumbnailPathFor(saved.originalImagePath));
-    expect(saved.width).toBeLessThanOrEqual(1536);
-    expect(saved.height).toBeLessThanOrEqual(1536);
+    expect(saved.width).toBeLessThanOrEqual(MAX_EDGE_PX);
+    expect(saved.height).toBeLessThanOrEqual(MAX_EDGE_PX);
 
     const origAbs = path.join(UPLOADS_ROOT, saved.originalImagePath);
     const thumbAbs = path.join(UPLOADS_ROOT, saved.thumbnailImagePath);

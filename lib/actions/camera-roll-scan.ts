@@ -48,7 +48,9 @@ export async function uploadScanBatch(formData: FormData): Promise<UploadScanBat
       continue;
     }
     try {
-      const saved = await saveUpload(entry, user.id);
+      // keepSource: these photos get garment-cropped by the scan, and the crop
+      // must not be cut out of the downscaled original. The scan deletes it.
+      const saved = await saveUpload(entry, user.id, { keepSource: true });
       paths.push(saved.originalImagePath);
     } catch (err) {
       rejected.push(err instanceof UploadError ? err.message : "Upload failed");

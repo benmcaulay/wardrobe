@@ -149,7 +149,9 @@ export async function importSelectedPhotos(input: {
           continue;
         }
         const bytes = await readFile(source);
-        const saved = await saveImageBuffer(bytes, user.id);
+        // Whole photos are garment-cropped later, so keep a full-resolution
+        // copy for that crop. Hand-cropped ones above do not need it.
+        const saved = await saveImageBuffer(bytes, user.id, { keepSource: true });
         photoPaths.push(saved.originalImagePath);
       }
     } catch (err) {
