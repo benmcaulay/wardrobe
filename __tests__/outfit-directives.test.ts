@@ -236,3 +236,94 @@ describe("wider vocabulary", () => {
     expect(describeDirective(note)).toMatch(/not something I can match/i);
   });
 });
+
+describe("colour sets and the all quantifier", () => {
+  const GREY = { categories: VOCAB.categories, colors: ["red", "black", "gray", "white", "navy", "beige"] };
+
+  it("reads 'all greyscale' as every piece, from a set of colours", () => {
+    // The reported bug: this parsed to include[black,gray,white] with AND
+    // semantics, needing one garment that was all three at once, so it did
+    // nothing at all.
+    const d = parseDirectiveKeywords("all greyscale", GREY);
+    expect(d).toMatchObject({ kind: "include", all: true });
+    expect((d as any).terms).toEqual(expect.arrayContaining(["black", "gray", "white"]));
+  });
+
+  it("matches a garment holding any one of the colours", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    expect(itemSatisfies(item({ colors: [{ hex: "#000", name: "black" }] }), d)).toBe(true);
+    expect(itemSatisfies(item({ colors: [{ hex: "#fff", name: "white" }] }), d)).toBe(true);
+    expect(itemSatisfies(item({ colors: [{ hex: "#f00", name: "red" }] }), d)).toBe(false);
+  });
+
+  it("rewards every matching piece and penalises the ones that break it", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    const grey = item({ colors: [{ hex: "#888", name: "gray" }] });
+    const red = item({ colors: [{ hex: "#f00", name: "red" }] });
+    // A seated grey piece must not satisfy it for the rest of the outfit.
+    expect(directiveBonus([grey], grey, [d])).toBeGreaterThan(0);
+    expect(directiveBonus([grey], red, [d])).toBeLessThan(0);
+  });
+
+  it("is unmet unless the whole look complies", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    const grey = item({ colors: [{ hex: "#888", name: "gray" }] });
+    const red = item({ colors: [{ hex: "#f00", name: "red" }] });
+    expect(unmetDirectives([grey, grey], [d])).toHaveLength(0);
+    expect(unmetDirectives([grey, red], [d])).toHaveLength(1);
+  });
+
+  it("keeps a single-piece ask singular", () => {
+    // "a red hat" must not become "every piece red".
+    const d = parseDirectiveKeywords("I want a red hat", VOCAB)!;
+    expect((d as any).all).toBeFalsy();
+  });
+
+  it("reads a negated colour set as an avoidance", () => {
+    expect(parseDirectiveKeywords("no neutrals", GREY)).toMatchObject({ kind: "exclude" });
+  });
+
+  it("says 'Everything' rather than 'Including' for an all directive", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    expect(describeDirective(d)).toMatch(/^Everything /);
+  });
+});
+
+describe("primary colour for whole-outfit palettes", () => {
+  const GREY = { categories: VOCAB.categories, colors: ["red", "black", "gray", "white", "navy", "beige", "blue"] };
+  // Real rows from the closet that exposed this.
+  const redJacket = item({ category: "jacket", colors: [
+    { hex: "#c0392b", name: "red" }, { hex: "#111", name: "black" }, { hex: "#fff", name: "white" }] });
+  const blueJeans = item({ category: "jeans", colors: [
+    { hex: "#4a6fb0", name: "blue" }, { hex: "#111", name: "black" }] });
+  const whiteShirt = item({ category: "shirt", colors: [
+    { hex: "#fff", name: "white" }, { hex: "#c0392b", name: "red" }] });
+
+  it("rejects a garment that is only incidentally greyscale", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    expect(itemSatisfies(redJacket, d)).toBe(false);
+    expect(itemSatisfies(blueJeans, d)).toBe(false);
+  });
+
+  it("accepts one whose primary colour qualifies", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    expect(itemSatisfies(whiteShirt, d)).toBe(true);
+  });
+
+  it("stays forgiving for a singular ask", () => {
+    // "a red hat" should take a hat with red in it, not only a wholly red one.
+    const d: SessionDirective = { kind: "include", id: "d", text: "red", terms: ["red"] };
+    expect(itemSatisfies(whiteShirt, d)).toBe(true);
+  });
+
+  it("avoids a colour wherever it appears", () => {
+    const d: SessionDirective = { kind: "exclude", id: "d", text: "no red", terms: ["red"] };
+    expect(itemSatisfies(redJacket, d)).toBe(true);
+  });
+
+  it("does not treat beige as greyscale, but does treat it as neutral", () => {
+    const tan = item({ colors: [{ hex: "#d4b896", name: "beige" }] });
+    expect(itemSatisfies(tan, parseDirectiveKeywords("all greyscale", GREY)!)).toBe(false);
+    expect(itemSatisfies(tan, parseDirectiveKeywords("all neutrals", GREY)!)).toBe(true);
+  });
+});

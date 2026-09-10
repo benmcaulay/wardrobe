@@ -42,8 +42,12 @@ formality directive and an exclude directive. Infer what the person means, inclu
 occasions, weather, moods and places — decide what someone saying this would actually want to
 wear, then express it using ONLY the forms below.
 
-- {"kind":"include","category":"...","terms":["..."]}
+- {"kind":"include","category":"...","terms":["..."],"all":false}
     They want this in the outfit.
+    "terms" are alternatives — any one matching is enough, so a colour family
+    like greyscale is ["black","gray","white"].
+    "all":true when they mean the WHOLE outfit ("all greyscale", "head to toe
+    black") rather than one piece ("a red hat"). Default false.
     "category" MUST be copied verbatim from the user's category list, or omitted if none fits.
     "terms" are matched against colour, material, pattern and the garment's name. Copy colours
     verbatim from the colour list. Omit anything you are unsure of — a wrong term is worse
@@ -112,7 +116,13 @@ ${trimmed}`,
 
     rows.forEach((row, index) => {
       if (!row || typeof row !== "object") return;
-      const r = row as { kind?: unknown; category?: unknown; terms?: unknown; target?: unknown };
+      const r = row as {
+      kind?: unknown;
+      category?: unknown;
+      terms?: unknown;
+      target?: unknown;
+      all?: unknown;
+    };
       // Each intent from one sentence needs its own id, or removing the chip
       // for "no tie" would also remove the "formal" it arrived with.
       const rowId = index === 0 ? id : `${id}-${index}`;
@@ -140,7 +150,14 @@ ${trimmed}`,
           ? r.terms.filter((t): t is string => typeof t === "string" && t.trim().length > 0).slice(0, 4)
           : [];
         if (!category && terms.length === 0) return;
-        directives.push({ kind: r.kind, id: rowId, text: trimmed, category, terms });
+        directives.push({
+          kind: r.kind,
+          id: rowId,
+          text: trimmed,
+          category,
+          terms,
+          ...(r.kind === "include" && (r as { all?: unknown }).all === true ? { all: true } : {}),
+        });
         return;
       }
       if (r.kind === "note") directives.push({ kind: "note", id: rowId, text: trimmed });

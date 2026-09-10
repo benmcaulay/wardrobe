@@ -52,7 +52,19 @@ export type DirectiveTarget = {
 
 export type SessionDirective =
   /** Wants a garment matching these terms in the outfit ("a red hat"). */
-  | { kind: "include"; id: string; text: string; category?: string; terms: string[] }
+  | {
+      kind: "include";
+      id: string;
+      text: string;
+      category?: string;
+      terms: string[];
+      /**
+       * "all greyscale" is about every garment, "a red hat" about one. Without
+       * the distinction the first reads as "have one grey thing", which is
+       * satisfied instantly and changes nothing about the rest of the look.
+       */
+      all?: boolean;
+    }
   /** Wants to see less of something ("no black", "not the denim jacket"). */
   | { kind: "exclude"; id: string; text: string; category?: string; terms: string[] }
   /** Pulls the whole look toward a point on the formality ladder. */
@@ -106,12 +118,38 @@ export function itemSatisfies(item: DirectiveTarget, directive: SessionDirective
   );
   if (directive.category && !categoryText.includes(normalize(directive.category))) return false;
 
-  // Every term must appear somewhere describable: colour names, pattern,
-  // material, or the item's own name. "red hat" is category + colour; "linen"
-  // alone is a material with no category at all.
-  return directive.terms.every((term) => {
+  /*
+   * Any term is enough, not all of them.
+   *
+   * "all greyscale" resolves to ["black","gray","white"], and requiring every
+   * term meant looking for one garment that is simultaneously all three —
+   * unsatisfiable, so the instruction silently did nothing. Terms are
+   * alternative descriptions of the same wish far more often than they are a
+   * conjunction, and the category field already carries the one condition
+   * that genuinely ANDs with them.
+   */
+  if (directive.terms.length === 0) return true;
+
+  /*
+   * Which colours count.
+   *
+   * A whole-outfit palette is about primary colours, matching the convention
+   * the colour rules already state on screen ("counts items whose primary
+   * color matches"). Measured against the real closet: a North Face Red
+   * Jacket lists [red, black, white] and Uniqlo Barrel Jeans list
+   * [blue, black], so an any-colour test let both into an "all greyscale"
+   * look on a black they merely carry as trim.
+   *
+   * Singular asks stay forgiving in the other direction: "a red hat" should
+   * accept a hat with red in it, and "no red" should avoid anything red at
+   * all, trim included.
+   */
+  const colors = item.colors ?? [];
+  const searchable = directive.kind === "include" && directive.all ? colors.slice(0, 1) : colors;
+
+  return directive.terms.some((term) => {
     const t = normalize(term);
-    if ((item.colors ?? []).some((c) => normalize(c.name).includes(t))) return true;
+    if (searchable.some((c) => normalize(c.name).includes(t))) return true;
     if (item.pattern && normalize(item.pattern).includes(t)) return true;
     if (item.material && normalize(item.material).includes(t)) return true;
     if (item.name && normalize(item.name).includes(t)) return true;
@@ -135,6 +173,13 @@ export function directiveBonus(
   for (const directive of directives) {
     switch (directive.kind) {
       case "include":
+        if (directive.all) {
+          // Every piece has to answer it, so this pays out on each one and
+          // penalises the ones that do not — otherwise the first grey garment
+          // would satisfy it and the rest of the outfit would drift.
+          bonus += itemSatisfies(item, directive) ? DIRECTIVE_BOOST : -DIRECTIVE_BOOST;
+          break;
+        }
         // Pays out once; a seated match stops further ones earning anything.
         if (placed.some((p) => itemSatisfies(p, directive))) break;
         if (itemSatisfies(item, directive)) bonus += DIRECTIVE_BOOST;
@@ -175,7 +220,11 @@ export function unmetDirectives(
 ): SessionDirective[] {
   return directives.filter((directive) => {
     if (directive.kind === "note") return false;
-    if (directive.kind === "include") return !items.some((i) => itemSatisfies(i, directive));
+    if (directive.kind === "include") {
+      return directive.all
+        ? !items.every((i) => itemSatisfies(i, directive))
+        : !items.some((i) => itemSatisfies(i, directive));
+    }
     if (directive.kind === "exclude") return items.some((i) => itemSatisfies(i, directive));
     if (items.length === 0) return true;
     if (directive.kind === "warmth") {
@@ -211,6 +260,9 @@ export function diagnoseDirective(
   if (directive.kind !== "include") return "not_this_time";
   const matches = pool.filter((item) => itemSatisfies(item, directive));
   if (matches.length === 0) return "no_match";
+  // An "all" directive is not about seating one piece, so a slot story would
+  // be misleading: it failed because some slot had nothing matching to offer.
+  if (directive.all) return "not_this_time";
   return matches.some(canSeat) ? "not_this_time" : "no_slot";
 }
 
@@ -244,6 +296,22 @@ const WARMTH_WORDS: ReadonlyArray<{ match: RegExp; target: number }> = [
  * make every avoidance a request for the thing.
  */
 const NEGATION = /\b(no|not|without|avoid|skip|never|don'?t want|nothing)\b/;
+
+/** "all greyscale", "everything black" — about the whole look, not one piece. */
+const UNIVERSAL = /\b(all|every|everything|entirely|head to toe|full)\b/;
+
+/**
+ * Words that name a set of colours rather than one.
+ *
+ * Kept here rather than in the model prompt because these are the phrasings
+ * that recur, and a colour set is exactly the case the AND-semantics bug made
+ * unsatisfiable — worth pinning down with a test rather than a call.
+ */
+const COLOR_GROUPS: ReadonlyArray<{ match: RegExp; colors: string[] }> = [
+  { match: /\b(greyscale|grayscale|monochrome|black and white)\b/, colors: ["black", "gray", "grey", "white"] },
+  { match: /\b(neutral|neutrals)\b/, colors: ["black", "gray", "grey", "white", "beige", "brown", "tan"] },
+  { match: /\b(earth tones?|earthy)\b/, colors: ["brown", "beige", "green", "tan"] },
+];
 
 const FORMALITY_WORDS: ReadonlyArray<{ match: RegExp; target: Formality }> = [
   { match: /\b(black tie|black-tie|formal|formalwear|suited|dressed up)\b/, target: 9 },
@@ -283,6 +351,19 @@ export function parseDirectiveKeywords(
   }
 
   // Longest first, so "long sleeve shirt" wins over "shirt".
+  const universal = UNIVERSAL.test(lower);
+
+  for (const group of COLOR_GROUPS) {
+    if (!group.match.test(lower)) continue;
+    // Intersect with the closet's own colour list: naming a colour it does
+    // not use would match nothing and read as the instruction being ignored.
+    const terms = vocab.colors.filter((c) => group.colors.includes(normalize(c)));
+    if (terms.length === 0) continue;
+    return negated
+      ? { kind: "exclude", id, text, terms }
+      : { kind: "include", id, text, terms, all: universal };
+  }
+
   const category = [...vocab.categories]
     .sort((a, b) => b.length - a.length)
     .find((c) => new RegExp(`\\b${escapeRe(normalize(c))}s?\\b`).test(lower));
@@ -290,7 +371,8 @@ export function parseDirectiveKeywords(
   const terms = vocab.colors.filter((c) => new RegExp(`\\b${escapeRe(normalize(c))}\\b`).test(lower));
 
   if (!category && terms.length === 0) return null;
-  return { kind: negated ? "exclude" : "include", id, text, category, terms };
+  if (negated) return { kind: "exclude", id, text, category, terms };
+  return { kind: "include", id, text, category, terms, all: universal && !category };
 }
 
 function escapeRe(s: string): string {
@@ -314,9 +396,11 @@ export function describeDirective(directive: SessionDirective): string {
       // implying an effect the scorer never applied.
       return "Noted, but not something I can match on";
     default: {
-      const what = [directive.terms.join(" "), directive.category].filter(Boolean).join(" ");
-      const verb = directive.kind === "exclude" ? "Avoiding" : "Including";
-      return `${verb} ${what || directive.text}`;
+      const what =
+        [directive.terms.join(" or "), directive.category].filter(Boolean).join(" ") ||
+        directive.text;
+      if (directive.kind === "exclude") return `Avoiding ${what}`;
+      return directive.all ? `Everything ${what}` : `Including ${what}`;
     }
   }
 }

@@ -213,10 +213,18 @@ function colorRulesStillPossible(
   return true;
 }
 
-function shuffle<T>(arr: T[]): T[] {
+/**
+ * Fisher-Yates, through the caller's rng when there is one.
+ *
+ * It used to always call Math.random, which quietly defeated the `rng` option
+ * that exists to make spins reproducible: slot order and — with no scoring —
+ * candidate order stayed random no matter what was injected, so seeded tests
+ * drifted between runs.
+ */
+function shuffle<T>(arr: T[], rng: () => number = Math.random): T[] {
   const out = [...arr];
   for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [out[i], out[j]] = [out[j]!, out[i]!];
   }
   return out;
@@ -282,7 +290,7 @@ export function pickRandomOutfit(
     return null;
   }
 
-  const orderedOpen = shuffle(open);
+  const orderedOpen = shuffle(open, scoring?.rng);
 
   function backtrack(index: number): boolean {
     const picked = [...assignment.values()]
