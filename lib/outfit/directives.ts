@@ -139,6 +139,29 @@ export function unmetDirectives(
   });
 }
 
+/**
+ * Why a directive went unhonoured.
+ *
+ * The distinction is the whole value of the message. "I want a red hat" can
+ * fail because the closet has no red hat, or because the outfit layout has no
+ * hat slot to put one in — and those need opposite responses. Reporting the
+ * first when the second is true sends someone looking for a wardrobe problem
+ * they do not have, which is exactly what the first version did against a
+ * closet holding five red hats.
+ */
+export type DirectiveMiss = "no_match" | "no_slot" | "not_this_time";
+
+export function diagnoseDirective(
+  directive: SessionDirective,
+  pool: readonly DirectiveTarget[],
+  canSeat: (item: DirectiveTarget) => boolean,
+): DirectiveMiss {
+  if (directive.kind !== "include") return "not_this_time";
+  const matches = pool.filter((item) => itemSatisfies(item, directive));
+  if (matches.length === 0) return "no_match";
+  return matches.some(canSeat) ? "not_this_time" : "no_slot";
+}
+
 /** Clamp a model- or keyword-derived target onto the ladder. */
 export function clampFormality(value: number): Formality {
   if (!Number.isFinite(value)) return (FORMALITY_MIN + FORMALITY_MAX) / 2;

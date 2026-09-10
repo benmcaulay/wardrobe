@@ -5,6 +5,7 @@ import {
   describeDirective,
   directiveBonus,
   itemSatisfies,
+  diagnoseDirective,
   parseDirectiveKeywords,
   unmetDirectives,
   type SessionDirective,
@@ -162,5 +163,25 @@ describe("category nesting", () => {
     const d: SessionDirective = { kind: "include", id: "d", text: "red shirt", category: "shirt", terms: ["red"] };
     const shoes = item({ category: "shoes", categoryPath: ["shoes", "footwear"] });
     expect(itemSatisfies(shoes, d)).toBe(false);
+  });
+});
+
+describe("diagnoseDirective", () => {
+  const d: SessionDirective = { kind: "include", id: "d", text: "red hat", category: "hat", terms: ["red"] };
+  const redHat = item({ id: "h", category: "hat" });
+  const blackShirt = item({ id: "s", category: "shirt", colors: [{ hex: "#000", name: "black" }] });
+
+  it("says no_match only when the closet really lacks it", () => {
+    expect(diagnoseDirective(d, [blackShirt], () => true)).toBe("no_match");
+  });
+
+  it("says no_slot when the garment exists but nothing can seat it", () => {
+    // The bug this exists to prevent: a closet with five red hats and a
+    // layout with no hat slot was told "nothing in your closet matches".
+    expect(diagnoseDirective(d, [redHat, blackShirt], () => false)).toBe("no_slot");
+  });
+
+  it("says not_this_time when it was seatable and simply was not drawn", () => {
+    expect(diagnoseDirective(d, [redHat], () => true)).toBe("not_this_time");
   });
 });

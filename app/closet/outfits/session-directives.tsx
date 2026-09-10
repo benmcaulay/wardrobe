@@ -15,9 +15,25 @@
 
 import { useState } from "react";
 import { MAX_NOTE_LENGTH } from "@/lib/outfit/style-rules";
-import type { SessionDirective } from "@/lib/outfit/directives";
+import type { DirectiveMiss, SessionDirective } from "@/lib/outfit/directives";
 
-export type DirectiveChip = { directive: SessionDirective; summary: string; unmet: boolean };
+export type DirectiveChip = {
+  directive: SessionDirective;
+  summary: string;
+  /** Why the last spin could not honour it, or null when it did. */
+  miss: DirectiveMiss | null;
+};
+
+/**
+ * Naming the actual obstacle. "Nothing matches" against a closet holding five
+ * red hats is worse than saying nothing — it sends someone to fix the wrong
+ * thing. The real cause there is a layout with no hat slot.
+ */
+const MISS_COPY: Record<DirectiveMiss, string> = {
+  no_match: "nothing in your closet matches",
+  no_slot: "no slot for that \u2014 add one to your layout",
+  not_this_time: "couldn\u2019t fit it this time",
+};
 
 export function SessionDirectives({
   directives,
@@ -107,7 +123,7 @@ export function SessionDirectives({
                     <p className="truncate text-xs text-ink">{chip.summary}</p>
                     <p className="truncate text-[11px] text-ink-muted">
                       &ldquo;{chip.directive.text}&rdquo;
-                      {chip.unmet ? " — nothing in your closet matches" : null}
+                      {chip.miss ? ` \u2014 ${MISS_COPY[chip.miss]}` : null}
                     </p>
                   </div>
                   <button

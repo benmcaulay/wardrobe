@@ -20,6 +20,7 @@ import { WeatherCard, useDailyWeather } from "./weather-card";
 import { PendingWearsCard } from "./pending-wears";
 import { StyleRulesPanel } from "./style-rules-panel";
 import { SessionDirectives, type DirectiveChip } from "./session-directives";
+import type { DirectiveMiss } from "@/lib/outfit/directives";
 import { interpretDirective } from "@/lib/actions/outfit-directives";
 import type { Color } from "@/lib/json";
 import type { CategoryParents } from "@/lib/category-tree";
@@ -165,7 +166,7 @@ export function OutfitStudio({
       }
       setDirectives((prev) => [
         ...prev,
-        { directive: result.directive, summary: result.summary, unmet: false },
+        { directive: result.directive, summary: result.summary, miss: null },
       ]);
     });
   }, []);
@@ -174,11 +175,15 @@ export function OutfitStudio({
     setDirectives((prev) => prev.filter((d) => d.directive.id !== id));
   }, []);
 
-  const onDirectivesUnmet = useCallback((ids: readonly string[]) => {
-    setDirectives((prev) =>
-      prev.map((d) => ({ ...d, unmet: ids.includes(d.directive.id) })),
-    );
-  }, []);
+  const onDirectivesUnmet = useCallback(
+    (misses: ReadonlyArray<{ id: string; reason: DirectiveMiss }>) => {
+      const byId = new Map(misses.map((m) => [m.id, m.reason]));
+      setDirectives((prev) =>
+        prev.map((d) => ({ ...d, miss: byId.get(d.directive.id) ?? null })),
+      );
+    },
+    [],
+  );
 
   const weather = useDailyWeather({ initialContext, onChanged: onModelChanged });
 
