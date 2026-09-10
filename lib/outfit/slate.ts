@@ -37,6 +37,11 @@ import {
   type AttributedRule,
   type RuleContext,
 } from "@/lib/outfit/style-rules";
+import {
+  directiveBonus,
+  unmetDirectives,
+  type SessionDirective,
+} from "@/lib/outfit/directives";
 
 /**
  * Identifies the ranker that produced a slate. Bump on any change that alters
@@ -91,6 +96,8 @@ export type Proposal = {
   itemIds: string[];
   /** Layer 1 score of the finished look, 0..1. */
   score: number;
+  /** Ids of session directives this proposal could not satisfy. */
+  unmet?: string[];
   /**
    * P(this exact set | policy). The product of the per-slot softmax
    * probabilities that produced it. Logged so a future ranker can be scored
@@ -200,6 +207,12 @@ export type SlateOptions = {
   rules?: readonly AttributedRule[];
   ruleContext?: RuleContext;
   /**
+   * Plain-English instructions for this session only (§9). Soft by design:
+   * they bias the draw hard but never exclude, so a closet with nothing
+   * matching still returns a complete outfit rather than a blank screen.
+   */
+  directives?: readonly SessionDirective[];
+  /**
    * Force every arm to one strategy. Training rounds (§10) use `explore` for
    * all three, because the goal there is an *informative* comparison rather
    * than a good outfit — Thompson sampling naturally over-picks the garments
@@ -228,6 +241,7 @@ function buildOne(
   rules: readonly AttributedRule[] = [],
   ruleContext: RuleContext = {},
   pinned: ReadonlySet<string> = new Set(),
+  directives: readonly SessionDirective[] = [],
 ): Proposal | null {
   const placed: SlateCandidate[] = [];
   const used = new Set<string>();
@@ -256,7 +270,8 @@ function buildOne(
     const scores = candidates.map(
       (item) =>
         scoreAddition(placed, item, context) +
-        preferenceBonus(placed, item, rules, ruleContext),
+        preferenceBonus(placed, item, rules, ruleContext) +
+        directiveBonus(placed, item, directives),
     );
     const probabilities = softmax(scores, temperature);
     const index = sampleIndex(probabilities, rng);
@@ -280,7 +295,15 @@ function buildOne(
   // once the last is in place. This is what the user is actually being offered.
   const finalScore = scoreOutfit(placed, context).score;
 
-  return { strategy, itemIds: placed.map((item) => item.id), score: finalScore, propensity };
+  return {
+    strategy,
+    itemIds: placed.map((item) => item.id),
+    score: finalScore,
+    propensity,
+    // Reported rather than enforced: the UI says which instruction it could
+    // not honour instead of silently returning nothing.
+    unmet: unmetDirectives(placed, directives).map((d) => d.id),
+  };
 }
 
 /**
@@ -337,6 +360,7 @@ export function buildSlate(
 
   const rules = options.rules ?? [];
   const ruleContext = options.ruleContext ?? {};
+  const directives = options.directives ?? [];
 
   const byKind = new Map<GarmentKind, SlateCandidate[]>();
   const ids: string[] = [];
@@ -400,6 +424,7 @@ export function buildSlate(
         rules,
         ruleContext,
         pinned,
+        directives,
       );
       if (!candidate) break;
       if (!fallback) fallback = candidate;
