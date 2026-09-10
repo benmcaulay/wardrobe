@@ -16,7 +16,12 @@ import { describeDirective, type SessionDirective } from "@/lib/outfit/directive
 import { parseDirective } from "@/lib/services/directiveParser";
 
 export type DirectiveResult =
-  | { ok: true; directive: SessionDirective; summary: string; source: "keywords" | "ai" }
+  | {
+      ok: true;
+      /** One sentence can carry several intents; each becomes its own chip. */
+      directives: Array<{ directive: SessionDirective; summary: string }>;
+      source: "keywords" | "ai" | "none";
+    }
   | { ok: false; error: string };
 
 export async function interpretDirective(text: string, id: string): Promise<DirectiveResult> {
@@ -30,7 +35,7 @@ export async function interpretDirective(text: string, id: string): Promise<Dire
   });
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
 
-  const { directive, source } = await parseDirective(
+  const { directives, source } = await parseDirective(
     trimmed,
     {
       categories: getCategoriesListFromPrefs(prefs),
@@ -39,11 +44,15 @@ export async function interpretDirective(text: string, id: string): Promise<Dire
     id,
   );
 
-  if (!directive) {
-    return {
-      ok: false,
-      error: "I couldn't turn that into something to match on. Try naming a colour or a category.",
-    };
-  }
-  return { ok: true, directive, summary: describeDirective(directive), source: source === "ai" ? "ai" : "keywords" };
+  // Never an error path any more: anything clothing-shaped that cannot be
+  // mapped comes back as an inert note, so what someone typed is always kept
+  // and always visible.
+  return {
+    ok: true,
+    directives: directives.map((directive) => ({
+      directive,
+      summary: describeDirective(directive),
+    })),
+    source,
+  };
 }

@@ -33,6 +33,7 @@ const MISS_COPY: Record<DirectiveMiss, string> = {
   no_match: "nothing in your closet matches",
   no_slot: "no slot for that \u2014 add one to your layout",
   not_this_time: "couldn\u2019t fit it this time",
+  couldnt_avoid: "couldn\u2019t avoid it \u2014 nothing else fits that slot",
 };
 
 export function SessionDirectives({

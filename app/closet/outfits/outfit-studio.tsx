@@ -166,7 +166,7 @@ export function OutfitStudio({
       }
       setDirectives((prev) => [
         ...prev,
-        { directive: result.directive, summary: result.summary, miss: null },
+        ...result.directives.map((d) => ({ ...d, miss: null })),
       ]);
     });
   }, []);

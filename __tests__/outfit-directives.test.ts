@@ -185,3 +185,54 @@ describe("diagnoseDirective", () => {
     expect(diagnoseDirective(d, [redHat], () => true)).toBe("not_this_time");
   });
 });
+
+describe("wider vocabulary", () => {
+  it("reads a negation as an avoidance, not a request", () => {
+    // "no black" and "black" share every term and differ only in the
+    // negation; reading it second would turn every avoidance into a request.
+    expect(parseDirectiveKeywords("no black", VOCAB)).toMatchObject({
+      kind: "exclude", terms: ["black"],
+    });
+    expect(parseDirectiveKeywords("without a jacket", VOCAB)).toMatchObject({
+      kind: "exclude", category: "jacket",
+    });
+    expect(parseDirectiveKeywords("black", VOCAB)).toMatchObject({ kind: "include" });
+  });
+
+  it("does not read a negated vibe as that vibe", () => {
+    expect(parseDirectiveKeywords("nothing formal", VOCAB)?.kind).not.toBe("formality");
+  });
+
+  it("maps weather words onto the warmth scale", () => {
+    expect(parseDirectiveKeywords("it's freezing", VOCAB)).toMatchObject({ kind: "warmth", target: 3 });
+    expect(parseDirectiveKeywords("something light", VOCAB)).toMatchObject({ kind: "warmth", target: 0.5 });
+  });
+
+  it("penalises an excluded garment as hard as it rewards a wanted one", () => {
+    const avoid: SessionDirective = { kind: "exclude", id: "d", text: "no red", terms: ["red"] };
+    expect(directiveBonus([], item(), [avoid])).toBe(-DIRECTIVE_BOOST);
+  });
+
+  it("keeps an exclusion soft, so a slot with nothing else can still fill", () => {
+    const avoid: SessionDirective = { kind: "exclude", id: "d", text: "no red", terms: ["red"] };
+    expect(Number.isFinite(directiveBonus([], item(), [avoid]))).toBe(true);
+  });
+
+  it("reports an exclusion that slipped through", () => {
+    const avoid: SessionDirective = { kind: "exclude", id: "d", text: "no red", terms: ["red"] };
+    expect(unmetDirectives([item()], [avoid])).toHaveLength(1);
+    expect(unmetDirectives([item({ colors: [{ hex: "#000", name: "black" }] })], [avoid])).toHaveLength(0);
+  });
+
+  it("blames the bench, not the closet, when an exclusion fails", () => {
+    const avoid: SessionDirective = { kind: "exclude", id: "d", text: "no red", terms: ["red"] };
+    expect(diagnoseDirective(avoid, [item()], () => true)).toBe("couldnt_avoid");
+  });
+
+  it("treats a note as heard but inert", () => {
+    const note: SessionDirective = { kind: "note", id: "d", text: "something more me" };
+    expect(directiveBonus([], item(), [note])).toBe(0);
+    expect(unmetDirectives([item()], [note])).toHaveLength(0);
+    expect(describeDirective(note)).toMatch(/not something I can match/i);
+  });
+});

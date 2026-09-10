@@ -22,6 +22,7 @@
  */
 
 import { itemFormality, FORMALITY_MAX, FORMALITY_MIN, type Formality } from "./formality";
+import { garmentWarmth } from "@/lib/packing/plan";
 import type { Color } from "@/lib/json";
 
 /**
@@ -39,6 +40,7 @@ import type { Color } from "@/lib/json";
  * do, rather than a second nesting rule that could disagree with the first.
  */
 export type DirectiveTarget = {
+  id?: string;
   category: string;
   subcategory?: string | null;
   name?: string | null;
@@ -51,8 +53,19 @@ export type DirectiveTarget = {
 export type SessionDirective =
   /** Wants a garment matching these terms in the outfit ("a red hat"). */
   | { kind: "include"; id: string; text: string; category?: string; terms: string[] }
+  /** Wants to see less of something ("no black", "not the denim jacket"). */
+  | { kind: "exclude"; id: string; text: string; category?: string; terms: string[] }
   /** Pulls the whole look toward a point on the formality ladder. */
-  | { kind: "formality"; id: string; text: string; target: Formality };
+  | { kind: "formality"; id: string; text: string; target: Formality }
+  /** Pulls the look toward a warmth, on garmentWarmth's 0..3 scale. */
+  | { kind: "warmth"; id: string; text: string; target: number }
+  /**
+   * Understood as clothing-related but not expressible as anything the scorer
+   * can act on. Kept rather than refused: the same reasoning as StyleNote,
+   * which stores what someone typed even when it parsed to nothing, because
+   * throwing away their words to show an error teaches them not to type.
+   */
+  | { kind: "note"; id: string; text: string };
 
 /**
  * Bonus for a garment that satisfies an outstanding `include` directive.
@@ -69,11 +82,24 @@ export const DIRECTIVE_BOOST = 0.35;
 /** Per-step penalty for missing the requested formality, over a 0..10 ladder. */
 export const FORMALITY_STEP_PENALTY = 0.03;
 
+/**
+ * Per-step penalty for missing the requested warmth.
+ *
+ * garmentWarmth spans 0..3 against formality's 0..10, so the per-step figure
+ * is larger to make a full miss cost about the same on both scales.
+ */
+export const WARMTH_STEP_PENALTY = 0.1;
+
+/** Warmth of one garment, on garmentWarmth's scale. */
+export function targetWarmth(item: DirectiveTarget): number {
+  return garmentWarmth({ ...item, id: item.id ?? "" });
+}
+
 const normalize = (s: string) => s.trim().toLowerCase();
 
 /** Does this garment answer this directive? */
 export function itemSatisfies(item: DirectiveTarget, directive: SessionDirective): boolean {
-  if (directive.kind !== "include") return false;
+  if (directive.kind !== "include" && directive.kind !== "exclude") return false;
 
   const categoryText = normalize(
     [item.category, item.subcategory ?? "", ...(item.categoryPath ?? [])].join(" "),
@@ -107,13 +133,27 @@ export function directiveBonus(
 ): number {
   let bonus = 0;
   for (const directive of directives) {
-    if (directive.kind === "include") {
-      if (placed.some((p) => itemSatisfies(p, directive))) continue;
-      if (itemSatisfies(item, directive)) bonus += DIRECTIVE_BOOST;
-      continue;
+    switch (directive.kind) {
+      case "include":
+        // Pays out once; a seated match stops further ones earning anything.
+        if (placed.some((p) => itemSatisfies(p, directive))) break;
+        if (itemSatisfies(item, directive)) bonus += DIRECTIVE_BOOST;
+        break;
+      case "exclude":
+        // Symmetric to include and equally soft: strongly disfavoured, still
+        // reachable if the slot has nothing else, which beats failing to
+        // build an outfit at all.
+        if (itemSatisfies(item, directive)) bonus -= DIRECTIVE_BOOST;
+        break;
+      case "formality":
+        bonus -= Math.abs(itemFormality(item) - directive.target) * FORMALITY_STEP_PENALTY;
+        break;
+      case "warmth":
+        bonus -= Math.abs(targetWarmth(item) - directive.target) * WARMTH_STEP_PENALTY;
+        break;
+      case "note":
+        break;
     }
-    const distance = Math.abs(itemFormality(item) - directive.target);
-    bonus -= distance * FORMALITY_STEP_PENALTY;
   }
   return bonus;
 }
@@ -126,14 +166,22 @@ export function directiveBonus(
  * matching FREE_SPREAD's premise that small formality gaps read as deliberate.
  */
 export const FORMALITY_TOLERANCE = 2;
+/** Warmth is a 0..3 scale, so the same proportional slack is a smaller number. */
+export const WARMTH_TOLERANCE = 0.8;
 
 export function unmetDirectives(
   items: readonly DirectiveTarget[],
   directives: readonly SessionDirective[],
 ): SessionDirective[] {
   return directives.filter((directive) => {
+    if (directive.kind === "note") return false;
     if (directive.kind === "include") return !items.some((i) => itemSatisfies(i, directive));
+    if (directive.kind === "exclude") return items.some((i) => itemSatisfies(i, directive));
     if (items.length === 0) return true;
+    if (directive.kind === "warmth") {
+      const warmth = items.reduce((max, i) => Math.max(max, targetWarmth(i)), 0);
+      return Math.abs(warmth - directive.target) > WARMTH_TOLERANCE;
+    }
     const mean = items.reduce((sum, i) => sum + itemFormality(i), 0) / items.length;
     return Math.abs(mean - directive.target) > FORMALITY_TOLERANCE;
   });
@@ -149,13 +197,17 @@ export function unmetDirectives(
  * they do not have, which is exactly what the first version did against a
  * closet holding five red hats.
  */
-export type DirectiveMiss = "no_match" | "no_slot" | "not_this_time";
+export type DirectiveMiss = "no_match" | "no_slot" | "not_this_time" | "couldnt_avoid";
 
 export function diagnoseDirective(
   directive: SessionDirective,
   pool: readonly DirectiveTarget[],
   canSeat: (item: DirectiveTarget) => boolean,
 ): DirectiveMiss {
+  // An exclusion that went unhonoured means the slot had nothing else to
+  // offer — the soft penalty lost to an empty bench. Saying "no match" there
+  // would be backwards.
+  if (directive.kind === "exclude") return "couldnt_avoid";
   if (directive.kind !== "include") return "not_this_time";
   const matches = pool.filter((item) => itemSatisfies(item, directive));
   if (matches.length === 0) return "no_match";
@@ -178,6 +230,21 @@ export function clampFormality(value: number): Formality {
  * guessed at from a longer word list, because a wrong guess here silently
  * reshapes every outfit and never announces itself.
  */
+const WARMTH_WORDS: ReadonlyArray<{ match: RegExp; target: number }> = [
+  { match: /\b(freezing|snow|parka weather|bundled|very warm|warmest)\b/, target: 3 },
+  { match: /\b(warm|warmer|cold|chilly|cosy|cozy|layered up)\b/, target: 2.4 },
+  { match: /\b(light|lighter|cool|breathable|hot|heat|summery)\b/, target: 0.5 },
+];
+
+/**
+ * Turns an instruction into an avoidance.
+ *
+ * Checked before the include path, because "no black" and "black" resolve to
+ * the same terms and differ only here — reading the negation second would
+ * make every avoidance a request for the thing.
+ */
+const NEGATION = /\b(no|not|without|avoid|skip|never|don'?t want|nothing)\b/;
+
 const FORMALITY_WORDS: ReadonlyArray<{ match: RegExp; target: Formality }> = [
   { match: /\b(black tie|black-tie|formal|formalwear|suited|dressed up)\b/, target: 9 },
   { match: /\b(interview|wedding|funeral|court|gala)\b/, target: 8 },
@@ -204,8 +271,15 @@ export function parseDirectiveKeywords(
   const lower = normalize(text);
   if (!lower) return null;
 
-  for (const { match, target } of FORMALITY_WORDS) {
-    if (match.test(lower)) return { kind: "formality", id, text, target };
+  const negated = NEGATION.test(lower);
+
+  if (!negated) {
+    for (const { match, target } of FORMALITY_WORDS) {
+      if (match.test(lower)) return { kind: "formality", id, text, target };
+    }
+    for (const { match, target } of WARMTH_WORDS) {
+      if (match.test(lower)) return { kind: "warmth", id, text, target };
+    }
   }
 
   // Longest first, so "long sleeve shirt" wins over "shirt".
@@ -216,7 +290,7 @@ export function parseDirectiveKeywords(
   const terms = vocab.colors.filter((c) => new RegExp(`\\b${escapeRe(normalize(c))}\\b`).test(lower));
 
   if (!category && terms.length === 0) return null;
-  return { kind: "include", id, text, category, terms };
+  return { kind: negated ? "exclude" : "include", id, text, category, terms };
 }
 
 function escapeRe(s: string): string {
@@ -225,12 +299,24 @@ function escapeRe(s: string): string {
 
 /** Short restatement shown on the chip, so the effect is legible at a glance. */
 export function describeDirective(directive: SessionDirective): string {
-  if (directive.kind === "formality") {
-    if (directive.target >= 8) return "Dressing formally";
-    if (directive.target >= 6) return "Smartening things up";
-    if (directive.target <= 2) return "Keeping it very casual";
-    return "Keeping it casual";
+  switch (directive.kind) {
+    case "formality":
+      if (directive.target >= 8) return "Dressing formally";
+      if (directive.target >= 6) return "Smartening things up";
+      if (directive.target <= 2) return "Keeping it very casual";
+      return "Keeping it casual";
+    case "warmth":
+      if (directive.target >= 2.2) return "Dressing warm";
+      if (directive.target <= 0.8) return "Dressing light";
+      return "Dressing for mild weather";
+    case "note":
+      // Says plainly that it was heard and is doing nothing, rather than
+      // implying an effect the scorer never applied.
+      return "Noted, but not something I can match on";
+    default: {
+      const what = [directive.terms.join(" "), directive.category].filter(Boolean).join(" ");
+      const verb = directive.kind === "exclude" ? "Avoiding" : "Including";
+      return `${verb} ${what || directive.text}`;
+    }
   }
-  const what = [directive.terms.join(" "), directive.category].filter(Boolean).join(" ");
-  return `Including ${what || directive.text}`;
 }
