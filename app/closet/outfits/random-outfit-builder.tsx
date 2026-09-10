@@ -847,6 +847,44 @@ export function RandomOutfitBuilder({
     setSpinError(null);
   }
 
+  /*
+   * A directive naming a category the layout has no slot for.
+   *
+   * Scoring cannot fix this: "I want a red hat" was reaching a layout with no
+   * hat slot, so no spin could ever seat one however hard the directive
+   * pushed, and the honest report was "no slot for that". Adding the slot is
+   * the only thing that makes the instruction answerable.
+   *
+   * Nesting counts as covered — a rule for "shirt" already accepts a t shirt,
+   * so asking for one must not add a second slot beside it.
+   *
+   * Applied once per directive id. Removing the slot by hand afterwards is a
+   * decision, and an effect that re-added it on the next render would be
+   * fighting the user for control of their own layout.
+   */
+  const slotsAddedForRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const wanted = directives.filter(
+      (d): d is Extract<SessionDirective, { kind: "include" }> =>
+        d.kind === "include" && Boolean(d.category),
+    );
+    for (const directive of wanted) {
+      if (slotsAddedForRef.current.has(directive.id)) continue;
+      slotsAddedForRef.current.add(directive.id);
+
+      const category = directive.category!;
+      const ancestry = new Set(
+        categoryAncestryPath(category, categoryParents, categoryList).map(normalizeCategoryName),
+      );
+      setCategoryRules((prev) => {
+        const covered = prev.some((rule) =>
+          rule.categories.some((c) => ancestry.has(normalizeCategoryName(c))),
+        );
+        return covered ? prev : [...prev, { categories: [category], count: 1 }];
+      });
+    }
+  }, [directives, categoryParents, categoryList]);
+
   async function spin() {
     if (!readyToSpin || spinLockRef.current) return;
     spinLockRef.current = true;
