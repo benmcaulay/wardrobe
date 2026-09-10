@@ -327,3 +327,35 @@ describe("primary colour for whole-outfit palettes", () => {
     expect(itemSatisfies(tan, parseDirectiveKeywords("all neutrals", GREY)!)).toBe(true);
   });
 });
+
+describe("names are not evidence of a palette", () => {
+  const GREY = { categories: VOCAB.categories, colors: ["red", "black", "gray", "white", "navy", "blue"] };
+  // A real row: primary blue, and the word "Gray" in its name.
+  const blueGreyTee = item({
+    category: "t shirt",
+    name: "Blue Gray T",
+    colors: [{ hex: "#4a6fb0", name: "blue" }, { hex: "#888", name: "gray" }],
+  });
+
+  it("rejects a blue garment whose name mentions grey", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    expect(itemSatisfies(blueGreyTee, d)).toBe(false);
+  });
+
+  it("reports the outfit as non-compliant because of it", () => {
+    const d = parseDirectiveKeywords("all greyscale", GREY)!;
+    const black = item({ colors: [{ hex: "#111", name: "black" }] });
+    expect(unmetDirectives([black, blueGreyTee], [d])).toHaveLength(1);
+  });
+
+  it("still lets a singular ask find things by name", () => {
+    // "the puffer" has no colour, material or category to go on.
+    const d: SessionDirective = { kind: "exclude", id: "d", text: "not the puffer", terms: ["puffer"] };
+    expect(itemSatisfies(item({ name: "Nike Puffer Jacket", colors: [] }), d)).toBe(true);
+  });
+
+  it("keeps material working for a whole-outfit ask", () => {
+    const d: SessionDirective = { kind: "include", id: "d", text: "all linen", terms: ["linen"], all: true };
+    expect(itemSatisfies(item({ material: "linen", colors: [] }), d)).toBe(true);
+  });
+});

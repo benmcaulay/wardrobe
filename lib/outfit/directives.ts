@@ -144,15 +144,25 @@ export function itemSatisfies(item: DirectiveTarget, directive: SessionDirective
    * accept a hat with red in it, and "no red" should avoid anything red at
    * all, trim included.
    */
+  const whole = directive.kind === "include" && directive.all;
   const colors = item.colors ?? [];
-  const searchable = directive.kind === "include" && directive.all ? colors.slice(0, 1) : colors;
+  const searchable = whole ? colors.slice(0, 1) : colors;
 
   return directive.terms.some((term) => {
     const t = normalize(term);
     if (searchable.some((c) => normalize(c.name).includes(t))) return true;
     if (item.pattern && normalize(item.pattern).includes(t)) return true;
     if (item.material && normalize(item.material).includes(t)) return true;
-    if (item.name && normalize(item.name).includes(t)) return true;
+    /*
+     * The name is not evidence of a palette.
+     *
+     * "Blue Gray T" is primarily blue and contains the word "gray", so the
+     * name fallback walked it straight into an "all greyscale" look and then
+     * reported the outfit as compliant — defeating the primary-colour rule
+     * one line above it. Names stay available for singular asks, where they
+     * are how a bare term like "puffer" finds anything at all.
+     */
+    if (!whole && item.name && normalize(item.name).includes(t)) return true;
     return categoryText.includes(t);
   });
 }
