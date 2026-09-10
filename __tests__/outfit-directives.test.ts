@@ -429,3 +429,34 @@ describe("brand", () => {
     expect(itemSatisfies(item({ brand: "Nike", colors: [] }), d)).toBe(true);
   });
 });
+
+describe("naming actual garments", () => {
+  const d: SessionDirective = {
+    kind: "items", id: "d", text: "beach day",
+    itemIds: ["a", "b"], labels: ["Havaianas", "Bucket hat"],
+  };
+
+  it("boosts every named garment, not just the first", () => {
+    // A chosen set is meant to arrive together; a once-only payout would
+    // seat one and leave the rest to chance.
+    expect(directiveBonus([item({ id: "a" })], item({ id: "b" }), [d])).toBe(DIRECTIVE_BOOST);
+    expect(directiveBonus([], item({ id: "a" }), [d])).toBe(DIRECTIVE_BOOST);
+  });
+
+  it("ignores garments it did not name", () => {
+    expect(directiveBonus([], item({ id: "zzz" }), [d])).toBe(0);
+  });
+
+  it("is met when any of them lands", () => {
+    // The set usually spans more categories than the layout has slots, so
+    // demanding all of them would report failure on a compliant look.
+    expect(unmetDirectives([item({ id: "a" })], [d])).toHaveLength(0);
+    expect(unmetDirectives([item({ id: "zzz" })], [d])).toHaveLength(1);
+  });
+
+  it("names what it picked, and counts the overflow", () => {
+    expect(describeDirective(d)).toBe("Picking Havaianas, Bucket hat");
+    const many: SessionDirective = { ...d, labels: ["A", "B", "C", "D", "E"] };
+    expect(describeDirective(many)).toBe("Picking A, B, C +2 more");
+  });
+});

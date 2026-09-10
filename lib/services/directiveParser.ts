@@ -63,16 +63,43 @@ wear, then express it using ONLY the forms below.
 - {"kind":"palette","maxColors":1-6}
     A limit on how many DIFFERENT colours the whole outfit may use, not which
     ones. "two colours max", "monochrome" (1), "keep the palette tight" (2).
+- {"kind":"items","itemIds":["..."]}
+    Specific garments from the closet listing below. Use this whenever the
+    instruction implies particular pieces rather than a property — "beach day"
+    means their actual sandals, shorts and bucket hat, not merely "casual".
+    Copy ids EXACTLY from the listing. Pick at most one per category, and only
+    pieces you would genuinely wear for this. Prefer this over a vague
+    formality guess when the closet plainly contains the right things.
 - {"kind":"note"}
     Clothing-related but not expressible above. Use this rather than forcing a bad fit.
 
 An instruction can produce several: "warm but not the puffer" is a warmth directive and an
 exclude. Return [] only when the text is not about clothing at all.`;
 
+/** One garment as the model sees it. Text only — see the pricing note below. */
+export type CatalogItem = {
+  id: string;
+  name: string;
+  category: string;
+  brand?: string | null;
+  material?: string | null;
+  colors?: string[];
+};
+
+/**
+ * How many garments the model is shown.
+ *
+ * The whole closet is ~2,100 tokens at 111 items, about $0.0016 at flash
+ * input rates — cheap enough not to bother trimming, but a cap keeps a large
+ * wardrobe from silently turning one instruction into a big call.
+ */
+export const MAX_CATALOG_ITEMS = 400;
+
 export async function parseDirective(
   text: string,
   vocab: { categories: readonly string[]; colors: readonly string[] },
   id: string,
+  catalog: readonly CatalogItem[] = [],
 ): Promise<DirectiveParse> {
   const trimmed = text.trim();
   if (!trimmed) return { directives: [], source: "none" };
@@ -89,7 +116,19 @@ export async function parseDirective(
    */
   const wordCount = trimmed.split(/\s+/).length;
   const isVibe = keyword?.kind === "formality" || keyword?.kind === "warmth";
-  const keywordIsEnough = keyword && !(isVibe && wordCount > VIBE_CONTEXT_WORDS);
+  /*
+   * A vibe defers to the model whenever the closet is visible.
+   *
+   * The word-count rule was written when the model could only answer with the
+   * same abstract property the keyword table already produced, so a short
+   * phrase was not worth a call. With the catalogue in the prompt that is no
+   * longer true: "beach day" keyword-matches formality 1, which is a fair
+   * reading and a useless one, where the model names the actual sandals and
+   * bucket hat. Concrete asks — a colour, a category, a count — stay free,
+   * because they are exact already and nothing is gained by asking.
+   */
+  const vibeNeedsModel = isVibe && (catalog.length > 0 || wordCount > VIBE_CONTEXT_WORDS);
+  const keywordIsEnough = keyword && !vibeNeedsModel;
   if (keywordIsEnough) return { directives: [keyword], source: "keywords" };
   // Nothing recognisable and no model available: keep the words rather than
   // refusing them, so the instruction is still visible and still deletable.
@@ -105,6 +144,16 @@ export async function parseDirective(
 
 Category list: ${vocab.categories.join(", ")}
 Colour list: ${vocab.colors.join(", ")}
+${
+  catalog.length > 0
+    ? `\nTheir closet (id|name|category|brand|material|colours):\n${catalog
+        .slice(0, MAX_CATALOG_ITEMS)
+        .map((i) =>
+          [i.id, i.name, i.category, i.brand ?? "", i.material ?? "", (i.colors ?? []).join("/")].join("|"),
+        )
+        .join("\n")}`
+    : ""
+}
 
 Reply with ONLY a valid JSON array, for example:
 [{"kind":"warmth","target":2.6},{"kind":"exclude","category":"jacket","terms":["denim"]}]
@@ -126,6 +175,7 @@ ${trimmed}`,
       target?: unknown;
       all?: unknown;
       maxColors?: unknown;
+      itemIds?: unknown;
     };
       // Each intent from one sentence needs its own id, or removing the chip
       // for "no tie" would also remove the "formal" it arrived with.
@@ -133,6 +183,24 @@ ${trimmed}`,
 
       if (r.kind === "formality" && typeof r.target === "number") {
         directives.push({ kind: "formality", id: rowId, text: trimmed, target: clampFormality(r.target) });
+        return;
+      }
+      if (r.kind === "items" && Array.isArray(r.itemIds)) {
+        // Validate against the closet. A hallucinated id would match nothing
+        // and read as the instruction being ignored, with no way to tell why.
+        const byId = new Map(catalog.map((c) => [c.id, c]));
+        const hits = r.itemIds
+          .filter((x): x is string => typeof x === "string")
+          .map((x) => byId.get(x))
+          .filter((c): c is CatalogItem => Boolean(c));
+        if (hits.length === 0) return;
+        directives.push({
+          kind: "items",
+          id: rowId,
+          text: trimmed,
+          itemIds: hits.map((c) => c.id),
+          labels: hits.map((c) => c.name),
+        });
         return;
       }
       if (r.kind === "palette" && typeof r.maxColors === "number") {

@@ -10,10 +10,10 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getCategoriesListFromPrefs } from "@/lib/categories";
 import { getColorsListFromPrefs } from "@/lib/colors";
-import { parseStylePrefs } from "@/lib/json";
+import { parseColors, parseStylePrefs } from "@/lib/json";
 import { MAX_NOTE_LENGTH } from "@/lib/outfit/style-rules";
 import { describeDirective, type SessionDirective } from "@/lib/outfit/directives";
-import { parseDirective } from "@/lib/services/directiveParser";
+import { MAX_CATALOG_ITEMS, parseDirective } from "@/lib/services/directiveParser";
 
 export type DirectiveResult =
   | {
@@ -29,11 +29,26 @@ export async function interpretDirective(text: string, id: string): Promise<Dire
   const trimmed = text.trim().slice(0, MAX_NOTE_LENGTH);
   if (!trimmed) return { ok: false, error: "Type an instruction first" };
 
-  const dbUser = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: { stylePrefs: true },
-  });
+  const [dbUser, rows] = await Promise.all([
+    prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
+    // The closet as text, so the model can name real garments instead of
+    // guessing at a property. ~2,100 tokens for 111 items; see
+    // MAX_CATALOG_ITEMS in the parser for why it is capped rather than paged.
+    prisma.wardrobeItem.findMany({
+      where: { userId: user.id, isWishlist: false },
+      select: { id: true, name: true, category: true, brand: true, material: true, colors: true },
+      take: MAX_CATALOG_ITEMS,
+    }),
+  ]);
   const prefs = parseStylePrefs(dbUser?.stylePrefs);
+  const catalog = rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    brand: row.brand,
+    material: row.material,
+    colors: parseColors(row.colors).map((c) => c.name),
+  }));
 
   const { directives, source } = await parseDirective(
     trimmed,
@@ -42,6 +57,7 @@ export async function interpretDirective(text: string, id: string): Promise<Dire
       colors: getColorsListFromPrefs(prefs).map((c) => c.name),
     },
     id,
+    catalog,
   );
 
   // Never an error path any more: anything clothing-shaped that cannot be

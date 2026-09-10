@@ -74,6 +74,16 @@ export type SessionDirective =
   /** Pulls the look toward a warmth, on garmentWarmth's 0..3 scale. */
   | { kind: "warmth"; id: string; text: string; target: number }
   /**
+   * Specific garments the model chose after reading the closet.
+   *
+   * The only directive that names real items. Everything else describes a
+   * property and lets the scorer find matches, which is why "beach day" could
+   * only ever become "very casual" — the vocabulary had no way to say "your
+   * bucket hat and the Havaianas". Ids are validated against the closet
+   * before they get here; a hallucinated one is dropped, not carried.
+   */
+  | { kind: "items"; id: string; text: string; itemIds: string[]; labels: string[] }
+  /**
    * Caps how many distinct colours the whole look may use.
    *
    * A cardinality constraint, which none of the others can express: "two
@@ -236,6 +246,12 @@ export function directiveBonus(
       case "warmth":
         bonus -= Math.abs(targetWarmth(item) - directive.target) * WARMTH_STEP_PENALTY;
         break;
+      case "items":
+        // Pays out per garment rather than once: a chosen set is meant to
+        // arrive together, and a single payout would seat one of them and
+        // leave the rest to chance.
+        if (item.id && directive.itemIds.includes(item.id)) bonus += DIRECTIVE_BOOST;
+        break;
       case "palette": {
         // Free while the look is still under the cap, and free for any colour
         // already in it — the penalty is only for opening a new one once the
@@ -279,6 +295,12 @@ export function unmetDirectives(
     }
     if (directive.kind === "exclude") return items.some((i) => itemSatisfies(i, directive));
     if (directive.kind === "palette") return paletteOf(items).size > directive.maxColors;
+    if (directive.kind === "items") {
+      // Unmet only when none of them made it. A chosen set usually spans more
+      // categories than the layout has slots, so demanding all of them would
+      // report failure on a look that took every piece it had room for.
+      return !items.some((i) => i.id && directive.itemIds.includes(i.id));
+    }
     if (items.length === 0) return true;
     if (directive.kind === "warmth") {
       const warmth = items.reduce((max, i) => Math.max(max, targetWarmth(i)), 0);
@@ -461,6 +483,11 @@ export function describeDirective(directive: SessionDirective): string {
       if (directive.target >= 2.2) return "Dressing warm";
       if (directive.target <= 0.8) return "Dressing light";
       return "Dressing for mild weather";
+    case "items": {
+      const shown = directive.labels.slice(0, 3).join(", ");
+      const rest = directive.labels.length - 3;
+      return `Picking ${shown}${rest > 0 ? ` +${rest} more` : ""}`;
+    }
     case "palette":
       return `At most ${directive.maxColors} colour${directive.maxColors === 1 ? "" : "s"}`;
     case "note":
