@@ -22,7 +22,31 @@
  */
 
 import { itemFormality, FORMALITY_MAX, FORMALITY_MIN, type Formality } from "./formality";
-import type { ScorableItem } from "./compatibility";
+import type { Color } from "@/lib/json";
+
+/**
+ * What a directive can be matched against.
+ *
+ * Declared structurally rather than as ScorableItem, because a directive reads
+ * only descriptive fields and the two callers disagree elsewhere — the random
+ * builder's item types `season` differently, and inheriting a field nothing
+ * here touches would have forced a cast at the call site to satisfy a
+ * constraint that does not exist.
+ *
+ * `categoryPath` is the item's category and every category above it
+ * (lib/category-tree.ts). Honouring it is what makes "I want a shirt" accept a
+ * t shirt filed under shirt — the same widening the outfit slot rules already
+ * do, rather than a second nesting rule that could disagree with the first.
+ */
+export type DirectiveTarget = {
+  category: string;
+  subcategory?: string | null;
+  name?: string | null;
+  material?: string | null;
+  pattern?: string | null;
+  colors?: Color[];
+  categoryPath?: string[];
+};
 
 export type SessionDirective =
   /** Wants a garment matching these terms in the outfit ("a red hat"). */
@@ -48,13 +72,13 @@ export const FORMALITY_STEP_PENALTY = 0.03;
 const normalize = (s: string) => s.trim().toLowerCase();
 
 /** Does this garment answer this directive? */
-export function itemSatisfies(item: ScorableItem, directive: SessionDirective): boolean {
+export function itemSatisfies(item: DirectiveTarget, directive: SessionDirective): boolean {
   if (directive.kind !== "include") return false;
 
-  if (directive.category) {
-    const haystack = normalize(`${item.category} ${item.subcategory ?? ""}`);
-    if (!haystack.includes(normalize(directive.category))) return false;
-  }
+  const categoryText = normalize(
+    [item.category, item.subcategory ?? "", ...(item.categoryPath ?? [])].join(" "),
+  );
+  if (directive.category && !categoryText.includes(normalize(directive.category))) return false;
 
   // Every term must appear somewhere describable: colour names, pattern,
   // material, or the item's own name. "red hat" is category + colour; "linen"
@@ -65,7 +89,7 @@ export function itemSatisfies(item: ScorableItem, directive: SessionDirective): 
     if (item.pattern && normalize(item.pattern).includes(t)) return true;
     if (item.material && normalize(item.material).includes(t)) return true;
     if (item.name && normalize(item.name).includes(t)) return true;
-    return normalize(`${item.category} ${item.subcategory ?? ""}`).includes(t);
+    return categoryText.includes(t);
   });
 }
 
@@ -77,8 +101,8 @@ export function itemSatisfies(item: ScorableItem, directive: SessionDirective): 
  * rest of the outfit.
  */
 export function directiveBonus(
-  placed: readonly ScorableItem[],
-  item: ScorableItem,
+  placed: readonly DirectiveTarget[],
+  item: DirectiveTarget,
   directives: readonly SessionDirective[],
 ): number {
   let bonus = 0;
@@ -104,7 +128,7 @@ export function directiveBonus(
 export const FORMALITY_TOLERANCE = 2;
 
 export function unmetDirectives(
-  items: readonly ScorableItem[],
+  items: readonly DirectiveTarget[],
   directives: readonly SessionDirective[],
 ): SessionDirective[] {
   return directives.filter((directive) => {

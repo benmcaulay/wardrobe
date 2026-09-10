@@ -19,6 +19,8 @@ import { StylistTrainer } from "./stylist-trainer";
 import { WeatherCard, useDailyWeather } from "./weather-card";
 import { PendingWearsCard } from "./pending-wears";
 import { StyleRulesPanel } from "./style-rules-panel";
+import { SessionDirectives, type DirectiveChip } from "./session-directives";
+import { interpretDirective } from "@/lib/actions/outfit-directives";
 import type { Color } from "@/lib/json";
 import type { CategoryParents } from "@/lib/category-tree";
 import type { OutfitSlotDefaults } from "@/lib/outfit-slot-defaults";
@@ -142,6 +144,42 @@ export function OutfitStudio({
     [onModelChanged],
   );
 
+  /*
+   * Session directives (lib/outfit/directives.ts). Held here rather than in
+   * the spin panel because they outlive a single spin but not the page, and
+   * deliberately never persisted — see the module for why a mood must not
+   * become a stored preference.
+   */
+  const [directives, setDirectives] = useState<DirectiveChip[]>([]);
+  const [directiveBusy, startDirectiveTransition] = useTransition();
+  const [directiveError, setDirectiveError] = useState<string | null>(null);
+
+  const onAddDirective = useCallback((text: string) => {
+    setDirectiveError(null);
+    startDirectiveTransition(async () => {
+      const id = `d${Date.now().toString(36)}`;
+      const result = await interpretDirective(text, id);
+      if (!result.ok) {
+        setDirectiveError(result.error);
+        return;
+      }
+      setDirectives((prev) => [
+        ...prev,
+        { directive: result.directive, summary: result.summary, unmet: false },
+      ]);
+    });
+  }, []);
+
+  const onRemoveDirective = useCallback((id: string) => {
+    setDirectives((prev) => prev.filter((d) => d.directive.id !== id));
+  }, []);
+
+  const onDirectivesUnmet = useCallback((ids: readonly string[]) => {
+    setDirectives((prev) =>
+      prev.map((d) => ({ ...d, unmet: ids.includes(d.directive.id) })),
+    );
+  }, []);
+
   const weather = useDailyWeather({ initialContext, onChanged: onModelChanged });
 
   return (
@@ -175,6 +213,17 @@ export function OutfitStudio({
 
       {tab === "generate" ? (
         <RandomOutfitBuilder
+          directives={directives.map((d) => d.directive)}
+          onDirectivesUnmet={onDirectivesUnmet}
+          directivesPanel={
+            <SessionDirectives
+              directives={directives}
+              busy={directiveBusy}
+              error={directiveError}
+              onAdd={onAddDirective}
+              onRemove={onRemoveDirective}
+            />
+          }
           items={items}
           colorOptions={colorOptions}
           initialSlotDefaults={outfitSlotDefaults}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { decode, type Color, type Season } from "@/lib/json";
 import { wornOnFromLocalDate, wornOnToISODate } from "@/lib/wear/rollup";
+import { unmetDirectives, type SessionDirective } from "@/lib/outfit/directives";
 import { isNoneCategoryStored, normalizeCategoryName } from "@/lib/categories";
 import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
@@ -102,6 +103,12 @@ type CanvasSlot = {
 };
 
 type Props = {
+  /** Session directives to bias this spin (lib/outfit/directives.ts). */
+  directives?: readonly SessionDirective[];
+  /** Reports which directives the finished outfit could not honour. */
+  onDirectivesUnmet?: (ids: readonly string[]) => void;
+  /** Rendered with the rules, so the instruction sits beside the spin it steers. */
+  directivesPanel?: React.ReactNode;
   items: RandomOutfitItem[];
   colorOptions: Color[];
   initialSlotDefaults: OutfitSlotDefaults;
@@ -165,6 +172,9 @@ function localISODate(): string {
 }
 
 export function RandomOutfitBuilder({
+  directives = [],
+  onDirectivesUnmet,
+  directivesPanel,
   items,
   colorOptions,
   initialSlotDefaults,
@@ -847,7 +857,7 @@ export function RandomOutfitBuilder({
         pickPool,
         slotInputs,
         colorRules,
-        spinScoringOptions(spinMode, { affinity, band }),
+        spinScoringOptions(spinMode, { affinity, band }, directives),
       );
       if (!assignment) {
         const after = diagnoseOutfitFill(pickPool, slotInputs, categoryRules, colorRules);
@@ -857,6 +867,16 @@ export function RandomOutfitBuilder({
             : "Could not build an outfit — check the message below your rules.",
         );
         return;
+      }
+
+      // Say which instruction the finished outfit could not honour. Reported
+      // rather than prevented: a directive nothing matches still returns a
+      // complete outfit, and silence would read as the instruction working.
+      if (onDirectivesUnmet) {
+        const chosen = [...new Set(assignment.values())]
+          .map((id) => itemsById.get(id))
+          .filter((i): i is NonNullable<typeof i> => Boolean(i));
+        onDirectivesUnmet(unmetDirectives(chosen, directives).map((d) => d.id));
       }
 
       const urlUpdates: Record<string, string> = {};
@@ -1809,6 +1829,7 @@ export function RandomOutfitBuilder({
           </button>
         </div>
 
+        {directivesPanel}
         {rulesFooter}
 
         {selected && (

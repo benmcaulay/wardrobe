@@ -18,6 +18,7 @@
  */
 
 import type { ClimateBand } from "@/lib/services/weather";
+import type { SessionDirective } from "@/lib/outfit/directives";
 import type { OutfitScoringOptions } from "@/lib/outfit-random";
 
 export type SpinMode = "random" | "smart";
@@ -42,6 +43,20 @@ export const SPIN_MODE_HINTS: Record<SpinMode, string> = {
  */
 export const SMART_TEMPERATURE = 0.07;
 
+/**
+ * Sampling temperature for a random spin that is carrying a directive.
+ *
+ * DEFAULT_TEMPERATURE (0.125) is too soft to be decisive: against eight rival
+ * garments a 0.35 boost is exp(0.35/0.125) ~ 16, about a 67% chance — often
+ * enough to look like the instruction was ignored. At 0.05 it is exp(7) ~ 1100,
+ * so it lands ~99% of the time.
+ *
+ * Sharpening costs nothing elsewhere in the spin: with compatibility off every
+ * garment that does not answer the directive scores exactly 0, so they remain
+ * uniform among themselves at any temperature.
+ */
+export const DIRECTIVE_TEMPERATURE = 0.05;
+
 export type SpinSignals = {
   /** Learned per-item affinity, 0..1. Empty until there's choice data. */
   affinity?: ReadonlyMap<string, number>;
@@ -56,14 +71,22 @@ export type SpinSignals = {
 export function spinScoringOptions(
   mode: SpinMode,
   signals: SpinSignals = {},
+  directives: readonly SessionDirective[] = [],
 ): OutfitScoringOptions | undefined {
-  if (mode === "random") return undefined;
+  if (mode === "random") {
+    // A random spin still has to honour an instruction someone just typed.
+    // Compatibility stays off so the spin keeps its character: every garment
+    // that does not answer the directive scores 0 and is sampled uniformly.
+    if (directives.length === 0) return undefined;
+    return { directives, useCompatibility: false, temperature: DIRECTIVE_TEMPERATURE };
+  }
   return {
     context: {
       band: signals.band ?? null,
       affinity: signals.affinity,
     },
     temperature: SMART_TEMPERATURE,
+    directives,
   };
 }
 

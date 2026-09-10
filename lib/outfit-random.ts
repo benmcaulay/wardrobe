@@ -2,6 +2,7 @@ import { normalizeCategoryName, isNoneCategoryStored } from "@/lib/categories";
 import { normalizeColorName } from "@/lib/colors";
 import type { Color, Season } from "@/lib/json";
 import { scoreAddition, type ScoringContext } from "@/lib/outfit/compatibility";
+import { directiveBonus, type SessionDirective } from "@/lib/outfit/directives";
 import { DEFAULT_TEMPERATURE, scoredOrder } from "@/lib/outfit/sampling";
 
 export type OutfitPickItem = {
@@ -235,6 +236,16 @@ export type OutfitScoringOptions = {
   temperature?: number;
   /** Injectable for tests; defaults to Math.random. */
   rng?: () => number;
+  /** Plain-English instructions for this session (lib/outfit/directives.ts). */
+  directives?: readonly SessionDirective[];
+  /**
+   * Include the Layer 1 compatibility score. False leaves only the directive
+   * bonus, which is what a *random* spin carrying an instruction needs: every
+   * non-matching garment scores 0 and is therefore still sampled uniformly,
+   * so "random" stays random instead of quietly becoming "smart" the moment
+   * someone types a directive.
+   */
+  useCompatibility?: boolean;
 };
 
 export function pickRandomOutfit(
@@ -299,7 +310,11 @@ export function pickRandomOutfit(
       ? scoredOrder(
           eligible.map((item) => ({
             item,
-            score: scoreAddition(picked, item, scoring.context),
+            score:
+              (scoring.useCompatibility === false
+                ? 0
+                : scoreAddition(picked, item, scoring.context)) +
+              directiveBonus(picked, item, scoring.directives ?? []),
           })),
           scoring.rng ?? Math.random,
           scoring.temperature ?? DEFAULT_TEMPERATURE,

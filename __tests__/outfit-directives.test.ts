@@ -148,3 +148,19 @@ describe("describeDirective", () => {
     expect(describeDirective({ kind: "formality", id: "d", text: "x", target: 9 })).toBe("Dressing formally");
   });
 });
+
+describe("category nesting", () => {
+  it("accepts a t shirt for a directive asking for a shirt", () => {
+    // The slot rules already widen an item to its ancestors; the matcher has
+    // to agree, or "a red shirt" silently excludes every t shirt.
+    const d: SessionDirective = { kind: "include", id: "d", text: "red shirt", category: "shirt", terms: ["red"] };
+    const tee = item({ category: "t shirt", categoryPath: ["t shirt", "shirt", "top"] });
+    expect(itemSatisfies(tee, d)).toBe(true);
+  });
+
+  it("still rejects an unrelated category with the right colour", () => {
+    const d: SessionDirective = { kind: "include", id: "d", text: "red shirt", category: "shirt", terms: ["red"] };
+    const shoes = item({ category: "shoes", categoryPath: ["shoes", "footwear"] });
+    expect(itemSatisfies(shoes, d)).toBe(false);
+  });
+});
