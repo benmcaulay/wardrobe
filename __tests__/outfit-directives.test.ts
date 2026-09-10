@@ -359,3 +359,73 @@ describe("names are not evidence of a palette", () => {
     expect(itemSatisfies(item({ material: "linen", colors: [] }), d)).toBe(true);
   });
 });
+
+describe("palette cardinality", () => {
+  const GREY = { categories: VOCAB.categories, colors: ["red", "black", "gray", "white", "navy", "blue"] };
+  const of = (name: string) => item({ colors: [{ hex: "#000", name }] });
+
+  it("reads a colour count, which no other primitive could express", () => {
+    // The reported failure: "2 colors in color pallete" returned a note,
+    // because a cardinality limit is not a colour name.
+    expect(parseDirectiveKeywords("2 colors in color pallete", GREY)).toMatchObject({
+      kind: "palette", maxColors: 2,
+    });
+    expect(parseDirectiveKeywords("two colours max", GREY)).toMatchObject({ maxColors: 2 });
+    expect(parseDirectiveKeywords("monochrome", GREY)).toMatchObject({ maxColors: 1 });
+  });
+
+  it("does not mistake a colour name for a count", () => {
+    expect(parseDirectiveKeywords("all greyscale", GREY)?.kind).toBe("include");
+  });
+
+  it("is free until the budget is spent, then charges for a new colour", () => {
+    const d: SessionDirective = { kind: "palette", id: "d", text: "2 colours", maxColors: 2 };
+    const black = of("black"), white = of("white"), red = of("red");
+    expect(directiveBonus([], black, [d])).toBe(0);
+    expect(directiveBonus([black], white, [d])).toBe(0);
+    // A colour already in the look is always free, however full the budget.
+    expect(directiveBonus([black, white], black, [d])).toBe(0);
+    expect(directiveBonus([black, white], red, [d])).toBeLessThan(0);
+  });
+
+  it("counts distinct primary colours, not garments", () => {
+    const d: SessionDirective = { kind: "palette", id: "d", text: "2 colours", maxColors: 2 };
+    const look = [of("black"), of("black"), of("white")];
+    expect(unmetDirectives(look, [d])).toHaveLength(0);
+    expect(unmetDirectives([...look, of("red")], [d])).toHaveLength(1);
+  });
+
+  it("ignores an item with no recorded colour rather than counting it", () => {
+    const d: SessionDirective = { kind: "palette", id: "d", text: "1 colour", maxColors: 1 };
+    expect(unmetDirectives([of("black"), item({ colors: [] })], [d])).toHaveLength(0);
+  });
+
+  it("says what it is doing", () => {
+    expect(describeDirective({ kind: "palette", id: "d", text: "x", maxColors: 2 })).toBe("At most 2 colours");
+    expect(describeDirective({ kind: "palette", id: "d", text: "x", maxColors: 1 })).toBe("At most 1 colour");
+  });
+});
+
+describe("brand", () => {
+  const B = { categories: VOCAB.categories, colors: ["red", "black", "white"] };
+
+  it("matches a brand name as a term", () => {
+    // 81 of 111 items carry a brand across 52 labels, so this has something
+    // to bite on — unlike season (1 of 111) or wear history (0 events).
+    const d: SessionDirective = { kind: "include", id: "d", text: "nike", terms: ["nike"] };
+    expect(itemSatisfies(item({ brand: "Nike", colors: [] }), d)).toBe(true);
+    expect(itemSatisfies(item({ brand: "Adidas", colors: [] }), d)).toBe(false);
+  });
+
+  it("counts brand even for a whole-outfit ask", () => {
+    // "all Nike" is a real request; brand is structured, unlike a garment's
+    // name, so it is safe where the name fallback was not.
+    const d: SessionDirective = { kind: "include", id: "d", text: "all nike", terms: ["nike"], all: true };
+    expect(itemSatisfies(item({ brand: "Nike", colors: [{ hex: "#f00", name: "red" }] }), d)).toBe(true);
+  });
+
+  it("avoids a brand", () => {
+    const d: SessionDirective = { kind: "exclude", id: "d", text: "no nike", terms: ["nike"] };
+    expect(itemSatisfies(item({ brand: "Nike", colors: [] }), d)).toBe(true);
+  });
+});

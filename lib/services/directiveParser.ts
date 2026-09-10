@@ -60,6 +60,9 @@ wear, then express it using ONLY the forms below.
 - {"kind":"warmth","target":0-3}
     0 is a single light layer, 1.5 mild, 3 deep winter.
     Use this for weather and places: "it is freezing" is 3, "beach day" is 0.
+- {"kind":"palette","maxColors":1-6}
+    A limit on how many DIFFERENT colours the whole outfit may use, not which
+    ones. "two colours max", "monochrome" (1), "keep the palette tight" (2).
 - {"kind":"note"}
     Clothing-related but not expressible above. Use this rather than forcing a bad fit.
 
@@ -122,6 +125,7 @@ ${trimmed}`,
       terms?: unknown;
       target?: unknown;
       all?: unknown;
+      maxColors?: unknown;
     };
       // Each intent from one sentence needs its own id, or removing the chip
       // for "no tie" would also remove the "formal" it arrived with.
@@ -129,6 +133,13 @@ ${trimmed}`,
 
       if (r.kind === "formality" && typeof r.target === "number") {
         directives.push({ kind: "formality", id: rowId, text: trimmed, target: clampFormality(r.target) });
+        return;
+      }
+      if (r.kind === "palette" && typeof r.maxColors === "number") {
+        const n = Math.round(r.maxColors);
+        if (n >= 1 && n <= 6) {
+          directives.push({ kind: "palette", id: rowId, text: trimmed, maxColors: n });
+        }
         return;
       }
       if (r.kind === "warmth" && typeof r.target === "number") {

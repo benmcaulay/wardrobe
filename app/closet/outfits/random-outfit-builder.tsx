@@ -206,6 +206,7 @@ export function RandomOutfitBuilder({
         // What makes a rule for "shirt" accept a piece filed under "t shirt".
         categoryPath: categoryAncestryPath(i.category, categoryParents, categoryList),
         colors: i.colors,
+        brand: i.brand,
         subcategory: i.subcategory,
         name: i.name,
         material: i.material,

@@ -42,6 +42,8 @@ import type { Color } from "@/lib/json";
 export type DirectiveTarget = {
   id?: string;
   category: string;
+  /** 81 of 111 items carry one, across 52 labels — enough to match on. */
+  brand?: string | null;
   subcategory?: string | null;
   name?: string | null;
   material?: string | null;
@@ -72,6 +74,15 @@ export type SessionDirective =
   /** Pulls the look toward a warmth, on garmentWarmth's 0..3 scale. */
   | { kind: "warmth"; id: string; text: string; target: number }
   /**
+   * Caps how many distinct colours the whole look may use.
+   *
+   * A cardinality constraint, which none of the others can express: "two
+   * colours max" is not about any particular garment, only about how many
+   * different ones end up together. Counted on primary colours, the same
+   * basis as the colour rules panel.
+   */
+  | { kind: "palette"; id: string; text: string; maxColors: number }
+  /**
    * Understood as clothing-related but not expressible as anything the scorer
    * can act on. Kept rather than refused: the same reasoning as StyleNote,
    * which stores what someone typed even when it parsed to nothing, because
@@ -101,6 +112,22 @@ export const FORMALITY_STEP_PENALTY = 0.03;
  * is larger to make a full miss cost about the same on both scales.
  */
 export const WARMTH_STEP_PENALTY = 0.1;
+
+/** An item's primary colour name, lowercased. Null when it has none recorded. */
+export function primaryColor(item: DirectiveTarget): string | null {
+  const first = (item.colors ?? [])[0];
+  return first ? normalize(first.name) : null;
+}
+
+/** Distinct primary colours across a look. */
+export function paletteOf(items: readonly DirectiveTarget[]): Set<string> {
+  const out = new Set<string>();
+  for (const item of items) {
+    const c = primaryColor(item);
+    if (c) out.add(c);
+  }
+  return out;
+}
 
 /** Warmth of one garment, on garmentWarmth's scale. */
 export function targetWarmth(item: DirectiveTarget): number {
@@ -153,6 +180,9 @@ export function itemSatisfies(item: DirectiveTarget, directive: SessionDirective
     if (searchable.some((c) => normalize(c.name).includes(t))) return true;
     if (item.pattern && normalize(item.pattern).includes(t)) return true;
     if (item.material && normalize(item.material).includes(t)) return true;
+    // Brand is a structured field, so it counts even for a whole-outfit ask:
+    // "all Nike" is a real request in a way "all Blue Gray T" is not.
+    if (item.brand && normalize(item.brand).includes(t)) return true;
     /*
      * The name is not evidence of a palette.
      *
@@ -206,6 +236,18 @@ export function directiveBonus(
       case "warmth":
         bonus -= Math.abs(targetWarmth(item) - directive.target) * WARMTH_STEP_PENALTY;
         break;
+      case "palette": {
+        // Free while the look is still under the cap, and free for any colour
+        // already in it — the penalty is only for opening a new one once the
+        // budget is spent. Neutral rather than punitive keeps a two-colour
+        // outfit from being scored worse than a one-colour one.
+        const colour = primaryColor(item);
+        if (!colour) break;
+        const already = paletteOf(placed);
+        if (already.has(colour) || already.size < directive.maxColors) break;
+        bonus -= DIRECTIVE_BOOST;
+        break;
+      }
       case "note":
         break;
     }
@@ -236,6 +278,7 @@ export function unmetDirectives(
         : !items.some((i) => itemSatisfies(i, directive));
     }
     if (directive.kind === "exclude") return items.some((i) => itemSatisfies(i, directive));
+    if (directive.kind === "palette") return paletteOf(items).size > directive.maxColors;
     if (items.length === 0) return true;
     if (directive.kind === "warmth") {
       const warmth = items.reduce((max, i) => Math.max(max, targetWarmth(i)), 0);
@@ -318,7 +361,7 @@ const UNIVERSAL = /\b(all|every|everything|entirely|head to toe|full)\b/;
  * unsatisfiable — worth pinning down with a test rather than a call.
  */
 const COLOR_GROUPS: ReadonlyArray<{ match: RegExp; colors: string[] }> = [
-  { match: /\b(greyscale|grayscale|monochrome|black and white)\b/, colors: ["black", "gray", "grey", "white"] },
+  { match: /\b(greyscale|grayscale|black and white)\b/, colors: ["black", "gray", "grey", "white"] },
   { match: /\b(neutral|neutrals)\b/, colors: ["black", "gray", "grey", "white", "beige", "brown", "tan"] },
   { match: /\b(earth tones?|earthy)\b/, colors: ["brown", "beige", "green", "tan"] },
 ];
@@ -363,6 +406,23 @@ export function parseDirectiveKeywords(
   // Longest first, so "long sleeve shirt" wins over "shirt".
   const universal = UNIVERSAL.test(lower);
 
+  // A colour *count* is a different shape from a colour *name*, and has to be
+  // read before the colour matching below — otherwise "2 colors in the
+  // palette" finds no colour name, falls through, and returns nothing.
+  // "monochrome" is a count, not a palette: one colour, whichever it is.
+  if (!negated && /\bmonochrome\b/.test(lower)) {
+    return { kind: "palette", id, text, maxColors: 1 };
+  }
+
+  const counted = lower.match(/\b(\d+|one|two|three|four)\b[^.]{0,20}\bcolou?rs?\b/);
+  if (counted && !negated) {
+    const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
+    const n = words[counted[1]!] ?? Number(counted[1]);
+    if (Number.isFinite(n) && n >= 1 && n <= 6) {
+      return { kind: "palette", id, text, maxColors: n };
+    }
+  }
+
   for (const group of COLOR_GROUPS) {
     if (!group.match.test(lower)) continue;
     // Intersect with the closet's own colour list: naming a colour it does
@@ -401,6 +461,8 @@ export function describeDirective(directive: SessionDirective): string {
       if (directive.target >= 2.2) return "Dressing warm";
       if (directive.target <= 0.8) return "Dressing light";
       return "Dressing for mild weather";
+    case "palette":
+      return `At most ${directive.maxColors} colour${directive.maxColors === 1 ? "" : "s"}`;
     case "note":
       // Says plainly that it was heard and is doing nothing, rather than
       // implying an effect the scorer never applied.
