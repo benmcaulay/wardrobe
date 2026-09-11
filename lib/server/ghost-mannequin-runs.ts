@@ -187,6 +187,16 @@ export async function runGenerateGhostViewFor(
   instructions?: string,
   primaryGarmentPath?: string | null,
   compositionHint?: CompositionHint,
+  /**
+   * A stable token that forces a genuinely new render.
+   *
+   * It goes into the cache key, so a different token means a different file
+   * and a real generation. It must be *stable per intent*, not random per
+   * attempt: the job id is used, so a job retried after a crash re-derives
+   * the same key, hits the cache, and cannot bill twice for one request.
+   * Minting a UUID here would have made every retry a fresh charge.
+   */
+  forceToken?: string,
 ): Promise<GenerateGhostViewResponse> {
   const [item, dbUser] = await Promise.all([
     prisma.wardrobeItem.findUnique({ where: { id: itemId } }),
@@ -300,6 +310,7 @@ export async function runGenerateGhostViewFor(
       category: categoryCheck.category,
       instructions,
       compositionHint: compositionHint ?? "default",
+      nonce: forceToken,
     });
   } catch (err) {
     log.error("ghost.view.failed", err, { userId: user.id, itemId });

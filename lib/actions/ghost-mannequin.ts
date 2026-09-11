@@ -139,6 +139,8 @@ export async function generateGhostViewFor(
   instructions?: string,
   primaryGarmentPath?: string | null,
   compositionHint?: CompositionHint,
+  /** Stable token forcing a fresh render; see runGenerateGhostViewFor. */
+  forceToken?: string,
 ): Promise<GenerateGhostViewResponse> {
   const user = await requireUser();
   const out = await runGenerateGhostViewFor(
@@ -149,6 +151,7 @@ export async function generateGhostViewFor(
     instructions,
     primaryGarmentPath,
     compositionHint,
+    forceToken,
   );
   if (out.ok) {
     revalidatePath("/closet");
@@ -694,6 +697,7 @@ export async function enqueueGhostViewFor(
   instructions?: string,
   primaryGarmentPath?: string | null,
   compositionHint?: CompositionHint,
+  forceNew?: boolean,
 ): Promise<EnqueueGhostJobResponse> {
   const user = await requireUser();
   const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
@@ -720,6 +724,7 @@ export async function enqueueGhostViewFor(
     instructions,
     primaryGarmentPath,
     compositionHint,
+    forceNew,
   };
   const jobId = await enqueueJob(user.id, "ghost_view", payload);
   kickJobDrain();

@@ -124,4 +124,59 @@ describe("ghost generation cache", () => {
     expect(rear.resultImagePath).not.toBe(front.resultImagePath);
     expect(rear.cached).toBe(false);
   });
+
+  it("a nonce forces a genuinely new render instead of the cached one", async () => {
+    // Without this there was no way to ask for another attempt: pressing
+    // generate again returned the identical file, which is correct and free
+    // but indistinguishable from a model that ignored you.
+    const garment = await writeTestImage("forced.jpg", "#4b5d8c");
+    const cachedRun = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+    });
+    const again = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+    });
+    expect(again.cached).toBe(true);
+
+    const forced = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+      nonce: "abc123",
+    });
+    expect(forced.cached).toBe(false);
+    // A new key, not an overwrite: two views must never share one path, or
+    // deleting either breaks the other.
+    expect(forced.resultImagePath).not.toBe(cachedRun.resultImagePath);
+  });
+
+  it("replaying the same nonce is still a cache hit, so one intent bills once", async () => {
+    const garment = await writeTestImage("replay.jpg", "#8c4b5d");
+    const first = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+      nonce: "stable",
+    });
+    const replay = await createGhostMannequin({
+      userId: TEST_USER,
+      garmentImagePath: garment,
+      category: "upperbody",
+      nonce: "stable",
+    });
+    expect(replay.resultImagePath).toBe(first.resultImagePath);
+    expect(replay.cached).toBe(true);
+    expect(replay.costTenthCents).toBe(0);
+  });
+
+  it("different nonces do not collide", async () => {
+    const garment = await writeTestImage("twice.jpg", "#5d8c4b");
+    const a = await createGhostMannequin({ userId: TEST_USER, garmentImagePath: garment, category: "upperbody", nonce: "n1" });
+    const b = await createGhostMannequin({ userId: TEST_USER, garmentImagePath: garment, category: "upperbody", nonce: "n2" });
+    expect(a.resultImagePath).not.toBe(b.resultImagePath);
+  });
 });

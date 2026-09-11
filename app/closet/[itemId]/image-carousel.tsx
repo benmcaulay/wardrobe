@@ -51,6 +51,15 @@ type GenerateOptions = {
   label: string;
   /** Extra directions passed to the model. */
   instructions: string;
+  /**
+   * Pay for a fresh attempt instead of the render already on file.
+   *
+   * Renders are cached on everything that affects the image, so pressing
+   * generate twice with nothing changed returns the identical file — free,
+   * but indistinguishable from a model that ignored you. This is the only way
+   * to ask for a different attempt at the same garment.
+   */
+  forceNew: boolean;
 };
 
 const POLL_INTERVAL_MS = 2000;
@@ -109,7 +118,7 @@ export function ImageCarousel({
    * the two things worth being able to set before that click, and they persist
    * across renders so a prompt you tuned once survives the next generate.
    */
-  const [genOptions, setGenOptions] = useState<GenerateOptions>({ label: "", instructions: "" });
+  const [genOptions, setGenOptions] = useState<GenerateOptions>({ label: "", instructions: "", forceNew: false });
   const [genMenuOpen, setGenMenuOpen] = useState(false);
   const [croppingPath, setCroppingPath] = useState<string | null>(null);
   const [whiteningPath, setWhiteningPath] = useState<string | null>(null);
@@ -305,6 +314,7 @@ export function ImageCarousel({
       genOptions.instructions,
       null,
       "default",
+      genOptions.forceNew,
     )
       .then((res) => {
         if (!res.ok) {
@@ -560,12 +570,13 @@ export function ImageCarousel({
               )}
             </div>
           </div>
-          {(genOptions.label.trim() || genOptions.instructions.trim()) && (
+          {(genOptions.label.trim() || genOptions.instructions.trim() || genOptions.forceNew) && (
             <p className="text-[11px] text-ink-muted">
               Next render:{" "}
               {[
                 genOptions.label.trim() ? `named "${genOptions.label.trim()}"` : null,
                 genOptions.instructions.trim() ? "with your prompt" : null,
+                genOptions.forceNew ? "a fresh render (1 credit)" : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -1220,7 +1231,7 @@ function GenerateOptionsMenu({
     };
   }, [onClose]);
 
-  const dirty = Boolean(options.label.trim() || options.instructions.trim());
+  const dirty = Boolean(options.label.trim() || options.instructions.trim() || options.forceNew);
 
   return (
     <div
@@ -1254,6 +1265,20 @@ function GenerateOptionsMenu({
         />
       </label>
 
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={options.forceNew}
+          onChange={(e) => onChange({ ...options, forceNew: e.target.checked })}
+          className="mt-0.5"
+        />
+        <span className="text-[11px] text-ink-muted">
+          <span className="text-ink">Force a new render</span> — otherwise an unchanged request
+          returns the render already on file, free. Ticking this spends a credit on a fresh
+          attempt.
+        </span>
+      </label>
+
       <p className="text-[11px] text-ink-muted">
         Applies to every render until you change it. Leave the name blank and it&apos;s numbered
         for you.
@@ -1270,7 +1295,7 @@ function GenerateOptionsMenu({
         {dirty && (
           <button
             type="button"
-            onClick={() => onChange({ label: "", instructions: "" })}
+            onClick={() => onChange({ label: "", instructions: "", forceNew: false })}
             className="rounded-full border border-ink/15 px-3 py-1.5 text-xs transition hover:bg-paper"
           >
             Clear

@@ -149,6 +149,7 @@ async function runVirtualTryOn(
 async function runGhostView(
   userId: string,
   payload: GhostViewJobPayload,
+  jobId: string,
 ): Promise<GhostViewJobResult> {
   const out = await runGenerateGhostViewFor(
     { id: userId },
@@ -158,6 +159,8 @@ async function runGhostView(
     payload.instructions,
     payload.primaryGarmentPath,
     payload.compositionHint,
+    // Stable across retries, so a re-run of the same job is a cache hit.
+    payload.forceNew ? jobId : undefined,
   );
   assertGhostOk(out);
   return {
@@ -323,7 +326,7 @@ export async function runJob(job: GenerationJob): Promise<void> {
     }
     if (job.type === "ghost_view") {
       const payload = parsePayload<GhostViewJobPayload>(job);
-      const result = await runGhostView(job.userId, payload);
+      const result = await runGhostView(job.userId, payload, job.id);
       await markJobSucceeded(job.id, result);
       log.info("job.succeeded", { jobId: job.id, type: job.type, userId: job.userId });
       return;

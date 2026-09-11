@@ -31,6 +31,14 @@ export type GhostViewJobPayload = {
   instructions?: string;
   primaryGarmentPath?: string | null;
   compositionHint?: "default" | "rear";
+  /**
+   * Ask for a fresh render rather than the cached one.
+   *
+   * Carried as an intent, not as a nonce: the nonce is minted server-side at
+   * render time, so a job retried after a crash re-derives the same one and
+   * cannot bill twice for a single request.
+   */
+  forceNew?: boolean;
 };
 
 export type GhostPreviewJobPayload = {

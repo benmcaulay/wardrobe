@@ -52,6 +52,20 @@ export type GhostMannequinInput = {
   instructions?: string;
   /** When `rear`, apparel prompts describe a back-facing catalog shot (not front-centred). */
   compositionHint?: "default" | "rear";
+  /**
+   * Forces a genuinely new render by changing the cache key.
+   *
+   * The cache is keyed on everything that affects the image, so pressing
+   * generate again with nothing changed returns the identical file — correct,
+   * free, and indistinguishable from a model that ignored you. A nonce is how
+   * "I want another attempt" becomes a different request.
+   *
+   * It changes the *key* rather than skipping the lookup on purpose. Skipping
+   * would write a second render over the first, which is the bug the cache was
+   * introduced to fix: two view rows pointing at one path, and deleting either
+   * one breaking the other.
+   */
+  nonce?: string;
 };
 
 export type GhostMannequinResult = {
@@ -235,6 +249,8 @@ function deterministicHash(input: GhostMannequinInput): string {
         // output, and without this the old render would be served instead.
         input.category === "footwear" ? (GHOST_FOOTWEAR_POSE_REFERENCE ?? "no-pose-ref") : "",
         EXPOSURE_NORMALIZE ? "exposure" : "no-exposure",
+        // Empty for every ordinary request, so the cache behaves as before.
+        input.nonce ?? "",
       ].join("|"),
     )
     .digest("hex")
