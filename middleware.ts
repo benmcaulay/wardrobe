@@ -7,6 +7,10 @@ const PUBLIC_PREFIXES = [
   "/api/images",
   "/api/public-image",
   "/api/auth",
+  // The page that turns an emailed link into a deliberate click. Reached by
+  // definition while signed out, so bouncing it to the landing page would
+  // make every magic link dead.
+  "/auth/confirm",
   // Stripe calls this server-to-server; it's authenticated by signature, not session.
   "/api/stripe/webhook",
   // Vercel Cron calls this server-to-server with no session. Authenticated by

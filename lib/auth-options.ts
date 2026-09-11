@@ -3,7 +3,10 @@ import type { Adapter } from "next-auth/adapters";
 import EmailProvider from "next-auth/providers/email";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "./db";
+import { createTransport } from "nodemailer";
+import { APP_NAME } from "./brand";
 import { emailAllowed } from "./auth-allowlist";
+import { confirmUrlFor } from "./auth-confirm-link";
 
 /** Credits granted to a freshly signed-up user (~$10 of generations). */
 const STARTER_CREDITS = 250;
@@ -36,6 +39,30 @@ export const authOptions: NextAuthOptions = {
       // much longer. NextAuth's default is 24h, which is a long window for a
       // credential sitting in an inbox.
       maxAge: 30 * 60,
+      /*
+       * Send people to a page that needs a click, not straight to the
+       * callback.
+       *
+       * Mail providers prefetch links to scan them, and a magic-link token is
+       * single use — so the scanner spent it, took the session, and the
+       * person clicking landed back on the signed-out page. Measured here:
+       * the link was opened 8 seconds after it was requested.
+       */
+      async sendVerificationRequest({ identifier, url, provider }) {
+        const confirm = confirmUrlFor(url);
+        const transport = createTransport(provider.server);
+        await transport.sendMail({
+          to: identifier,
+          from: provider.from,
+          subject: `Sign in to ${APP_NAME}`,
+          text: `Sign in to ${APP_NAME}\n\nOpen this link and press the button:\n${confirm}\n\nIt expires in 30 minutes. If you did not ask for this, ignore it.`,
+          html: `<body style="font-family:system-ui,sans-serif;line-height:1.5">
+  <p>Sign in to <strong>${APP_NAME}</strong>.</p>
+  <p><a href="${confirm}" style="display:inline-block;background:#1a1a1a;color:#fff;padding:12px 20px;border-radius:999px;text-decoration:none">Continue</a></p>
+  <p style="color:#666;font-size:13px">You will be asked to confirm on the next page. The link expires in 30 minutes; ignore this email if you did not ask for it.</p>
+</body>`,
+        });
+      },
     }),
   ],
   callbacks: {
