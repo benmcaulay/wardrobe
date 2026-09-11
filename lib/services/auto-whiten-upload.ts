@@ -13,20 +13,20 @@
  *    inside the garment. Connectivity is the only thing protecting a white shirt
  *    on a white sweep.
  *
- * ── On the default tolerance of 1 ────────────────────────────────────────────
+ * ── Off by default ──────────────────────────────────────────────────────────
  *
- * Deliberately, and it will often paint almost nothing. Tolerance is a
- * per-channel maximum difference from the sampled corner, so 1 only catches
- * pixels essentially identical to it. A JPEG backdrop carries ringing and
- * sensor noise of several levels, so a real photo's "flat white" wall is
- * typically 245–255, not one value — and most of it falls outside a tolerance of
- * 1. The manual tool defaults to 36 for that reason.
+ * It used to run on every save at a tolerance of 1, and that combination was
+ * the worst of both: tolerance is a per-channel maximum difference from the
+ * sampled corner, so 1 only catches pixels essentially identical to it, while
+ * a JPEG backdrop carries ringing and sensor noise of several levels. A real
+ * photo's "flat white" wall is typically 245–255, not one value. So it
+ * modified saved uploads unasked and had almost nothing to show for it — the
+ * manual tool defaults to 36 for the same reason.
  *
- * That is the correct trade for something that runs unattended on every save:
- * it can only ever clean pixels that were already the backdrop colour, so it
- * cannot eat a pale garment. Raise AUTO_WHITEN_TOLERANCE if you want it to
- * actually clear backdrops; `whitenPixelFraction` in the result tells you how
- * much it managed at the current setting.
+ * Set AUTO_WHITEN_ON_SAVE to turn it back on, and raise AUTO_WHITEN_TOLERANCE
+ * with it if you do; `whitenPixelFraction` in the result reports how much it
+ * managed. The manual Whiten tool is unaffected and remains the intended way
+ * to clean a backdrop, where the result is visible before it is kept.
  */
 import sharp from "sharp";
 import { log } from "../log";
@@ -40,7 +40,7 @@ export const MAX_TOLERANCE = 120;
 export const DEFAULT_AUTO_WHITEN_TOLERANCE = 1;
 
 export function autoWhitenEnabled(): boolean {
-  return boolEnv("AUTO_WHITEN_ON_SAVE", true);
+  return boolEnv("AUTO_WHITEN_ON_SAVE", false);
 }
 
 export function autoWhitenTolerance(): number {

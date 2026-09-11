@@ -201,7 +201,11 @@ describe("configuration", () => {
   });
 
   it("is on by default and can be switched off explicitly", () => {
+    // Off unless asked for: it edited saved uploads unprompted, and at the
+    // default tolerance of 1 it cleared almost nothing while doing so.
     delete process.env.AUTO_WHITEN_ON_SAVE;
+    expect(autoWhitenEnabled()).toBe(false);
+    process.env.AUTO_WHITEN_ON_SAVE = "true";
     expect(autoWhitenEnabled()).toBe(true);
     process.env.AUTO_WHITEN_ON_SAVE = "false";
     expect(autoWhitenEnabled()).toBe(false);
