@@ -51,3 +51,6 @@ pnpm-debug.log*
 
 # npm lockfile — this project is pnpm (see packageManager)
 package-lock.json
+
+# graphify generated graph; rebuild with `graphify update .`
+graphify-out/
