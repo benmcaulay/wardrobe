@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/benmcaulay/.local/bin/graphify hook-guard search",
+            "command": "sh -c 'b=\"$HOME/.local/bin/graphify\"; [ -x \"$b\" ] || b=\"$(command -v graphify 2>/dev/null)\"; [ -x \"$b\" ] || exit 0; exec \"$b\" hook-guard search'",
             "timeout": 10
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/benmcaulay/.local/bin/graphify hook-guard read",
+            "command": "sh -c 'b=\"$HOME/.local/bin/graphify\"; [ -x \"$b\" ] || b=\"$(command -v graphify 2>/dev/null)\"; [ -x \"$b\" ] || exit 0; exec \"$b\" hook-guard read'",
             "timeout": 10
           }
         ]
