@@ -29,6 +29,10 @@ const MODEL_COSTS: Record<string, CostTenthCents> = {
   "fal-ai/seedream/v4/edit": 30,
   "fal-ai/flux-pro/kontext": 40,
   "fal-ai/flux-pro/kontext/max/multi": 80,
+  // Local models. Genuinely free — the electricity is not metered here, and
+  // the entry has to exist or UNKNOWN_MODEL_COST below bills it as if it were
+  // a Gemini render.
+  "qwen-image-2.1-local": 0,
 };
 
 /** Charged when a model is not in the table, so an unknown model is never free. */

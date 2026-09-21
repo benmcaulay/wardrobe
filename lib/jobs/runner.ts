@@ -161,12 +161,15 @@ async function runGhostView(
     payload.compositionHint,
     // Stable across retries, so a re-run of the same job is a cache hit.
     payload.forceNew ? jobId : undefined,
+    payload.provider,
+    payload.reviseFromPath,
   );
   assertGhostOk(out);
   return {
     ghostImagePath: out.ghostImagePath,
     creditsRemaining: out.creditsRemaining,
     creditsUsed: out.creditsUsed,
+    cached: out.cached,
     viewLabel: payload.label.trim() || "Ghost",
   };
 }

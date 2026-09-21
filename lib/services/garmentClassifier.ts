@@ -18,7 +18,7 @@ import {
   type ObservedScene,
   type ScanSceneType,
 } from "../scan-scene";
-import { geminiJson, geminiText, geminiTextConfigured } from "./gemini-text";
+import { visionJson, visionText, visionTextConfigured, visionModelLabel } from "./vision-text";
 
 export type GarmentClassification = {
   isGarment: boolean;
@@ -443,12 +443,12 @@ async function realClassifyGarment(
   const startedAt = Date.now();
   let text: string;
   try {
-    text = await geminiText(classifierPrompt(scene, options), { images: [image] });
+    text = await visionText(classifierPrompt(scene, options), { images: [image] });
   } catch (err) {
     log.error("garment.classifier.failed", err, { ms: Date.now() - startedAt });
     throw err;
   }
-  log.info("garment.classifier.ok", { provider: "gemini", ms: Date.now() - startedAt, scene });
+  log.info("garment.classifier.ok", { model: visionModelLabel(), ms: Date.now() - startedAt, scene });
 
   const parsed = parseClassifierJson(text);
   if (!parsed) {
@@ -472,7 +472,7 @@ export async function detectGarmentBounds(
   imagePath: string,
   garment: DetectedGarment,
 ): Promise<import("./garment-crop").NormalizedBBox | null> {
-  if (!REAL_MODE || !geminiTextConfigured()) return null;
+  if (!REAL_MODE || !visionTextConfigured()) return null;
   const { detectionLabelForGarment, largestBBox } = await import("./garment-crop");
   const object = detectionLabelForGarment(garment.name, garment.category);
   const prompt = `Locate every "${object}" in this photo.
@@ -485,7 +485,7 @@ Return ONLY valid JSON: {"objects":[{"x_min":0.0,"y_min":0.0,"x_max":0.0,"y_max"
 If the item is not visible, return {"objects":[]}.`;
   try {
     const image = await loadImage(imagePath);
-    const data = await geminiJson<{ objects?: RawDetectObject[] }>(prompt, { images: [image] });
+    const data = await visionJson<{ objects?: RawDetectObject[] }>(prompt, { images: [image] });
     const boxes =
       data?.objects
         ?.map((o) => ({
@@ -523,7 +523,7 @@ export async function detectGarmentsInPhoto(
   if (!(await objectExists(imagePath))) {
     return { isGarment: false, garments: [], skipReason: "Image missing" };
   }
-  if (!REAL_MODE || !geminiTextConfigured()) {
+  if (!REAL_MODE || !visionTextConfigured()) {
     return stubScanDetection(imagePath);
   }
   try {

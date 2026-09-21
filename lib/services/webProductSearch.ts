@@ -21,7 +21,7 @@ import { log } from "../log";
 import { parseBrandFromTitle } from "../shopping-parse";
 import { serpApiEnabled, serpApiGet } from "./serpapi-client";
 import { getCachedSearch, setCachedSearch } from "./product-search-cache";
-import { geminiJson, geminiTextConfigured } from "./gemini-text";
+import { visionJson, visionTextConfigured } from "./vision-text";
 import { pick, range, seededRng } from "./_rng";
 import type { ProductMatch } from "./reverseImageSearch";
 
@@ -159,7 +159,7 @@ type SearchJson = {
 };
 
 async function searchProductsGemini(query: string): Promise<ProductMatch[]> {
-  const raw = await geminiJson<SearchJson>(SEARCH_PROMPT.replace("%QUERY%", query));
+  const raw = await visionJson<SearchJson>(SEARCH_PROMPT.replace("%QUERY%", query));
   return (raw.products ?? [])
     .map((p) => {
       const name = p.name?.trim();
@@ -258,7 +258,7 @@ export async function searchWebProductsDetailed(query: string): Promise<WebProdu
     }
   }
 
-  if (geminiTextConfigured()) {
+  if (visionTextConfigured()) {
     const startedAt = Date.now();
     try {
       const matches = await searchProductsGemini(q);

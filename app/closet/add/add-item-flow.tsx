@@ -13,6 +13,7 @@ import { ItemFormFields } from "@/components/item-form-fields";
 import { ProductSearchPanel } from "@/components/product-search-panel";
 import { PhotoSourcePicker, type WebSourceProps } from "@/components/photo-source-picker";
 import { CreditMark } from "@/components/credit-mark";
+import type { JobProgress } from "@/lib/jobs/progress";
 import { ImageCropper } from "@/components/image-cropper";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
 import { imageUrl } from "@/lib/image-paths";
@@ -74,6 +75,8 @@ type ReadyState = {
   /** null = original photo is the closet grid thumbnail */
   primaryViewId: string | null;
   generatingGhost: boolean;
+  /** Live word from the queue while generatingGhost, so the wait is legible. */
+  ghostProgress: JobProgress | null;
   ghostError: string | null;
   extras: ExtraImage[];
   value: ItemFormValue;
@@ -110,7 +113,9 @@ function getClipboardImageFile(e: ClipboardEvent): File | null {
 /** Single source of truth, shared with the server (HEIC/HEIF included). */
 const IMAGE_ACCEPT = IMAGE_UPLOAD_ACCEPT;
 const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 4 * 60 * 1000;
+/* Slows down rather than giving up — see the note in image-carousel.tsx. */
+const POLL_INTERVAL_MAX_MS = 15_000;
+const POLL_BACKOFF_AFTER_MS = 60_000;
 const GHOST_PREVIEW_JOB_KEY = "wardrobe:ghost-preview-job";
 
 function clearFileInputs(...refs: Array<RefObject<HTMLInputElement>>) {
@@ -145,6 +150,7 @@ function buildReadyState(
     activeViewId: null,
     primaryViewId: null,
     generatingGhost: false,
+    ghostProgress: null,
     ghostError: null,
     extras: [],
     value: {
@@ -540,10 +546,13 @@ export function AddItemFlow({
     garmentImagePath: string,
     signal: number,
   ) {
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    const startedAt = Date.now();
+    for (;;) {
       if (pollGenRef.current !== signal) return;
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      const waited = Date.now() - startedAt;
+      await new Promise((r) =>
+        setTimeout(r, waited < POLL_BACKOFF_AFTER_MS ? POLL_INTERVAL_MS : POLL_INTERVAL_MAX_MS),
+      );
       if (pollGenRef.current !== signal) return;
       const status = await getGhostJobStatus(jobId);
       if (pollGenRef.current !== signal) return;
@@ -560,16 +569,9 @@ export function AddItemFlow({
         applyGhostPreviewResult(status, viewLabel);
         return;
       }
+      const { progress } = status;
+      setState((s) => (s.kind === "ready" ? { ...s, ghostProgress: progress } : s));
     }
-    setState((s) =>
-      s.kind === "ready"
-        ? {
-            ...s,
-            generatingGhost: false,
-            ghostError: "This is taking longer than expected. Check back shortly.",
-          }
-        : s,
-    );
   }
 
   function startGhostPreviewPoll(jobId: string, viewLabel: string, garmentImagePath: string) {
@@ -578,7 +580,9 @@ export function AddItemFlow({
       JSON.stringify({ jobId, viewLabel, garmentImagePath }),
     );
     setState((s) =>
-      s.kind === "ready" ? { ...s, generatingGhost: true, ghostError: null } : s,
+      s.kind === "ready"
+        ? { ...s, generatingGhost: true, ghostProgress: null, ghostError: null }
+        : s,
     );
     const signal = ++pollGenRef.current;
     void pollGhostPreviewJob(jobId, viewLabel, garmentImagePath, signal).finally(() => {
@@ -1484,8 +1488,16 @@ function ReadyView({
           ) : (
             <>
               {state.generatingGhost && (
-                <p className="text-[11px] text-ink-muted">
-                  Generating in the background — you can keep editing or save without waiting.
+                <p
+                  className={`text-[11px] ${
+                    state.ghostProgress && !state.ghostProgress.active
+                      ? "text-ink"
+                      : "text-ink-muted"
+                  }`}
+                >
+                  {state.ghostProgress?.message ?? "Starting…"}{" "}
+                  {state.ghostProgress?.active !== false &&
+                    "You can keep editing or save without waiting."}
                 </p>
               )}
               <button

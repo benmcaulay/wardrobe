@@ -6,6 +6,8 @@ import { encode } from "@/lib/json";
 import { log } from "@/lib/log";
 import {
   createGhostMannequin,
+  ghostRenderIsFree,
+  type GhostProvider,
   mapItemToGhost,
   requireGhostCategory,
   type GhostMannequinCategory,
@@ -89,6 +91,14 @@ export type PreviewGhostResponse =
       creditsUsed: number;
       model: string | null;
       costTenthCents: number;
+      /**
+       * Whether the image came off the shelf rather than being made.
+       *
+       * Not inferable from `creditsUsed === 0` any more: a local render costs
+       * nothing either, and telling someone their fresh render was "reused"
+       * reads as the generator ignoring them.
+       */
+      cached: boolean;
     }
   | { ok: false; error: string };
 
@@ -100,6 +110,14 @@ export type GenerateGhostViewResponse =
       creditsUsed: number;
       model: string | null;
       costTenthCents: number;
+      /**
+       * Whether the image came off the shelf rather than being made.
+       *
+       * Not inferable from `creditsUsed === 0` any more: a local render costs
+       * nothing either, and telling someone their fresh render was "reused"
+       * reads as the generator ignoring them.
+       */
+      cached: boolean;
     }
   | { ok: false; error: string };
 
@@ -127,7 +145,7 @@ export async function runPreviewGhostMannequin(
     where: { id: user.id },
     select: { credits: true },
   });
-  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
+  if (REAL_GHOST && !ghostRenderIsFree(input.category) && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
   const quota = await checkAiQuota(user.id);
@@ -176,6 +194,7 @@ export async function runPreviewGhostMannequin(
     creditsUsed: result.credits,
     model: result.model,
     costTenthCents: result.costTenthCents,
+    cached: result.cached,
   };
 }
 
@@ -197,6 +216,18 @@ export async function runGenerateGhostViewFor(
    * Minting a UUID here would have made every retry a fresh charge.
    */
   forceToken?: string,
+  /** Renderer for this one request; see GhostMannequinInput.provider. */
+  provider?: GhostProvider,
+  /**
+   * Correct an existing render instead of building one from a photo.
+   *
+   * The path must be one of this item's own renders. Seeding a generation from
+   * earlier output is normally the thing to avoid — it is how renders used to
+   * converge into copies of each other — but that risk comes from doing it by
+   * accident. Here it is the whole point, it is scoped to one stated change,
+   * and the short revision prompt tells the model to leave everything else be.
+   */
+  reviseFromPath?: string,
 ): Promise<GenerateGhostViewResponse> {
   const [item, dbUser] = await Promise.all([
     prisma.wardrobeItem.findUnique({ where: { id: itemId } }),
@@ -208,7 +239,7 @@ export async function runGenerateGhostViewFor(
   const categoryShapes = await loadCategoryShapes(user.id);
   const categoryCheck = requireGhostCategory({ ...item, categoryShapes });
   if (!categoryCheck.ok) return { ok: false, error: categoryCheck.error };
-  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
+  if (REAL_GHOST && !ghostRenderIsFree(categoryCheck.category, provider) && (dbUser?.credits ?? 0) < 1) {
     return { ok: false, error: "Out of credits" };
   }
   const quota = await checkAiQuota(user.id);
@@ -301,14 +332,32 @@ export async function runGenerateGhostViewFor(
     extras: stack.extraImagePaths.length,
   });
 
+  /*
+   * A revision replaces the whole source stack: the render being corrected is
+   * the only reference. Handing the model the original photograph as well
+   * invites it to redo the render from scratch, which is exactly what asking
+   * for a revision was meant to avoid.
+   */
+  const revising = Boolean(reviseFromPath);
+  if (revising) {
+    if (!knownRenders.has(reviseFromPath!)) {
+      return { ok: false, error: "That image is not one of this item's renders" };
+    }
+    if (!instructions?.trim()) {
+      return { ok: false, error: "Say what to change before revising a render" };
+    }
+  }
+
   let result: GhostMannequinResult;
   try {
     result = await createGhostMannequin({
       userId: user.id,
-      garmentImagePath: stack.garmentImagePath,
-      extraImagePaths: stack.extraImagePaths,
+      garmentImagePath: revising ? reviseFromPath! : stack.garmentImagePath,
+      extraImagePaths: revising ? [] : stack.extraImagePaths,
       category: categoryCheck.category,
+      provider,
       instructions,
+      revision: revising,
       compositionHint: compositionHint ?? "default",
       nonce: forceToken,
     });
@@ -372,5 +421,6 @@ export async function runGenerateGhostViewFor(
     creditsUsed: result.credits,
     model: result.model,
     costTenthCents: result.costTenthCents,
+    cached: result.cached,
   };
 }

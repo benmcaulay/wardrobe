@@ -18,7 +18,7 @@
  * the model call fails, which is why it lives here and not in a test file.
  */
 import { boolEnv } from "@/lib/env";
-import { geminiText, geminiTextConfigured, parseJsonLoose } from "./gemini-text";
+import { visionText, visionTextConfigured, parseJsonLoose } from "./vision-text";
 import {
   ACTIVITIES,
   EMPTY_REQUIREMENTS,
@@ -38,7 +38,7 @@ export type TripParse = {
 };
 
 export function tripParserEnabled(): boolean {
-  return boolEnv("USE_REAL_TRIP_PARSER") && geminiTextConfigured();
+  return boolEnv("USE_REAL_TRIP_PARSER") && visionTextConfigured();
 }
 
 /** Phrases that reliably imply an activity, for the keyless path. */
@@ -138,7 +138,7 @@ export async function parseTripText(text: string): Promise<TripParse> {
   if (!tripParserEnabled()) return parseTripTextWithKeywords(trimmed);
 
   try {
-    const text = await geminiText(
+    const text = await visionText(
       `${SYSTEM}
 
 Reply with ONLY valid JSON matching this schema:

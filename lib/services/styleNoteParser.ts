@@ -19,7 +19,7 @@
  * fails, which is why it lives here and not in a test file.
  */
 import { boolEnv } from "@/lib/env";
-import { geminiText, geminiTextConfigured, parseJsonLoose } from "./gemini-text";
+import { visionText, visionTextConfigured, parseJsonLoose } from "./vision-text";
 import { classifyGarmentKind } from "@/lib/categories";
 import { isValidRule, type StyleRule } from "@/lib/outfit/style-rules";
 import { OCCASIONS } from "@/lib/wear/occasions";
@@ -39,7 +39,7 @@ export type NoteParse = {
 };
 
 export function styleNoteParserEnabled(): boolean {
-  return boolEnv("USE_REAL_STYLE_NOTES") && geminiTextConfigured();
+  return boolEnv("USE_REAL_STYLE_NOTES") && visionTextConfigured();
 }
 
 const NEGATION = /\b(don'?t|do not|never|stop|avoid|no more|not with|hate|dislike)\b/i;
@@ -211,7 +211,7 @@ export async function parseStyleNote(
 
   try {
     const scoped = subjects.slice(0, MAX_SUBJECTS);
-    const text = await geminiText(
+    const text = await visionText(
       [
         SYSTEM,
         "",

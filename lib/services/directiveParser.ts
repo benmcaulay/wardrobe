@@ -15,7 +15,7 @@
 
 import { clampFormality, parseDirectiveKeywords, type SessionDirective } from "@/lib/outfit/directives";
 import { boolEnv } from "@/lib/env";
-import { geminiText, geminiTextConfigured, parseJsonLoose } from "./gemini-text";
+import { visionText, visionTextConfigured, parseJsonLoose } from "./vision-text";
 import { log } from "@/lib/log";
 
 export type DirectiveParse = {
@@ -32,7 +32,7 @@ export type DirectiveParse = {
 const VIBE_CONTEXT_WORDS = 3;
 
 function aiEnabled(): boolean {
-  return boolEnv("USE_REAL_DIRECTIVE_PARSER") && geminiTextConfigured();
+  return boolEnv("USE_REAL_DIRECTIVE_PARSER") && visionTextConfigured();
 }
 
 const SYSTEM = `You turn one short clothing instruction into structured directives for an outfit picker.
@@ -139,7 +139,7 @@ export async function parseDirective(
   }
 
   try {
-    const raw = await geminiText(
+    const raw = await visionText(
       `${SYSTEM}
 
 Category list: ${vocab.categories.join(", ")}

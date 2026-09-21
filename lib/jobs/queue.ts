@@ -7,6 +7,7 @@ import type { GenerationJob } from "@prisma/client";
 import { prisma } from "../db";
 import { encode, decode } from "../json";
 import { log } from "../log";
+import type { GhostProvider } from "../services/ghostMannequin";
 import type { ObservedScene, ScanSceneType } from "../scan-scene";
 
 export type GenerationJobType =
@@ -39,6 +40,10 @@ export type GhostViewJobPayload = {
    * cannot bill twice for a single request.
    */
   forceNew?: boolean;
+  /** Renderer chosen in the UI. Absent means "whatever the deployment defaults to". */
+  provider?: GhostProvider;
+  /** Correct this existing render rather than building one from the photo. */
+  reviseFromPath?: string;
 };
 
 export type GhostPreviewJobPayload = {
@@ -61,8 +66,10 @@ export type VirtualTryOnJobResult = {
 export type GhostViewJobResult = {
   ghostImagePath: string;
   creditsRemaining: number;
-  /** 0 when the render was served from cache. */
+  /** 0 for a cache hit, and also 0 for a local render, which is simply free. */
   creditsUsed?: number;
+  /** True only for a genuine cache hit — see GenerateGhostViewResponse.cached. */
+  cached?: boolean;
   viewLabel: string;
 };
 
@@ -309,6 +316,12 @@ export type JobView<T = unknown> = {
   status: GenerationJobStatus;
   result: T | null;
   error: string | null;
+  /* Timing and attempt counters, so a poller can say why a job is still
+   * waiting instead of only that it is. See describeJobProgress. */
+  createdAt: Date;
+  updatedAt: Date;
+  attempts: number;
+  maxAttempts: number;
 };
 
 /** Read a job for the owning user (status polling). Returns null if not theirs. */
@@ -324,6 +337,10 @@ export async function getJobForUser<T = VirtualTryOnJobResult>(
     status: job.status as GenerationJobStatus,
     result: job.result ? decode<T>(job.result, null as T) : null,
     error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
   };
 }
 

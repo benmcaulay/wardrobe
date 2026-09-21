@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import { fal } from "@fal-ai/client";
 import { log } from "../log";
+import { QWEN_GHOST_MODEL, qwenEditImage } from "./ghost-provider-qwen";
 import { boolEnv, numEnv, strEnv } from "../env";
 import { costTenthCentsForModel } from "../ai-costs";
 import { getObject, objectExists, putObject, contentTypeFor } from "../storage";
@@ -66,6 +67,21 @@ export type GhostMannequinInput = {
    * one breaking the other.
    */
   nonce?: string;
+  /**
+   * The garment image is a previous render being corrected, not a photo.
+   *
+   * Hashed, because the same source and instruction produce a different image
+   * depending on which of the two jobs this is.
+   */
+  revision?: boolean;
+  /**
+   * Which renderer to use, chosen per request rather than per deployment.
+   *
+   * It feeds `deterministicHash`, so a local render and a Gemini render of the
+   * same garment are different cache entries. Without that the second one
+   * asked for would silently return the first one's image.
+   */
+  provider?: GhostProvider;
 };
 
 export type GhostMannequinResult = {
@@ -141,13 +157,18 @@ const REAL_MODE = boolEnv("USE_REAL_GHOST_MANNEQUIN");
  *
  * GHOST_PROVIDER still forces one vendor for every category when set.
  */
-type GhostProvider = "fal" | "gemini";
+export type GhostProvider = "fal" | "gemini" | "qwen";
 
 const FAL_AVAILABLE = Boolean(strEnv("FAL_KEY"));
 
-function providerForCategory(category: GhostMannequinCategory): GhostProvider {
+function providerForCategory(
+  category: GhostMannequinCategory,
+  /** Per-request choice from the UI. Beats GHOST_PROVIDER, which is a deploy-wide default. */
+  override?: GhostProvider,
+): GhostProvider {
+  if (override) return override;
   const forced = strEnv("GHOST_PROVIDER")?.toLowerCase();
-  if (forced === "fal" || forced === "gemini") return forced;
+  if (forced === "fal" || forced === "gemini" || forced === "qwen") return forced;
 
   if (category === "footwear") {
     if (FAL_AVAILABLE) return "fal";
@@ -160,6 +181,20 @@ function providerForCategory(category: GhostMannequinCategory): GhostProvider {
     return "gemini";
   }
   return "gemini";
+}
+
+/**
+ * Whether a render for this category costs money.
+ *
+ * The credit pre-flight has to know before generating, and a local provider
+ * needs no balance — without this, running out of Gemini credits also locks
+ * out the free option.
+ */
+export function ghostRenderIsFree(
+  category: GhostMannequinCategory,
+  provider?: GhostProvider,
+): boolean {
+  return providerForCategory(category, provider) === "qwen";
 }
 
 const GEMINI_IMAGE_MODEL = strEnv("GEMINI_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL);
@@ -211,6 +246,7 @@ export function footwearPoseReferenceKey(): string | undefined {
 
 /** Model string for logs and cache keys, for whichever provider ran. */
 function modelLabelFor(provider: GhostProvider, category: GhostMannequinCategory): string {
+  if (provider === "qwen") return QWEN_GHOST_MODEL;
   return provider === "gemini" ? geminiModelFor(category) : FAL_GHOST_MODEL;
 }
 
@@ -237,6 +273,7 @@ function deterministicHash(input: GhostMannequinInput): string {
         input.category,
         input.instructions?.trim() ?? "",
         input.compositionHint ?? "default",
+        input.revision ? "revision" : "",
         PROMPT_VERSION,
         POST_PROCESS_MODE,
         ...sortedExtras,
@@ -244,7 +281,7 @@ function deterministicHash(input: GhostMannequinInput): string {
         // The endpoint is part of a render's identity: without it a model swap
         // would silently reuse the old image. Resolved per category, since
         // footwear and apparel go to different vendors.
-        modelLabelFor(providerForCategory(input.category), input.category),
+        modelLabelFor(providerForCategory(input.category, input.provider), input.category),
         // So does the pose exemplar: attaching or changing one changes the
         // output, and without this the old render would be served instead.
         input.category === "footwear" ? (GHOST_FOOTWEAR_POSE_REFERENCE ?? "no-pose-ref") : "",
@@ -522,11 +559,41 @@ ${SINGLE_ITEM}
 No legs, ankles, feet, hangers, or text.`;
 
 /** fal.ai prompt for catalog garment generation. */
+/**
+ * Prompt for adjusting a render that already exists.
+ *
+ * A different job from `buildPrompt`, which turns a photograph of a worn or
+ * folded garment into a catalogue shot. Here the input is already that
+ * catalogue shot: framing, scale, background and colour are all correct, and
+ * the only thing wanted is the change asked for. Reusing the build prompt
+ * would re-derive the whole image and quietly move everything else.
+ *
+ * Deliberately short. The long prompt exists to argue a model out of putting
+ * the garment on a person; none of that applies to an image that is already a
+ * floating product shot, and repeating it only gives the model more to drift
+ * against.
+ */
+export function buildRevisionPrompt(instructions: string): string {
+  return `The reference is an existing e-commerce product photo of this garment. Make one change to it and nothing else.
+
+The change:
+${instructions.trim()}
+
+Everything else is already correct and must survive untouched:
+- Same garment, same cut, same colours, same prints, logos, trims and fabric.
+- Same framing, same scale, same position in frame, same orientation.
+- Same pure white (#ffffff) background. No wearer, no stand, no hanger, no shadow.
+- Do not re-pose, re-light, re-crop, or restyle. This is a correction, not a new render.`;
+}
+
 export function buildPrompt(
   category: GhostMannequinCategory,
   instructions: string | undefined,
   compositionHint: "default" | "rear",
+  /** When true the reference is a previous render, not a photo of the garment. */
+  revision = false,
 ): string {
+  if (revision) return buildRevisionPrompt(instructions ?? "");
   const base =
     category === "footwear"
       ? FOOTWEAR_PROMPT
@@ -856,6 +923,23 @@ async function generateViaGemini(
   return geminiEditImage(fullPrompt, loaded, { model: geminiModelFor(category) });
 }
 
+/** Local path: same inline bytes as gemini, but rendered by ComfyUI on this machine. */
+async function generateViaQwen(
+  prompt: string,
+  garmentKey: string,
+  extraKeys: string[],
+  attempt: number,
+): Promise<Buffer> {
+  const loaded = await Promise.all(
+    [garmentKey, ...extraKeys].map(async (k) => {
+      const buffer = await getObject(k);
+      if (!buffer) throw new Error(`Missing image: ${k}`);
+      return { buffer, mime: contentTypeFor(k) };
+    }),
+  );
+  return qwenEditImage(prompt, loaded, { seed: attempt });
+}
+
 /** Storage keys for one request. Derived from the same hash, so they move together. */
 function artifactKeys(input: GhostMannequinInput) {
   const hash = deterministicHash(input);
@@ -882,10 +966,11 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
     input.category,
     input.instructions,
     input.compositionHint ?? "default",
+    input.revision,
   );
 
   const startedAt = Date.now();
-  const provider = providerForCategory(input.category);
+  const provider = providerForCategory(input.category, input.provider);
   const modelLabel = modelLabelFor(provider, input.category);
 
   // The image models intermittently return a blank frame — observed roughly one
@@ -899,10 +984,15 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
     let rawBuffer: Buffer;
     const attemptStarted = Date.now();
     try {
-      rawBuffer =
-        provider === "gemini"
-          ? await generateViaGemini(prompt, input.garmentImagePath, extraKeys, input.category)
-          : await generateViaFal(prompt, input.garmentImagePath, extraKeys);
+      if (provider === "gemini") {
+        rawBuffer = await generateViaGemini(prompt, input.garmentImagePath, extraKeys, input.category);
+      } else if (provider === "qwen") {
+        // Seeded from the attempt so the blank-frame retry above asks for a
+        // genuinely different frame rather than re-rolling the same one.
+        rawBuffer = await generateViaQwen(prompt, input.garmentImagePath, extraKeys, attempt);
+      } else {
+        rawBuffer = await generateViaFal(prompt, input.garmentImagePath, extraKeys);
+      }
     } catch (err) {
       log.error("ghost.generate.failed", err, {
         provider,
@@ -959,7 +1049,10 @@ async function realGhostMannequin(input: GhostMannequinInput): Promise<GhostMann
   const billedCalls = processed.neckRepairUsed ? 2 : 1;
   return {
     resultImagePath: key,
-    credits: billedCalls,
+    // Credits meter money spent with a vendor. A local render spends none, so
+    // charging one would bill the user for their own electricity and, worse,
+    // let a Gemini balance of zero block a provider that needs no balance.
+    credits: provider === "qwen" ? 0 : billedCalls,
     cached: false,
     model: modelLabel,
     costTenthCents: costTenthCentsForModel(modelLabel) * billedCalls,

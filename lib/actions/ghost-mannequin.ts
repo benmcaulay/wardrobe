@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
+import { describeJobProgress, type JobProgress } from "@/lib/jobs/progress";
 import { prisma } from "@/lib/db";
 import { loadCategoryShapes } from "@/lib/server/category-shapes";
 import { promoteOnOriginalDelete } from "@/lib/ghost-view-promote";
@@ -13,10 +14,14 @@ import type { ProductMatch } from "@/lib/services/reverseImageSearch";
 import { deleteObject } from "@/lib/storage";
 import { checkAiQuota } from "@/lib/ai-guardrails";
 import { log } from "@/lib/log";
+import { comfyReady } from "@/lib/services/ghost-provider-qwen";
+import { geminiTextConfigured } from "@/lib/services/gemini-text";
 import {
   createGhostMannequin,
+  ghostRenderIsFree,
   requireGhostCategory,
   type GhostMannequinResult,
+  type GhostProvider,
 } from "@/lib/services/ghostMannequin";
 import {
   enqueueJob,
@@ -141,6 +146,8 @@ export async function generateGhostViewFor(
   compositionHint?: CompositionHint,
   /** Stable token forcing a fresh render; see runGenerateGhostViewFor. */
   forceToken?: string,
+  provider?: GhostProvider,
+  reviseFromPath?: string,
 ): Promise<GenerateGhostViewResponse> {
   const user = await requireUser();
   const out = await runGenerateGhostViewFor(
@@ -152,6 +159,8 @@ export async function generateGhostViewFor(
     primaryGarmentPath,
     compositionHint,
     forceToken,
+    provider,
+    reviseFromPath,
   );
   if (out.ok) {
     revalidatePath("/closet");
@@ -668,13 +677,15 @@ export async function previewGhostMannequin(
 export type EnqueueGhostJobResponse = { ok: true; jobId: string } | { ok: false; error: string };
 
 export type GhostJobStatusResponse =
-  | { ok: true; status: "queued" | "running" }
+  | { ok: true; status: "queued" | "running"; progress: JobProgress }
   | {
       ok: true;
       status: "succeeded";
       ghostImagePath: string;
       creditsRemaining: number;
       creditsUsed?: number;
+      /** True only for a genuine cache hit, never merely for a free render. */
+      cached?: boolean;
       viewLabel?: string;
       /** Model that generated it, and its list-price cost in tenths of a cent. */
       model?: string | null;
@@ -698,6 +709,9 @@ export async function enqueueGhostViewFor(
   primaryGarmentPath?: string | null,
   compositionHint?: CompositionHint,
   forceNew?: boolean,
+  provider?: GhostProvider,
+  /** Correct one of this item's renders instead of starting from the photo. */
+  reviseFromPath?: string,
 ): Promise<EnqueueGhostJobResponse> {
   const user = await requireUser();
   const item = await prisma.wardrobeItem.findUnique({ where: { id: itemId } });
@@ -711,7 +725,11 @@ export async function enqueueGhostViewFor(
     where: { id: user.id },
     select: { credits: true },
   });
-  if (REAL_GHOST && (dbUser?.credits ?? 0) < 1) {
+  if (
+    REAL_GHOST &&
+    !ghostRenderIsFree(categoryCheck.category, provider) &&
+    (dbUser?.credits ?? 0) < 1
+  ) {
     return { ok: false, error: "Out of credits" };
   }
   const quota = await checkAiQuota(user.id);
@@ -725,6 +743,8 @@ export async function enqueueGhostViewFor(
     primaryGarmentPath,
     compositionHint,
     forceNew,
+    provider,
+    reviseFromPath,
   };
   const jobId = await enqueueJob(user.id, "ghost_view", payload);
   kickJobDrain();
@@ -777,6 +797,39 @@ export async function enqueueGhostPreview(
   return { ok: true, jobId };
 }
 
+export type GhostRendererOption = {
+  id: GhostProvider;
+  label: string;
+  /** Short note under the label: what choosing this costs the user. */
+  detail: string;
+};
+
+/**
+ * Renderers this server can actually reach, for the Generate menu.
+ *
+ * Asked of the server rather than hardcoded in the client, because the answer
+ * differs per deployment: a laptop with ComfyUI running has a local option and
+ * makingspace.cloud never will. Offering a choice that cannot work is worse
+ * than offering none.
+ */
+export async function availableGhostRenderers(): Promise<GhostRendererOption[]> {
+  await requireUser();
+  const options: GhostRendererOption[] = [];
+  if (geminiTextConfigured()) {
+    options.push({ id: "gemini", label: "Cloud", detail: "~15s · 1 credit" });
+  }
+  /*
+   * Never probe from a deployment. ComfyUI runs on someone's laptop, so on
+   * Vercel this is a guaranteed-failed localhost connection on every item
+   * page — cheap, but pointless, and it would be the app quietly asking
+   * itself a question with only one possible answer.
+   */
+  if (!process.env.VERCEL && (await comfyReady())) {
+    options.push({ id: "qwen", label: "On this Mac", detail: "~2 min · free" });
+  }
+  return options;
+}
+
 /** Poll a ghost job (view or preview). */
 export async function getGhostJobStatus(jobId: string): Promise<GhostJobStatusResponse> {
   const user = await requireUser();
@@ -801,6 +854,7 @@ export async function getGhostJobStatus(jobId: string): Promise<GhostJobStatusRe
         ghostImagePath: view.ghostImagePath,
         creditsRemaining: view.creditsRemaining,
         creditsUsed: view.creditsUsed,
+        cached: view.cached,
         viewLabel: view.viewLabel,
       };
     }
@@ -815,7 +869,15 @@ export async function getGhostJobStatus(jobId: string): Promise<GhostJobStatusRe
       costTenthCents: preview.costTenthCents ?? 0,
     };
   }
-  return { ok: true, status: job.status === "running" ? "running" : "queued" };
+  // The raw status is two words for at least five situations — not yet
+  // claimed, claimed and running, claimed by a worker that died, waiting on a
+  // retry after a failure, out of retries. Waiting through the wrong one is
+  // what makes a render feel like it hung.
+  return {
+    ok: true,
+    status: job.status === "running" ? "running" : "queued",
+    progress: describeJobProgress(job, new Date()),
+  };
 }
 
 /** Resume polling after navigating back to an item detail page. */

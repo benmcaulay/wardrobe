@@ -23,7 +23,7 @@ import { normalizeColorName } from "../colors";
 import { parseBrandFromTitle } from "../shopping-parse";
 import { signedPublicImageUrl } from "../public-image-url";
 import { contentTypeFor, getObject } from "../storage";
-import { geminiJson, geminiTextConfigured } from "./gemini-text";
+import { visionJson, visionTextConfigured, visionModelLabel } from "./vision-text";
 import { serpApiGet, serpApiLensEnabled } from "./serpapi-client";
 import { pick, range, seededRng } from "./_rng";
 
@@ -101,7 +101,7 @@ export async function identifyGarmentInImage(
   const startedAt = Date.now();
   let raw: IdentifyJson;
   try {
-    raw = await geminiJson<IdentifyJson>(IDENTIFY_PROMPT, {
+    raw = await visionJson<IdentifyJson>(IDENTIFY_PROMPT, {
       images: [{ buffer, mime: contentTypeFor(imagePath) }],
     });
   } catch (err) {
@@ -256,10 +256,10 @@ export async function reverseImageSearch(imagePath: string): Promise<ProductMatc
     }
   }
 
-  if (geminiTextConfigured()) {
+  if (visionTextConfigured()) {
     const identified = await identifyGarmentInImage(imagePath);
     if (identified) {
-      log.info("reverse-image.ok", { provider: "gemini", results: 1, priced: false });
+      log.info("reverse-image.ok", { model: visionModelLabel(), results: 1, priced: false });
       return [identified.match];
     }
     return [];

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { imageUrl } from "@/lib/image-paths";
+import type { JobProgress } from "@/lib/jobs/progress";
 import {
   deleteGhostViewFor,
   deleteOriginalPhotoFor,
@@ -10,6 +11,7 @@ import {
   addManualGhostViewFor,
   addWebProductGhostViewFor,
   enqueueGhostViewFor,
+  availableGhostRenderers,
   getGhostJobStatus,
   getPendingGhostViewJobForItem,
   setPrimaryThumbnailFor,
@@ -17,8 +19,10 @@ import {
   updateOriginalStyleFor,
   replaceGhostViewImageWithCrop,
   replaceOriginalImageWithEdit,
+  type GhostRendererOption,
   type GhostViewStyle,
 } from "@/lib/actions/ghost-mannequin";
+import type { GhostProvider } from "@/lib/services/ghostMannequin";
 import { ImageCropper } from "@/components/image-cropper";
 import { PhotoSourcePicker } from "@/components/photo-source-picker";
 import { WebcamCaptureModal } from "@/components/webcam-capture-modal";
@@ -60,10 +64,19 @@ type GenerateOptions = {
    * to ask for a different attempt at the same garment.
    */
   forceNew: boolean;
+  /** Which renderer to use. Undefined means the server's own default. */
+  provider?: GhostProvider;
 };
 
 const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 4 * 60 * 1000;
+/*
+ * Polling slows down but does not stop. The old four-minute deadline replaced
+ * a real answer ("nothing has picked this up") with a shrug ("check back
+ * shortly") at exactly the moment the answer became interesting — on a deploy
+ * where the queue is drained by a nightly cron, every slow job hit it.
+ */
+const POLL_INTERVAL_MAX_MS = 15_000;
+const POLL_BACKOFF_AFTER_MS = 60_000;
 
 type Props = {
   itemId: string;
@@ -106,6 +119,13 @@ export function ImageCarousel({
   );
   const [sourceImagePaths, setSourceImagePaths] = useState(extraImagePaths);
   const [ghostGenerating, setGhostGenerating] = useState(false);
+  const [ghostProgress, setGhostProgress] = useState<JobProgress | null>(null);
+  /*
+   * Renderers this server can actually reach. Asked of the server because the
+   * answer is per-deployment: a laptop running ComfyUI has a local option and
+   * the cloud never will.
+   */
+  const [renderers, setRenderers] = useState<GhostRendererOption[]>([]);
   const [manualAdding, setManualAdding] = useState(false);
   const [, startTransition] = useTransition();
   const pollGenRef = useRef(0);
@@ -136,6 +156,10 @@ export function ImageCarousel({
   const [webResults, setWebResults] = useState<ProductMatch[]>([]);
   const router = useRouter();
   const noCredits = credits < 1;
+  /* A local render spends no credits, so an empty balance must not disable it. */
+  const rendererIsFree = genOptions.provider === "qwen";
+  /** Non-null while the revision box is open on a view; holds the typed change. */
+  const [revision, setRevision] = useState<{ path: string; text: string } | null>(null);
 
   useEffect(() => {
     setGhostViews(initialGhostViews);
@@ -249,10 +273,13 @@ export function ImageCarousel({
   }
 
   async function pollGhostJob(jobId: string, signal: number) {
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    const startedAt = Date.now();
+    for (;;) {
       if (pollGenRef.current !== signal) return;
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      const waited = Date.now() - startedAt;
+      const interval =
+        waited < POLL_BACKOFF_AFTER_MS ? POLL_INTERVAL_MS : POLL_INTERVAL_MAX_MS;
+      await new Promise((r) => setTimeout(r, interval));
       if (pollGenRef.current !== signal) return;
       const status = await getGhostJobStatus(jobId);
       if (pollGenRef.current !== signal) return;
@@ -260,11 +287,12 @@ export function ImageCarousel({
         setError(status.error);
         return;
       }
+      if (status.status !== "succeeded") setGhostProgress(status.progress);
       if (status.status === "succeeded") {
-        // creditsUsed === 0 means an identical request already had an image on
-        // disk. Say so — otherwise reusing it looks like the generator ignoring
-        // the request and returning the same picture.
-        if (status.creditsUsed === 0) {
+        // Keyed on `cached`, not on creditsUsed === 0: a local render is free
+        // too, and telling someone their fresh render was "reused" reads as the
+        // generator having ignored them.
+        if (status.cached) {
           setNotice(
             "That request was identical to an earlier one, so the existing render was reused — no credit spent. " +
               "Change the instructions to get a different image.",
@@ -274,16 +302,24 @@ export function ImageCarousel({
         return;
       }
     }
-    setError("This is taking longer than expected. Check back on this item shortly.");
   }
 
   function startGhostPoll(jobId: string) {
     setGhostGenerating(true);
     const signal = ++pollGenRef.current;
     void pollGhostJob(jobId, signal).finally(() => {
-      if (pollGenRef.current === signal) setGhostGenerating(false);
+      if (pollGenRef.current === signal) {
+        setGhostGenerating(false);
+        setGhostProgress(null);
+      }
     });
   }
+
+  useEffect(() => {
+    void (async () => {
+      setRenderers(await availableGhostRenderers());
+    })();
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -302,6 +338,44 @@ export function ImageCarousel({
    * an overridable "main photo" (see runGenerateGhostViewFor), and the front
    * angle is the default. Name and instructions come from the ⋮ menu.
    */
+  /**
+   * Correct the selected render rather than building a new one from the photo.
+   *
+   * Same job and same polling as a fresh generate — the only differences are
+   * which image goes in and which prompt is used, and the server decides both.
+   */
+  function doRevise() {
+    const change = revision?.text.trim();
+    if (!revision || !change) return;
+    setError(null);
+    setNotice(null);
+    setGhostGenerating(true);
+    void enqueueGhostViewFor(
+      itemId,
+      sourceImagePaths,
+      genOptions.label,
+      change,
+      null,
+      "default",
+      genOptions.forceNew,
+      genOptions.provider,
+      revision.path,
+    )
+      .then((res) => {
+        if (!res.ok) {
+          setError(res.error);
+          setGhostGenerating(false);
+          return;
+        }
+        setRevision(null);
+        startGhostPoll(res.jobId);
+      })
+      .catch(() => {
+        setError("Something went wrong starting the revision. Please try again.");
+        setGhostGenerating(false);
+      });
+  }
+
   function doGenerate() {
     setError(null);
     setNotice(null);
@@ -315,6 +389,7 @@ export function ImageCarousel({
       null,
       "default",
       genOptions.forceNew,
+      genOptions.provider,
     )
       .then((res) => {
         if (!res.ok) {
@@ -512,9 +587,14 @@ export function ImageCarousel({
               : ` (1 credit · ${costLabel}).`}
           </p>
           {ghostGenerating && (
-            <p className="text-[11px] text-ink-muted">
-              Generating in the background — you can leave this page; refresh later to see the new
-              view.
+            <p
+              className={`text-[11px] ${
+                ghostProgress && !ghostProgress.active ? "text-ink" : "text-ink-muted"
+              }`}
+            >
+              {ghostProgress?.message ?? "Starting…"}{" "}
+              {ghostProgress?.active !== false &&
+                "You can leave this page; the render continues without it."}
             </p>
           )}
           <div className="flex gap-2 flex-wrap">
@@ -536,10 +616,17 @@ export function ImageCarousel({
             <div className="relative inline-flex items-stretch">
               <Button
                 onClick={doGenerate}
-                disabled={ghostGenerating || manualAdding || noCredits || !!categoryBlocked}
+                disabled={
+                  ghostGenerating ||
+                  manualAdding ||
+                  (noCredits && !rendererIsFree) ||
+                  !!categoryBlocked
+                }
                 title={
                   categoryBlocked ??
-                  (noCredits ? "Out of credits — buy more in Settings" : "Render from the thumbnail")
+                  (noCredits && !rendererIsFree
+                    ? "Out of credits — buy more in Settings"
+                    : "Render from the thumbnail")
                 }
                 icon={<Sparkle size={ICON} />}
                 className="rounded-r-none border-r-0 pr-3"
@@ -564,19 +651,28 @@ export function ImageCarousel({
               {genMenuOpen && (
                 <GenerateOptionsMenu
                   options={genOptions}
+                  renderers={renderers}
                   onChange={setGenOptions}
                   onClose={() => setGenMenuOpen(false)}
                 />
               )}
             </div>
           </div>
-          {(genOptions.label.trim() || genOptions.instructions.trim() || genOptions.forceNew) && (
+          {(genOptions.label.trim() ||
+            genOptions.instructions.trim() ||
+            genOptions.forceNew ||
+            genOptions.provider) && (
             <p className="text-[11px] text-ink-muted">
               Next render:{" "}
               {[
                 genOptions.label.trim() ? `named "${genOptions.label.trim()}"` : null,
                 genOptions.instructions.trim() ? "with your prompt" : null,
-                genOptions.forceNew ? "a fresh render (1 credit)" : null,
+                genOptions.forceNew
+                  ? `a fresh render${rendererIsFree ? "" : " (1 credit)"}`
+                  : null,
+                genOptions.provider
+                  ? (renderers.find((r) => r.id === genOptions.provider)?.label ?? null)
+                  : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -837,7 +933,53 @@ export function ImageCarousel({
             >
               Reset
             </Button>
+            <Button
+              size="sm"
+              variant={revision?.path === activeGhost.imagePath ? "solid" : "outline"}
+              aria-pressed={revision?.path === activeGhost.imagePath}
+              title="Describe one change and re-render from this image"
+              disabled={ghostGenerating || manualAdding}
+              onClick={() =>
+                setRevision((open) =>
+                  open?.path === activeGhost.imagePath
+                    ? null
+                    : { path: activeGhost.imagePath, text: "" },
+                )
+              }
+              icon={<Sparkle size={ICON_SM} />}
+            >
+              Revise
+            </Button>
           </div>
+
+          {revision?.path === activeGhost.imagePath && (
+            <div className="space-y-1.5 rounded-lg border border-ink/15 bg-surface p-2.5">
+              <textarea
+                autoFocus
+                rows={2}
+                placeholder="Straighten the printed text…"
+                value={revision.text}
+                onChange={(e) => setRevision({ ...revision, text: e.target.value })}
+                className="min-h-[3rem] w-full resize-none rounded-lg border border-ink/15 bg-surface px-3 py-2 text-xs placeholder:text-ink-muted focus:border-ink/40 focus:outline-none"
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="solid"
+                  onClick={doRevise}
+                  disabled={!revision.text.trim() || ghostGenerating}
+                  icon={<Sparkle size={ICON_SM} />}
+                >
+                  {ghostGenerating ? "Revising…" : "Apply change"}
+                </Button>
+                <span className="text-[10px] text-ink-muted">
+                  Re-renders from this view rather than the photo. Name anything you want kept —
+                  it can still drift on what you don&apos;t mention. Saved as a new view
+                  {rendererIsFree ? "" : " (1 credit)"}.
+                </span>
+              </div>
+            </div>
+          )}
           <label className="block text-xs">
             <span className="text-ink-muted">Thumbnail zoom ({(activeGhost.thumbZoom ?? 1).toFixed(2)}×)</span>
             <input
@@ -1204,10 +1346,12 @@ function MoreGlyph() {
  */
 function GenerateOptionsMenu({
   options,
+  renderers,
   onChange,
   onClose,
 }: {
   options: GenerateOptions;
+  renderers: GhostRendererOption[];
   onChange: (next: GenerateOptions) => void;
   onClose: () => void;
 }) {
@@ -1241,6 +1385,34 @@ function GenerateOptionsMenu({
       /* Right-aligned to the ⋮ and above the fold-prone bottom of the panel. */
       className="absolute right-0 top-full z-30 mt-2 w-72 space-y-2.5 rounded-xl border border-ink/15 bg-surface p-3 shadow-tile"
     >
+      {/* Only worth showing when there is a genuine choice — one entry is furniture. */}
+      {renderers.length > 1 && (
+        <div className="space-y-1">
+          <span className="text-[10px] uppercase tracking-wide text-ink-muted">Rendered by</span>
+          <div className="flex gap-1.5">
+            {renderers.map((r) => {
+              const active = (options.provider ?? renderers[0]!.id) === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => onChange({ ...options, provider: r.id })}
+                  aria-pressed={active}
+                  className={`flex-1 rounded-lg border px-2 py-1.5 text-left transition ${
+                    active
+                      ? "border-ink/40 bg-paper-warm"
+                      : "border-ink/15 hover:border-ink/30"
+                  }`}
+                >
+                  <span className="block text-[11px] text-ink">{r.label}</span>
+                  <span className="block text-[10px] text-ink-muted">{r.detail}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <label className="block space-y-1">
         <span className="text-[10px] uppercase tracking-wide text-ink-muted">View name</span>
         <input
