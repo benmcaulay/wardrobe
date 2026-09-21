@@ -1,4 +1,5 @@
 import { isNoneCategoryStored, NONE_CATEGORY } from "@/lib/categories";
+import { sameBrand } from "@/lib/brand-name";
 import type { ActiveFilters } from "@/components/closet-filters";
 import { parseMultiFilterParam } from "@/lib/closet-filter-params";
 import { parseColors, parseStringArray } from "@/lib/json";
@@ -141,7 +142,7 @@ export function filterClosetItems<T extends ClosetFilterableItem>(
   filters: ActiveFilters,
 ): T[] {
   return items.filter((item) => {
-    if (filters.brand && item.brand !== filters.brand) return false;
+    if (filters.brand && !sameBrand(item.brand, filters.brand)) return false;
     if (!itemMatchesCategoryFilter(item, filters.categories)) return false;
     if (!itemMatchesColorFilter(item, filters.colors)) return false;
     if (!itemMatchesSeasonFilter(item, filters.season)) return false;

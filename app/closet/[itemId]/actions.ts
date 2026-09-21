@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { brandForEditedItem } from "@/lib/server/brand-name";
 import { prisma } from "@/lib/db";
 import { encode, parseStylePrefs } from "@/lib/json";
 import { getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
@@ -22,7 +23,7 @@ async function assertOwned(itemId: string, userId: string) {
 
 export async function updateItem(input: UpdateItemInput): Promise<ActionResponse> {
   const user = await requireUser();
-  await assertOwned(input.itemId, user.id);
+  const existing = await assertOwned(input.itemId, user.id);
   if (!input.name.trim()) return { ok: false, error: "Name is required" };
 
   const dbUser = await prisma.user.findUnique({
@@ -36,7 +37,7 @@ export async function updateItem(input: UpdateItemInput): Promise<ActionResponse
     where: { id: input.itemId },
     data: {
       name: input.name.trim(),
-      brand: input.brand.trim() || null,
+      brand: await brandForEditedItem(user.id, existing.brand, input.brand),
       category: input.category,
       subcategory: input.subcategory.trim() || null,
       colors: encode(input.colors),

@@ -4,6 +4,7 @@ import { log } from "@/lib/log";
 import { autoWhitenEnabled, whitenSavedUpload } from "@/lib/services/auto-whiten-upload";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
+import { canonicalBrandForUser } from "@/lib/server/brand-name";
 import { prisma } from "@/lib/db";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { importListingImage } from "@/lib/server/import-product-image";
@@ -266,7 +267,7 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResp
     data: {
       userId: user.id,
       name: input.name.trim(),
-      brand: input.brand.trim() || null,
+      brand: await canonicalBrandForUser(user.id, input.brand),
       category: input.category,
       subcategory: input.subcategory.trim() || null,
       colors: encode(input.colors),

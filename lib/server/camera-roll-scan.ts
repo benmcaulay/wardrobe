@@ -13,6 +13,7 @@ import {
 import { cropGarmentRegion } from "@/lib/services/garment-crop";
 import { computeDHash } from "@/lib/image-dhash";
 import { findClosetMatch, type ClosetHashEntry } from "@/lib/server/scan-closet-index";
+import { canonicalBrandForUser } from "@/lib/server/brand-name";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { deleteUpload,
   deleteSourceCopy,
@@ -277,7 +278,9 @@ export async function commitScanReview(
     const owners = sanitizeOwnerIds(sel?.ownerIds ?? item.ownerIds ?? [], validOwnerIds, [
       primaryOwnerId,
     ]);
-    const brand = (sel?.brand ?? item.brand)?.trim() || null;
+    // Matched against the closet so a re-typed "nike" files under whatever
+    // spelling this user's first Nike piece established.
+    const brand = await canonicalBrandForUser(userId, sel?.brand ?? item.brand);
 
     if (!include) {
       await discardReviewItem(userId, item);

@@ -73,3 +73,20 @@ describe("filterClosetItems", () => {
     ).toEqual(["shared"]);
   });
 });
+
+describe("brand filter casing", () => {
+  it("matches a brand whose stored spelling differs only in case", () => {
+    const items = [
+      { ...baseItem, id: "a", brand: "adidas" },
+      { ...baseItem, id: "b", brand: "Adidas" },
+      { ...baseItem, id: "c", brand: "Nike" },
+    ];
+    const kept = filterClosetItems(items, { ...emptyFilters, brand: "ADIDAS" });
+    expect(kept.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("still keeps everything when no brand is selected", () => {
+    const items = [{ ...baseItem, brand: null }];
+    expect(filterClosetItems(items, emptyFilters)).toHaveLength(1);
+  });
+});

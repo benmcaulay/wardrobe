@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { dedupeBrands } from "@/lib/brand-name";
 import { requireUser } from "@/lib/auth";
 import { getCategoriesListFromPrefs, isNoneCategoryStored, NONE_CATEGORY, normalizeCategoryName } from "@/lib/categories";
 import {
@@ -224,9 +225,7 @@ export default async function ClosetPage({ searchParams }: { searchParams: Searc
 
   const options: FilterOptions = {
     categories: categoryFilterOptions,
-    brands: [...new Set(allForFacets.map((i) => i.brand).filter((b): b is string => !!b))].sort(
-      (a, b) => a.localeCompare(b),
-    ),
+    brands: dedupeBrands(allForFacets.map((i) => i.brand)).sort((a, b) => a.localeCompare(b)),
     colors: colorFilterOptions,
     tags: tagFilterOptions,
     owners: ownerFilterOptions,

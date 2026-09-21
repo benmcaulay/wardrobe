@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { dedupeBrands } from "@/lib/brand-name";
 import { isNoneCategoryStored, NONE_CATEGORY } from "@/lib/categories";
 import {
   MultiSelectFilter,
@@ -174,9 +175,7 @@ export function OutfitBuilder({ items, colorOptions, initialOutfits }: Props) {
     const colorNames = [...new Set([...fromPrefs, ...fromItems])].sort((a, b) =>
       a.localeCompare(b),
     );
-    const brands = [
-      ...new Set(items.map((i) => i.brand?.trim()).filter((b): b is string => !!b)),
-    ].sort((a, b) => a.localeCompare(b));
+    const brands = dedupeBrands(items.map((i) => i.brand)).sort((a, b) => a.localeCompare(b));
     const tags = [
       ...new Set(
         items.flatMap((i) => {

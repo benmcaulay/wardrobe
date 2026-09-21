@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { canonicalBrandForUser } from "@/lib/server/brand-name";
 import { NONE_CATEGORY } from "@/lib/categories";
 import { encode, parseStylePrefs } from "@/lib/json";
 import { getPrimaryOwnerId, resolveItemOwnerIds } from "@/lib/owners";
@@ -172,7 +173,7 @@ export async function addWishlistItem(
     data: {
       userId: user.id,
       name,
-      brand: input.brand?.trim() || null,
+      brand: await canonicalBrandForUser(user.id, input.brand),
       category: input.category?.trim() || NONE_CATEGORY,
       subcategory: null,
       colors: encode([]),
