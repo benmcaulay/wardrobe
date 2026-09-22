@@ -11,6 +11,7 @@ import {
   type SessionDirective,
 } from "@/lib/outfit/directives";
 import { isNoneCategoryStored, normalizeCategoryName } from "@/lib/categories";
+import { isTypingTarget } from "@/lib/keyboard";
 import { imageUrl, thumbnailUrl } from "@/lib/image-paths";
 import {
   categoryListSignature,
@@ -417,6 +418,32 @@ export function RandomOutfitBuilder({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+
+  /*
+   * Backspace removes the selected slot — the keyboard equivalent of the
+   * "Remove slot" button, on the key people already reach for.
+   *
+   * Three things it must not do. Not fire while someone is typing, or it eats
+   * a keystroke meant for the directives box. Not fire behind the preview
+   * popup, where the thing on screen to dismiss is the popup and Escape
+   * already does that. And not let the browser act on the key itself: outside
+   * a text field Backspace still means "go back" in some browsers, which
+   * would leave the page rather than remove the slot.
+   */
+  useEffect(() => {
+    if (!selectedSlotId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Backspace" && e.key !== "Delete") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target as HTMLElement | null)) return;
+      if (previewItem) return;
+      e.preventDefault();
+      removeSlot(selectedSlotId!);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- removeSlot is redefined every render
+  }, [selectedSlotId, previewItem]);
 
   const spinLockRef = useRef(false);
   const spinSeqRef = useRef(0);
