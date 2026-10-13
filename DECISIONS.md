@@ -143,3 +143,26 @@ survive, and the UI tells the user to name anything they care about.
 QWEN_GHOST_RESOLUTION to 1536 to give small print more pixels took the sampler
 from ~5.6 s/step to ~149 s/step — memory thrashing, ~100 minutes projected for
 one image. The knob exists for a machine with more RAM; leave it at 0 here.
+
+**2026-10-13 · packing · Changing a trip's bags has to move the contents, because
+both content maps are keyed by bag id.** `assignments` and `gearAssignments` are
+`{ [bagId]: ids }`, so a bag is not a label on the trip — it is the key its
+contents live under. Writing `bagIds` alone strands them under a key nothing
+renders: gone from the plan, and back again the moment that bag returns.
+`lib/packing/trip-bags.ts` holds the two rules (swap carries contents across,
+remove drops the entry so the pieces return to unpacked) and `updateTrip` now
+goes through it, which also closes the same hole on the path that already
+accepted `bagIds`.
+
+**2026-10-13 · packing · The trip planner keeps `assignments` in client state, so
+a server-side rekey needs the same move applied locally.** Swapping a bag wrote
+the right thing to the database and then showed the new bag as empty:
+`router.refresh()` renews the props, but the client map was still keyed to the
+bag the trip no longer had. The handlers live in `TripPlanner` rather than
+`BagsOverview` for that reason, and apply `moveBagContents`/`pruneBagContents`
+— the same pure helpers the server uses — alongside the action.
+
+**2026-10-13 · ui · OriginKit has no form controls.** The registry is WebGL and
+animation work — backgrounds, text effects, galleries, cursors. Searching it
+before building a picker or any other plain control is wasted time; it is worth
+a look for something decorative or motion-led, and nothing else.

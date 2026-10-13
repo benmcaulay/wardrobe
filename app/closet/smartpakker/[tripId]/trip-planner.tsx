@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { moveBagContents, pruneBagContents } from "@/lib/packing/trip-bags";
 import { CityPicker } from "@/components/city-picker";
 import { GearIcon } from "@/components/gear-icon";
 import { WorldMap } from "@/components/world-map";
@@ -61,6 +62,7 @@ import {
   parseTripDescription,
   generatePackingPlan,
   setItemPacking,
+  swapTripBag,
   updateTrip,
 } from "../actions";
 
@@ -167,9 +169,14 @@ export type PlannerGear = {
 
 const NONE = "__none__";
 
+/** What the smartpakker actions return. Mirrored here: a "use server" module
+ *  may only export async functions, so its own Result type cannot be shared. */
+type ActionResult = { ok: true } | { ok: false; error?: string };
+
 export function TripPlanner({
   trip,
   bags,
+  ownedBags,
   items,
   gear,
   initialClimate,
@@ -181,6 +188,8 @@ export function TripPlanner({
 }: {
   trip: PlannerTrip;
   bags: PlannerBag[];
+  /** Every bag the user owns, for the swap and add menus. */
+  ownedBags: PlannerBag[];
   items: PlannerItem[];
   gear: PlannerGear[];
   initialClimate: ClimateSummary | null;
@@ -200,6 +209,39 @@ export function TripPlanner({
   const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments);
   const [gearAssignments, setGearAssignments] =
     useState<Record<string, string[]>>(initialGearAssignments);
+
+  /**
+   * Change which bags the trip uses.
+   *
+   * These live here rather than in BagsOverview because `assignments` is
+   * client state keyed by bag id: the server moves the contents, but a
+   * `router.refresh()` only refreshes the props, leaving this map keyed to a
+   * bag the trip no longer has — which showed a freshly swapped bag as empty.
+   * Applying the same pure helpers locally keeps the two in step.
+   */
+  const handleSwapBag = useCallback(
+    async (fromBagId: string, toBagId: string): Promise<ActionResult> => {
+      const res = await swapTripBag({ tripId: trip.id, fromBagId, toBagId });
+      if (!res.ok) return res;
+      setAssignments((prev) => moveBagContents(prev, fromBagId, toBagId));
+      setGearAssignments((prev) => moveBagContents(prev, fromBagId, toBagId));
+      router.refresh();
+      return res;
+    },
+    [trip.id, router],
+  );
+
+  const handleSetBags = useCallback(
+    async (nextIds: string[]): Promise<ActionResult> => {
+      const res = await updateTrip({ id: trip.id, bagIds: nextIds });
+      if (!res.ok) return res;
+      setAssignments((prev) => pruneBagContents(prev, nextIds));
+      setGearAssignments((prev) => pruneBagContents(prev, nextIds));
+      router.refresh();
+      return res;
+    },
+    [trip.id, router],
+  );
   const [estimates, setEstimates] = useState<Map<string, { weightGrams: number; volumeLiters: number }>>(
     () => new Map(items.map((i) => [i.id, { weightGrams: i.weightGrams, volumeLiters: i.volumeLiters }])),
   );
@@ -925,9 +967,12 @@ export function TripPlanner({
           itself, and every change to it happens in Pack mode. */}
       <BagsOverview
         bags={bags}
+        ownedBags={ownedBags}
         usage={usage}
         contentsOf={packContents}
         onPack={openPackMode}
+        onSwap={handleSwapBag}
+        onSetBags={handleSetBags}
       />
 
       {/* Gear — the half of the bag that isn't clothes. Sits after the day
@@ -1623,23 +1668,82 @@ function TripHeader({ trip, onSaved }: { trip: PlannerTrip; onSaved: () => void 
  */
 function BagsOverview({
   bags,
+  ownedBags,
   usage,
   contentsOf,
   onPack,
+  onSwap,
+  onSetBags,
 }: {
   bags: PlannerBag[];
+  ownedBags: PlannerBag[];
   usage: ReturnType<typeof computeUsage>;
   contentsOf: (bagId: string) => PackCandidate[];
   onPack: (bagId: string) => void;
+  onSwap: (fromBagId: string, toBagId: string) => Promise<ActionResult>;
+  onSetBags: (nextIds: string[]) => Promise<ActionResult>;
 }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /** Which bag's swap menu is open, if any. */
+  const [swapping, setSwapping] = useState<string | null>(null);
+
+  const onTrip = new Set(bags.map((b) => b.id));
+  const elsewhere = ownedBags.filter((b) => !onTrip.has(b.id));
+
+  async function run(key: string, work: () => Promise<ActionResult>) {
+    setBusy(key);
+    setError(null);
+    const res = await work();
+    setBusy(null);
+    if (!res.ok) {
+      setError(res.error ?? "That didn't work");
+      return;
+    }
+    setSwapping(null);
+  }
+
+  const swap = (fromBagId: string, toBagId: string) => run(fromBagId, () => onSwap(fromBagId, toBagId));
+  const setBags = (nextIds: string[], key: string) => run(key, () => onSetBags(nextIds));
+  /*
+   * No bags on the trip is a state you can now reach by removing the last
+   * one, so it has to offer the way back. Owning nothing at all is the only
+   * case with nothing to show.
+   */
   if (bags.length === 0) {
     return (
-      <div className="rounded-2xl bg-paper-warm p-6 text-sm text-ink-muted">
-        This trip has no bags.{" "}
-        <Link href="/closet/smartpakker/bags" className="text-ink underline">
-          Add a bag
-        </Link>{" "}
-        then edit the trip to include it.
+      <div className="space-y-3 rounded-2xl bg-paper-warm p-6 text-sm text-ink-muted">
+        {ownedBags.length === 0 ? (
+          <p>
+            This trip has no bags.{" "}
+            <Link href="/closet/smartpakker/bags" className="text-ink underline">
+              Add one to your bags
+            </Link>{" "}
+            and it will show up here to bring along.
+          </p>
+        ) : (
+          <>
+            <p>Nothing to pack into yet. Bring one along:</p>
+            <div className="flex flex-wrap gap-2">
+              {ownedBags.map((other) => (
+                <button
+                  key={other.id}
+                  type="button"
+                  onClick={() => setBags([other.id], other.id)}
+                  disabled={busy !== null}
+                  className="rounded-full border border-dashed border-ink/25 px-3 py-1 text-xs text-ink transition hover:bg-surface disabled:opacity-50"
+                >
+                  + {other.name} · {formatVolume(other.volumeLiters)}
+                </button>
+              ))}
+            </div>
+            {error ? (
+              <p role="alert" className="text-xs text-rose-700">
+                {error}
+              </p>
+            ) : null}
+          </>
+        )}
       </div>
     );
   }
@@ -1669,8 +1773,60 @@ function BagsOverview({
                   >
                     Pack this
                   </button>
+                  {elsewhere.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setSwapping((open) => (open === bag.id ? null : bag.id))}
+                      aria-expanded={swapping === bag.id}
+                      disabled={busy !== null}
+                      className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                        swapping === bag.id
+                          ? "border-ink bg-ink text-paper"
+                          : "border-ink/15 hover:bg-paper-warm"
+                      }`}
+                    >
+                      {busy === bag.id ? "Swapping…" : "Swap"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setBags(bags.filter((b) => b.id !== bag.id).map((b) => b.id), bag.id)}
+                    disabled={busy !== null}
+                    title={
+                      count > 0
+                        ? `Take this bag off the trip — its ${count} ${count === 1 ? "piece goes" : "pieces go"} back to unpacked`
+                        : "Take this bag off the trip"
+                    }
+                    className="rounded-full border border-ink/15 px-3 py-1 text-xs text-ink-muted transition hover:bg-paper-warm hover:text-ink disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
                 </div>
               </div>
+
+              {swapping === bag.id ? (
+                <div className="mt-3 rounded-lg border border-ink/15 bg-surface p-2.5">
+                  <p className="text-[10px] uppercase tracking-wide text-ink-muted">Swap for</p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {elsewhere.map((other) => (
+                      <button
+                        key={other.id}
+                        type="button"
+                        onClick={() => swap(bag.id, other.id)}
+                        disabled={busy !== null}
+                        className="rounded-full border border-ink/15 px-3 py-1 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+                      >
+                        {other.name} · {formatVolume(other.volumeLiters)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-ink-muted">
+                    {count > 0
+                      ? `All ${count} ${count === 1 ? "piece moves" : "pieces move"} across. Nothing is unpacked.`
+                      : "This bag is empty, so nothing moves."}
+                  </p>
+                </div>
+              ) : null}
 
               <div className="mt-3 space-y-2">
                 <CapacityMeter
@@ -1698,6 +1854,29 @@ function BagsOverview({
           );
         })}
       </ul>
+
+      {elsewhere.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wide text-ink-muted">Also bring</span>
+          {elsewhere.map((other) => (
+            <button
+              key={other.id}
+              type="button"
+              onClick={() => setBags([...bags.map((b) => b.id), other.id], other.id)}
+              disabled={busy !== null}
+              className="rounded-full border border-dashed border-ink/25 px-3 py-1 text-xs transition hover:bg-paper-warm disabled:opacity-50"
+            >
+              + {other.name} · {formatVolume(other.volumeLiters)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="mt-3 text-xs text-rose-700">
+          {error}
+        </p>
+      ) : null}
     </CollapsibleSection>
   );
 }

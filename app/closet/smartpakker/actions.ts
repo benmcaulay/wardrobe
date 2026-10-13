@@ -13,6 +13,11 @@ import {
 } from "@/lib/json";
 import { classifyGarmentKind, getCategoriesListFromPrefs } from "@/lib/categories";
 import { resolveBagCategory } from "@/lib/packing/bag-category";
+import {
+  setTripBags,
+  swapTripBag as swapBagContents,
+  type BagContents,
+} from "@/lib/packing/trip-bags";
 import { getPrimaryOwnerId } from "@/lib/owners";
 import { saveUpload, deleteUpload, UploadError } from "@/lib/uploads";
 import { DEFAULT_SILHOUETTE_ID, isSilhouetteId } from "@/lib/packing/silhouettes";
@@ -498,11 +503,11 @@ export async function updateTrip(input: {
   assignments?: Record<string, string[]>;
 }): Promise<Result> {
   const user = await requireUser();
-  const existing = await prisma.packingTrip.findUnique({
+  const trip = await prisma.packingTrip.findUnique({
     where: { id: input.id },
-    select: { userId: true },
+    select: { userId: true, assignments: true, gearAssignments: true },
   });
-  if (!existing || existing.userId !== user.id) return { ok: false, error: "Trip not found" };
+  if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
 
   const data: Record<string, unknown> = {};
   if (input.name !== undefined) {
@@ -546,11 +551,27 @@ export async function updateTrip(input: {
     data.endDate = end;
     data.climateData = null;
   }
-  if (input.bagIds !== undefined) {
-    data.bagIds = encode(await ownedBagIds(user.id, input.bagIds));
-  }
   if (input.assignments !== undefined) {
     data.assignments = encode(await sanitizeAssignments(user.id, input.assignments));
+  }
+  if (input.bagIds !== undefined) {
+    /*
+     * Last, and through setTripBags, because both content maps are keyed by
+     * bag id. Writing bagIds on its own leaves a dropped bag's items under a
+     * key nothing renders — gone from the plan, and back again the moment
+     * that bag is re-added.
+     */
+    const next = setTripBags(
+      {
+        bagIds: [],
+        assignments: parseBagContents(data.assignments ?? trip.assignments),
+        gear: parseBagContents(trip.gearAssignments),
+      },
+      await ownedBagIds(user.id, input.bagIds),
+    );
+    data.bagIds = encode(next.bagIds);
+    data.assignments = encode(next.assignments);
+    data.gearAssignments = encode(next.gear);
   }
   if (Object.keys(data).length === 0) return { ok: true };
 
@@ -566,6 +587,70 @@ export async function deleteTrip(id: string): Promise<Result> {
   if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
   await prisma.packingTrip.delete({ where: { id } });
   revalidatePath("/closet/smartpakker");
+  return { ok: true };
+}
+
+/** Both content maps are stored as JSON; a corrupt one reads as empty, never throws. */
+function parseBagContents(json: unknown): BagContents {
+  if (typeof json !== "string") return {};
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as BagContents)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Put a different bag on the trip in one bag's place, contents and all.
+ *
+ * Separate from `updateTrip` because the contents have to move, which a list
+ * of bag ids cannot express: setting bagIds to the new bag would empty it and
+ * tip everything back into the unpacked pile, which is precisely the work
+ * someone swapping a bag does not want to redo.
+ */
+export async function swapTripBag(input: {
+  tripId: string;
+  fromBagId: string;
+  toBagId: string;
+}): Promise<Result> {
+  const user = await requireUser();
+  const trip = await prisma.packingTrip.findUnique({
+    where: { id: input.tripId },
+    select: { userId: true, bagIds: true, assignments: true, gearAssignments: true },
+  });
+  if (!trip || trip.userId !== user.id) return { ok: false, error: "Trip not found" };
+
+  const owned = await ownedBagIds(user.id, [input.toBagId]);
+  if (owned.length === 0) return { ok: false, error: "That bag isn't yours" };
+
+  const bagIds = parseStringArray(trip.bagIds);
+  if (!bagIds.includes(input.fromBagId)) {
+    return { ok: false, error: "That bag isn't on this trip" };
+  }
+
+  const next = swapBagContents(
+    {
+      bagIds,
+      assignments: parseBagContents(trip.assignments),
+      gear: parseBagContents(trip.gearAssignments),
+    },
+    input.fromBagId,
+    input.toBagId,
+  );
+
+  await prisma.packingTrip.update({
+    where: { id: input.tripId },
+    data: {
+      bagIds: encode(next.bagIds),
+      assignments: encode(next.assignments),
+      gearAssignments: encode(next.gear),
+    },
+  });
+  revalidatePath("/closet/smartpakker");
+  revalidatePath(`/closet/smartpakker/${input.tripId}`);
   return { ok: true };
 }
 

@@ -39,9 +39,9 @@ export default async function TripPage({ params }: { params: { tripId: string } 
   const bagIds = parseStringArray(trip.bagIds);
   const [prefRow, bagRows, itemRows, gearRows] = await Promise.all([
     prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
-    prisma.packingBag.findMany({
-      where: { userId: user.id, id: { in: bagIds.length ? bagIds : ["__none__"] } },
-    }),
+    // Every bag the user owns, not only this trip's: the Bags section offers
+    // the others as swap and add targets, and filters the trip's own out.
+    prisma.packingBag.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" } }),
     prisma.wardrobeItem.findMany({
       where: {
         userId: user.id,
@@ -79,16 +79,21 @@ export default async function TripPage({ params }: { params: { tripId: string } 
     }),
   ]);
 
+  const toPlannerBag = (b: (typeof bagRows)[number]): PlannerBag => ({
+    id: b.id,
+    name: b.name,
+    volumeLiters: b.volumeLiters,
+    maxWeightKg: b.maxWeightKg,
+    silhouette: b.silhouette,
+    imagePath: b.imagePath,
+  });
+
   const bags: PlannerBag[] = bagRows
+    .filter((b) => bagIds.includes(b.id))
     .sort((a, b) => bagIds.indexOf(a.id) - bagIds.indexOf(b.id))
-    .map((b) => ({
-      id: b.id,
-      name: b.name,
-      volumeLiters: b.volumeLiters,
-      maxWeightKg: b.maxWeightKg,
-      silhouette: b.silhouette,
-      imagePath: b.imagePath,
-    }));
+    .map(toPlannerBag);
+  /** Everything owned, for the swap and add menus. */
+  const ownedBags: PlannerBag[] = bagRows.map(toPlannerBag);
 
   const items: PlannerItem[] = itemRows.map((r) => {
     const est = estimateItemPacking({
@@ -213,6 +218,7 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       <TripPlanner
         trip={tripView}
         bags={bags}
+        ownedBags={ownedBags}
         items={items}
         gear={gear}
         initialRequirements={parseTripRequirements(trip.requirements)}
