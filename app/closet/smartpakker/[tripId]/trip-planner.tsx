@@ -87,6 +87,8 @@ export type PlannerBag = {
 export type PlannerItem = {
   id: string;
   name: string;
+  /** Searchable in Pack mode: "patagonia" should find the jacket. */
+  brand: string | null;
   imagePath: string;
   /** How the item's thumbnail is framed — flip and zoom, saved on the item. */
   tile: ItemTileMeta;
@@ -596,6 +598,7 @@ export function TripPlanner({
         kind: "item",
         id: item.id,
         name: item.name,
+        brand: item.brand,
         imagePath: item.imagePath,
         tile: item.tile,
         group: BUCKET_LABELS[item.bucket],

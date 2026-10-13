@@ -581,6 +581,35 @@ export async function updateTrip(input: {
   return { ok: true };
 }
 
+/**
+ * Persist the hub's trip order after a drag.
+ *
+ * Takes the whole order rather than a move, so one drag pins every trip's
+ * position; ids are filtered to this user's own trips so a stale list cannot
+ * carry someone else's id into the preferences.
+ */
+export async function saveTripOrder(tripIds: string[]): Promise<Result> {
+  const user = await requireUser();
+  const owned = await prisma.packingTrip.findMany({
+    where: { userId: user.id },
+    select: { id: true },
+  });
+  const ownedSet = new Set(owned.map((t) => t.id));
+  const clean = [...new Set(tripIds)].filter((id) => ownedSet.has(id));
+
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { stylePrefs: true },
+  });
+  const prefs = parseStylePrefs(row?.stylePrefs);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stylePrefs: encode({ ...prefs, tripOrder: clean }) },
+  });
+  revalidatePath("/closet/smartpakker");
+  return { ok: true };
+}
+
 export async function deleteTrip(id: string): Promise<Result> {
   const user = await requireUser();
   const trip = await prisma.packingTrip.findUnique({ where: { id }, select: { userId: true } });

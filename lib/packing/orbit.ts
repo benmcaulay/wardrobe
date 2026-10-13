@@ -157,6 +157,36 @@ export function phaseAt(elapsedMs: number, periodMs = ORBIT_PERIOD_MS): number {
  * squashed to about a third so the orbits read as seen from slightly above
  * rather than head-on.
  */
+/**
+ * How big to draw the bag and its orbiting pieces for a stage of this size.
+ *
+ * These used to be fixed at 192px and 56px, which meant the system stayed the
+ * same size whether it had a quarter of a laptop screen or the whole of one —
+ * a small bag marooned in white space, and the only way to make it legible was
+ * to zoom the browser, which blew the controls up with it.
+ *
+ * Driven by the stage's *smaller* side, so a wide-but-short window grows the
+ * artwork no further than it has headroom for. Clamped at both ends: below the
+ * floor the bag stops reading as a bag, and above the ceiling it crowds the
+ * orbit it is supposed to sit inside.
+ */
+export function stageArtSizes(box: { width: number; height: number }): {
+  bag: number;
+  item: number;
+} {
+  const shortest = Math.min(box.width, box.height);
+  // Before the stage has been measured, fall back to the old fixed pair rather
+  // than to zero — the first frame should look like the old one, not empty.
+  if (!Number.isFinite(shortest) || shortest <= 0) return { bag: 192, item: 56 };
+
+  const bag = Math.round(Math.min(420, Math.max(176, shortest * 0.52)));
+  // Proportional to the bag so the system keeps its proportions as it grows,
+  // but it climbs more slowly: the pieces are read individually and oversized
+  // thumbnails start colliding on the near side of the orbit.
+  const item = Math.round(Math.min(104, Math.max(52, bag * 0.28)));
+  return { bag, item };
+}
+
 export function orbitRadii(box: {
   width: number;
   height: number;

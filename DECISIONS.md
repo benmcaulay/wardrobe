@@ -166,3 +166,20 @@ bag the trip no longer had. The handlers live in `TripPlanner` rather than
 animation work — backgrounds, text effects, galleries, cursors. Searching it
 before building a picker or any other plain control is wasted time; it is worth
 a look for something decorative or motion-led, and nothing else.
+
+**2026-10-13 · ui · A mirrored image must be cropped mirrored, and flipped back
+on the way out.** `mirror` is a display-only flag — the file on disk is never
+flipped — so handing the raw file to `ImageCropper` showed the garment facing
+the opposite way from the thing the user had just clicked Crop on, and a region
+picked on the left was taken from the right. The cropper now flips the source
+into a real bitmap (not a CSS transform: react-easy-crop reports its region in
+the source image's own coordinates, so a visual-only flip leaves every reported
+region reversed) and flips the output back before saving, which leaves the
+stored file and the view's mirror flag untouched.
+
+**2026-10-13 · packing · Hub trip order lives in `stylePrefs.tripOrder`, not a
+column.** It is a view preference, and the alternative needed a schema
+migration to reach production before the feature could ship. Unlisted trips
+sort *first* by departure date, so a trip created after the last drag lands at
+the top rather than under an arrangement that predates it. One drag saves the
+whole order, or the untouched trips would keep floating on date.

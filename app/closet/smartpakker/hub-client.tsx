@@ -7,7 +7,8 @@ import { CityPicker } from "@/components/city-picker";
 import { flagEmoji, placeLabel, type Place } from "@/lib/places";
 import { formatVolume } from "@/lib/packing/estimate";
 import { formatTripRange } from "@/lib/packing/trip-dates";
-import { createTrip, deleteTrip, searchDestinations } from "./actions";
+import { moveTrip } from "@/lib/packing/trip-order";
+import { createTrip, deleteTrip, saveTripOrder, searchDestinations } from "./actions";
 
 export type BagOption = { id: string; name: string; volumeLiters: number };
 
@@ -36,6 +37,26 @@ export function HubClient({
 }) {
   const router = useRouter();
   const [trips, setTrips] = useState<TripView[]>(initialTrips);
+  /** Index being dragged, or null. Same handle idiom as the outfit layer list. */
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  /**
+   * Drop the dragged trip at `to`.
+   *
+   * Reordered locally first so the card lands where it was dropped rather
+   * than waiting on a round trip, then the whole order is saved — one drag
+   * pins every position, otherwise the untouched trips would still be
+   * floating on departure date.
+   */
+  function dropAt(to: number) {
+    const from = dragIndex;
+    setDragIndex(null);
+    if (from === null || from === to) return;
+    const order = moveTrip(trips, from, to);
+    const byId = new Map(trips.map((t) => [t.id, t]));
+    setTrips(order.map((id) => byId.get(id)!).filter(Boolean));
+    void saveTripOrder(order);
+  }
   const [name, setName] = useState("");
   const [destination, setDestination] = useState("");
   /**
@@ -211,10 +232,25 @@ export function HubClient({
 
       {trips.length > 0 ? (
         <section>
-          <h2 className="mb-4 font-serif text-2xl">Your trips</h2>
+          <div className="mb-4 flex items-baseline gap-3">
+            <h2 className="font-serif text-2xl">Your trips</h2>
+            {trips.length > 1 ? (
+              <span className="text-xs text-ink-muted">Drag ⋮⋮ to reorder</span>
+            ) : null}
+          </div>
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {trips.map((trip) => (
-              <li key={trip.id} className="group relative">
+            {trips.map((trip, index) => (
+              <li
+                key={trip.id}
+                onDragOver={(e) => {
+                  if (dragIndex !== null) e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  dropAt(index);
+                }}
+                className={`group relative transition ${dragIndex === index ? "opacity-40" : ""}`}
+              >
                 <Link
                   href={`/closet/smartpakker/${trip.id}`}
                   className="block rounded-2xl border border-ink/10 bg-surface p-5 shadow-tile transition hover:border-ink/25"
@@ -239,6 +275,21 @@ export function HubClient({
                 >
                   Delete
                 </button>
+                {trips.length > 1 ? (
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={() => setDragIndex(index)}
+                    onDragEnd={() => setDragIndex(null)}
+                    aria-label={`Drag to reorder ${trip.name}`}
+                    title="Drag to reorder"
+                    /* Bottom-left, clear of Delete at the top right, and only
+                       on hover so the cards stay quiet until you reach for one. */
+                    className="absolute bottom-3 left-3 cursor-grab rounded px-1 text-sm leading-none text-ink-muted opacity-0 transition hover:bg-paper-warm hover:text-ink active:cursor-grabbing group-hover:opacity-100"
+                  >
+                    ⋮⋮
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>

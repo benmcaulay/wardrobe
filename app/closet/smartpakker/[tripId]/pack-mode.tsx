@@ -33,6 +33,7 @@ import { occasionLabel, type OccasionKind } from "@/lib/packing/occasion";
 import {
   BAG_Z,
   orbitRadii,
+  stageArtSizes,
   phaseAt,
   planetOrbits,
   planetSlot,
@@ -71,6 +72,8 @@ export type PackCandidate = {
   kind: "item" | "gear";
   id: string;
   name: string;
+  /** Searched alongside the name; gear has none. */
+  brand?: string | null;
   imagePath?: string;
   icon?: string;
   /** Bucket label for the filter chips ("Tops", "Shoes", "Tech"…). */
@@ -96,6 +99,13 @@ export type PackBag = {
   overWeight: boolean;
 };
 
+/**
+ * Thumbnail size before the stage has measured itself.
+ *
+ * The real size comes from `stageArtSizes`, which scales the whole system to
+ * the space it has. This is the size a piece flies at, and the stage reports
+ * its own back up so the two match on landing.
+ */
 const ITEM_SIZE = 56;
 
 export function PackMode({
@@ -171,6 +181,8 @@ export function PackMode({
    * but it is set once per drop, not per frame, so it costs one render.
    */
   const [flight, setFlight] = useState<FlyIn | null>(null);
+  /** The stage's current thumbnail size, so a flight lands at the size it becomes. */
+  const [itemSize, setItemSize] = useState(ITEM_SIZE);
   const clearFlight = useCallback((key: string) => {
     setFlight((current) => (current?.key === key ? null : current));
   }, []);
@@ -187,12 +199,12 @@ export function PackMode({
           imagePath: payload.imagePath ?? null,
           // Framed in flight too, so the piece doesn't flip on landing.
           tile: candidates.find((c) => c.kind === payload.kind && c.id === payload.id)?.tile,
-          size: ITEM_SIZE,
+          size: itemSize,
         });
       }
       onDrop(payload, zoneId);
     },
-    [onDrop, candidates],
+    [onDrop, candidates, itemSize],
   );
 
   const groups = useMemo(() => {
@@ -206,7 +218,9 @@ export function PackMode({
     return candidates.filter(
       (c) =>
         (group == null || c.group === group) &&
-        (needle === "" || c.name.toLowerCase().includes(needle)),
+        (needle === "" ||
+          c.name.toLowerCase().includes(needle) ||
+          (c.brand ?? "").toLowerCase().includes(needle)),
     );
   }, [candidates, query, group]);
 
@@ -322,6 +336,7 @@ export function PackMode({
           contents={contents}
           packEl={packEl}
           flyingKey={flight?.key ?? null}
+          onItemSize={setItemSize}
           onAdjustSize={onAdjustSize}
           onSetDailyWear={onSetDailyWear}
         />
@@ -377,7 +392,7 @@ function Rail({
        * could not be reached at all. Capped at 40vh the list scrolls inside
        * itself (it already had overflow-y-auto) and the stage keeps its 18rem.
        */
-      className={`flex max-h-[40vh] min-h-0 flex-col border-b transition-colors md:max-h-none md:w-80 md:shrink-0 md:border-b-0 md:border-r ${
+      className={`flex max-h-[40vh] min-h-0 flex-col border-b transition-colors md:max-h-none md:w-80 md:shrink-0 md:border-b-0 md:border-r lg:w-96 ${
         isOver ? "border-accent bg-accent/10" : "border-ink/10"
       }`}
     >
@@ -444,7 +459,7 @@ function FilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-full border px-3 py-1 text-[11px] transition ${
+      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
         active ? "border-ink bg-ink text-paper" : "border-ink/15 bg-surface text-ink hover:bg-paper-warm"
       }`}
     >
@@ -632,6 +647,7 @@ function BagStage({
   contents,
   packEl,
   flyingKey,
+  onItemSize,
   onAdjustSize,
   onSetDailyWear,
 }: {
@@ -641,11 +657,23 @@ function BagStage({
   packEl: MutableRefObject<HTMLDivElement | null>;
   /** Content key currently mid-flight, whose orbiting piece stays hidden. */
   flyingKey: string | null;
+  /** Reports the measured thumbnail size up, so a flight lands at the right size. */
+  onItemSize: (size: number) => void;
   onAdjustSize: (itemId: string, weightGrams: number | null, volumeLiters: number | null) => void;
   onSetDailyWear: (itemId: string, dailyWear: boolean | null) => void;
 }) {
   /** Which orbiting piece has its adjust panel open, if any. */
   const [adjusting, setAdjusting] = useState<PackCandidate | null>(null);
+  /**
+   * The bag's photo failed to load, so fall back to the drawn silhouette.
+   *
+   * The fallback below only covers a cutout that has not resolved *yet*. A
+   * path that resolves and then 404s — a bag whose file has gone missing —
+   * rendered the browser's broken-image box instead, which the artwork being
+   * scaled to the stage turned from a small blemish into a large hole.
+   */
+  const [bagArtFailed, setBagArtFailed] = useState(false);
+  useEffect(() => setBagArtFailed(false), [bag.imagePath]);
   const reduceMotion = useReducedMotion();
   const { ref: dropRef, isOver, incoming } = useDropZone(bag.id);
   const stage = useRef<HTMLDivElement | null>(null);
@@ -703,18 +731,25 @@ function BagStage({
    */
   const contentKeys = contents.map((c) => `${c.kind}:${c.id}`);
   const keySignature = contentKeys.join("|");
+  /** Artwork scales with the stage; see stageArtSizes. */
+  const art = useMemo(() => stageArtSizes(box), [box]);
+
+  useEffect(() => {
+    onItemSize(art.item);
+  }, [art.item, onItemSize]);
+
   const orbits: PlanetOrbit[] = useMemo(() => {
     const { maxRadiusX, maxRadiusY } = orbitRadii({
       width: box.width,
       height: box.height,
-      itemHalf: ITEM_SIZE / 2,
+      itemHalf: art.item / 2,
     });
     return planetOrbits(keySignature ? keySignature.split("|") : [], {
       maxRadiusX,
       maxRadiusY,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keySignature, box.width, box.height]);
+  }, [keySignature, box.width, box.height, art.item]);
 
   /**
    * One rAF loop writes every planet's transform.
@@ -830,20 +865,23 @@ function BagStage({
               and once the orbit is cut out the bag is the only opaque
               rectangle left on screen. Falls back to the drawn silhouette
               until the cut-out resolves, so nothing pops in as a black box. */}
-          {bag.imagePath && bagCutout ? (
+          {bag.imagePath && bagCutout && !bagArtFailed ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={bagCutout}
               alt={bag.name}
               draggable={false}
-              className="h-48 w-48 object-contain"
+              onError={() => setBagArtFailed(true)}
+              style={{ width: art.bag, height: art.bag }}
+              className="object-contain"
             />
           ) : (
             <BagArt
               silhouette={bag.silhouette}
               level={fill}
               over={bag.overVolume}
-              className="h-48 w-48 text-ink"
+              style={{ width: art.bag, height: art.bag }}
+              className="text-ink"
             />
           )}
           {/* Clear of the artwork: a cut-out fills its box to the edge, so the
@@ -864,6 +902,7 @@ function BagStage({
             innerRef={(el) => {
               planetRefs.current[i] = el;
             }}
+            size={art.item}
             onOpen={() => setAdjusting(entry)}
           />
         ))}
@@ -917,7 +956,23 @@ function BagStage({
             format={formatWeight}
             over={bag.overWeight}
           />
-        ) : null}
+        ) : (
+          /*
+           * No weight limit on this bag, so there is no bar to fill — but what
+           * you are carrying is still the number you want before an airline
+           * asks. Shown as a figure rather than a meter, because inventing a
+           * capacity to draw a bar against would be a made-up limit.
+           */
+          <div className="flex items-baseline justify-between text-xs">
+            <span className="text-ink-muted">Weight</span>
+            <span className="tabular-nums">
+              {formatWeight(bag.usedWeightGrams + (incoming?.weightGrams ?? 0))}
+              {incoming?.weightGrams ? (
+                <span className="text-ink-muted"> with this</span>
+              ) : null}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -942,11 +997,13 @@ function Planet({
   entry,
   bagId,
   innerRef,
+  size,
   onOpen,
 }: {
   entry: PackCandidate;
   bagId: string;
   innerRef: (el: HTMLButtonElement | null) => void;
+  size: number;
   onOpen: () => void;
 }) {
   const cutout = useCutout(entry.kind === "item" ? entry.imagePath : null);
@@ -968,7 +1025,7 @@ function Planet({
       onPointerDown={handle.onPointerDown}
       onClick={onOpen}
       title={`${entry.name} — click to adjust, drag to the list to take out`}
-      style={{ width: ITEM_SIZE, height: ITEM_SIZE, zIndex: BAG_Z, touchAction: "none" }}
+      style={{ width: size, height: size, zIndex: BAG_Z, touchAction: "none" }}
       className={`absolute flex cursor-grab items-center justify-center rounded-xl transition-transform hover:scale-110 ${
         handle.isDragging ? "opacity-30" : ""
       }`}

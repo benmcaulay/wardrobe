@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { parseStringArray } from "@/lib/json";
+import { parseStringArray, parseStylePrefs } from "@/lib/json";
 import { formatVolume } from "@/lib/packing/estimate";
+import { sortTrips } from "@/lib/packing/trip-order";
 import { HubClient, type BagOption, type TripView } from "./hub-client";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +19,10 @@ function countAssigned(assignmentsJson: string): number {
 
 export default async function SmartPakkerPage() {
   const user = await requireUser();
-  const [bags, trips] = await Promise.all([
+  const [bags, trips, prefRow] = await Promise.all([
     prisma.packingBag.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" } }),
     prisma.packingTrip.findMany({ where: { userId: user.id }, orderBy: { startDate: "desc" } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { stylePrefs: true } }),
   ]);
 
   const bagOptions: BagOption[] = bags.map((b) => ({
@@ -29,7 +31,8 @@ export default async function SmartPakkerPage() {
     volumeLiters: b.volumeLiters,
   }));
 
-  const tripViews: TripView[] = trips.map((t) => ({
+  const tripOrder = parseStylePrefs(prefRow?.stylePrefs).tripOrder ?? [];
+  const unsorted: TripView[] = trips.map((t) => ({
     id: t.id,
     name: t.name,
     destination: t.destination,
@@ -38,6 +41,8 @@ export default async function SmartPakkerPage() {
     bagCount: parseStringArray(t.bagIds).length,
     packedCount: countAssigned(t.assignments),
   }));
+  // Saved order wins; see lib/packing/trip-order.
+  const tripViews = sortTrips(unsorted, tripOrder);
 
   const totalLiters = bags.reduce((sum, b) => sum + b.volumeLiters, 0);
 

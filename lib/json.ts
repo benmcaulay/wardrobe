@@ -85,6 +85,8 @@ export type StylePrefs = {
   outfitSlotDefaults?: Record<string, { x: number; y: number; scale: number }>;
   /** Outfit layer order — category signatures, frontmost first (drag to reorder the stack). */
   outfitLayerOrder?: string[];
+  /** Hub trip order, newest-departure-first until something is dragged. */
+  tripOrder?: string[];
   /** Vertical placement bands — each entry is a layer (top→bottom) of category names. */
   outfitVisualLayers?: string[][];
   /** Remembered position + size per piece per placed-together combination. */

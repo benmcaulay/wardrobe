@@ -54,6 +54,7 @@ export default async function TripPage({ params }: { params: { tripId: string } 
       select: {
         id: true,
         name: true,
+        brand: true,
         category: true,
         subcategory: true,
         material: true,
@@ -107,6 +108,7 @@ export default async function TripPage({ params }: { params: { tripId: string } 
     return {
       id: r.id,
       name: r.name,
+      brand: r.brand,
       imagePath: r.ghostImagePath ?? r.originalImagePath,
       // Resolved with the same helper the closet grid and the outfit canvas use,
       // so all three agree on how a piece is framed.

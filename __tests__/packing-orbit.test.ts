@@ -8,6 +8,7 @@ import {
   phaseAt,
   planetOrbits,
   planetSlot,
+  stageArtSizes,
 } from "@/lib/packing/orbit";
 import {
   BAG_PANEL_PREFIX,
@@ -326,5 +327,40 @@ describe("panel state", () => {
       expect("ghost:1" in state).toBe(false);
       expect(state[id]).toBe(false);
     });
+  });
+});
+
+describe("stageArtSizes", () => {
+  it("grows the artwork with the stage", () => {
+    const small = stageArtSizes({ width: 520, height: 420 });
+    const large = stageArtSizes({ width: 1400, height: 900 });
+    expect(large.bag).toBeGreaterThan(small.bag);
+    expect(large.item).toBeGreaterThan(small.item);
+  });
+
+  it("is driven by the shorter side, so a short wide stage does not overflow", () => {
+    // A wide but shallow stage has no headroom, whatever its width says.
+    expect(stageArtSizes({ width: 2000, height: 400 })).toEqual(
+      stageArtSizes({ width: 400, height: 400 }),
+    );
+  });
+
+  it("clamps at both ends", () => {
+    expect(stageArtSizes({ width: 200, height: 200 }).bag).toBe(176);
+    expect(stageArtSizes({ width: 4000, height: 4000 })).toEqual({ bag: 420, item: 104 });
+  });
+
+  it("falls back to the old fixed pair before the stage is measured", () => {
+    // The first frame renders at 0x0; it should look like the old layout
+    // rather than collapse to nothing.
+    expect(stageArtSizes({ width: 0, height: 0 })).toEqual({ bag: 192, item: 56 });
+  });
+
+  it("always leaves orbit room for an item of the size it just picked", () => {
+    for (const side of [400, 700, 1100, 1600]) {
+      const { bag, item } = stageArtSizes({ width: side, height: side });
+      const { maxRadiusX } = orbitRadii({ width: side, height: side, itemHalf: item / 2 });
+      expect(maxRadiusX).toBeGreaterThan(bag / 2);
+    }
   });
 });
