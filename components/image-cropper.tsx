@@ -12,12 +12,55 @@ type Props = {
   src: string;
   /** Fixed aspect ratio when not using native dimensions. Default 1 (square) — matches the closet grid tile. */
   aspect?: number;
+  /**
+   * The caller displays this image flipped, so crop it flipped too.
+   *
+   * A mirrored view is mirrored only at display time — the file on disk is
+   * not — so handing the raw file to the cropper showed the garment facing
+   * the other way from the thing the user had just clicked Crop on, and a
+   * region picked on the left was taken from the right.
+   *
+   * The output is flipped back before it is returned, so the saved file stays
+   * in the orientation the rest of the app expects and the view's own mirror
+   * flag keeps working untouched.
+   */
+  mirror?: boolean;
   onCancel: () => void;
   /** Returns a freshly-generated JPEG blob of the cropped (or fitted) region. */
   onConfirm: (blob: Blob) => void | Promise<void>;
 };
 
-export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
+export function ImageCropper({ src: rawSrc, aspect = 1, mirror = false, onCancel, onConfirm }: Props) {
+  /*
+   * Crop against a genuinely flipped bitmap rather than a CSS transform:
+   * react-easy-crop reports its region in the source image's own coordinates,
+   * so a visual-only flip would leave every reported region reversed.
+   */
+  const [flipped, setFlipped] = useState<string | null>(null);
+  useEffect(() => {
+    if (!mirror) {
+      setFlipped(null);
+      return;
+    }
+    let url: string | null = null;
+    let cancelled = false;
+    void flipToObjectUrl(rawSrc).then((made) => {
+      if (cancelled) {
+        URL.revokeObjectURL(made);
+        return;
+      }
+      url = made;
+      setFlipped(made);
+    });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [rawSrc, mirror]);
+
+  // Until the flip is ready there is nothing honest to show, so hold the old
+  // source back rather than flash the un-mirrored one.
+  const src = mirror ? flipped : rawSrc;
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [areaPixels, setAreaPixels] = useState<Area | null>(null);
@@ -33,6 +76,7 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
     setCrop({ x: 0, y: 0 });
     setZoom(1);
     setAreaPixels(null);
+    if (!src) return;
     let cancelled = false;
     void loadImage(src).then((img) => {
       if (!cancelled && img.naturalWidth > 0 && img.naturalHeight > 0) {
@@ -51,20 +95,24 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
   }, []);
 
   async function handleConfirm() {
+    if (!src) return;
     setWorking(true);
     try {
-      const blob = fitWhole
+      const cropped = fitWhole
         ? await fitWholeToSquareBlob(src)
         : areaPixels
           ? await cropToBlob(src, areaPixels)
           : null;
+      // Back into the file's own orientation: what was cropped came from a
+      // flipped bitmap, and only the display is allowed to mirror.
+      const blob = cropped && mirror ? await flipBlob(cropped) : cropped;
       if (blob) await onConfirm(blob);
     } finally {
       setWorking(false);
     }
   }
 
-  const confirmDisabled = working || (fitWhole ? !nativeSize : !areaPixels);
+  const confirmDisabled = working || !src || (fitWhole ? !nativeSize : !areaPixels);
 
   return (
     <div className="space-y-4">
@@ -72,7 +120,7 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
         <div className="relative w-full max-h-[min(70vh,880px)] mx-auto rounded-2xl overflow-hidden bg-surface ring-1 ring-inset ring-ink/10 aspect-square flex items-center justify-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={src}
+            src={src ?? undefined}
             alt="Full photo preview"
             className="max-w-full max-h-full object-contain"
           />
@@ -82,6 +130,7 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
           className="relative w-full max-h-[min(70vh,880px)] mx-auto rounded-2xl overflow-hidden bg-ink/90"
           style={{ aspectRatio: "1 / 1" }}
         >
+          {src ? (
           <Cropper
             key={`${src}-${aspect}`}
             image={src}
@@ -96,6 +145,7 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
             restrictPosition={false}
             objectFit="contain"
           />
+          ) : null}
         </div>
       )}
 
@@ -166,6 +216,35 @@ export function ImageCropper({ src, aspect = 1, onCancel, onConfirm }: Props) {
  * image's longer edge), padding the shorter dimension with white. Preserves the
  * whole item; the result drops straight into square tiles without cropping.
  */
+/** A horizontally flipped copy of `src`, as an object URL the caller revokes. */
+async function flipToObjectUrl(src: string): Promise<string> {
+  const img = await loadImage(src);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, 0, 0);
+  return URL.createObjectURL(await canvasToBlob(canvas));
+}
+
+/** Flip a blob back, undoing `flipToObjectUrl` for the saved file. */
+async function flipBlob(blob: Blob): Promise<Blob> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const flippedUrl = await flipToObjectUrl(url);
+    try {
+      return await fetch(flippedUrl).then((r) => r.blob());
+    } finally {
+      URL.revokeObjectURL(flippedUrl);
+    }
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function fitWholeToSquareBlob(src: string): Promise<Blob> {
   const img = await loadImage(src);
   const w = img.naturalWidth;

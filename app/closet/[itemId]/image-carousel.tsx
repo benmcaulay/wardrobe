@@ -743,6 +743,7 @@ export function ImageCarousel({
       {croppingOriginal && (
         <OriginalCropModal
           src={imageUrl(origPath)}
+          mirror={originalStyle.mirror}
           onClose={() => setCroppingOriginal(false)}
           onConfirm={async (blob) => {
             const formData = new FormData();
@@ -789,6 +790,7 @@ export function ImageCarousel({
         <GhostViewCropModal
           itemId={itemId}
           imagePath={croppingPath}
+          mirror={ghostViews.find((v) => v.imagePath === croppingPath)?.mirror}
           onClose={() => setCroppingPath(null)}
           onReplaced={(previousPath, newPath) => {
             setGhostViews((prev) =>
@@ -1029,10 +1031,13 @@ function OriginalWhitenModal({
 
 function OriginalCropModal({
   src,
+  mirror,
   onClose,
   onConfirm,
 }: {
   src: string;
+  /** Crop what the carousel shows, flip included. See ImageCropper.mirror. */
+  mirror?: boolean;
   onClose: () => void;
   onConfirm: (blob: Blob) => Promise<void>;
 }) {
@@ -1054,7 +1059,7 @@ function OriginalCropModal({
           Same controls as when adding a piece: drag to reposition, zoom slider, optional native
           aspect. Square crop matches closet tiles.
         </p>
-        <ImageCropper src={src} aspect={1} onCancel={onClose} onConfirm={onConfirm} />
+        <ImageCropper src={src} aspect={1} mirror={mirror} onCancel={onClose} onConfirm={onConfirm} />
       </div>
     </div>
   );
@@ -1095,6 +1100,7 @@ function GhostViewWhitenModal({
 function GhostViewCropModal({
   itemId,
   imagePath,
+  mirror,
   onClose,
   onReplaced,
   onError,
@@ -1102,6 +1108,8 @@ function GhostViewCropModal({
 }: {
   itemId: string;
   imagePath: string;
+  /** Crop what the carousel shows, flip included. See ImageCropper.mirror. */
+  mirror?: boolean;
   onClose: () => void;
   onReplaced: (previousPath: string, newPath: string) => void;
   onError: (msg: string) => void;
@@ -1128,6 +1136,7 @@ function GhostViewCropModal({
         <ImageCropper
           src={imageUrl(imagePath)}
           aspect={1}
+          mirror={mirror}
           onCancel={onClose}
           onConfirm={async (blob) => {
             const formData = new FormData();
